@@ -63,7 +63,7 @@ enum Commands {
         #[arg(short = 'd', long = "output-dir")]
         output_dir: Option<String>,
 
-        /// 从既有 output 目录播种：读取 {DIR}/thread-NN/output-keymap.txt 作为各线程初始解
+        /// 从既有 output 目录播种：读取 {DIR}/thread-NN/字根键位表.txt 作为各线程初始解
         /// （按 thread-NN 编号轮询映射）。与 --seed-keymap 互斥。
         #[arg(long = "seed-dir")]
         seed_dir: Option<String>,
@@ -84,7 +84,7 @@ enum Commands {
         keymap: String,
 
         /// 编码输出文件
-        #[arg(short = 'o', long, default_value = "output-encode.txt")]
+        #[arg(short = 'o', long, default_value = "单字编码表.txt")]
         output: String,
     },
 
@@ -125,7 +125,7 @@ enum Commands {
     /// 导出测评用码表（字<TAB>码，简码在前、全码在后）
     #[command(name = "export")]
     ExportTable {
-        /// 键位映射文件（output-keymap.txt）
+        /// 键位映射文件（字根键位表.txt）
         #[arg(short = 'k', long)]
         keymap: String,
 
@@ -133,18 +133,18 @@ enum Commands {
         #[arg(short = 'c', long)]
         chaifen: String,
 
-        /// 简码表（output-simple-codes.txt，可选）
+        /// 简码表（简码表.txt，可选）
         #[arg(short = 's', long)]
         simple: Option<String>,
 
         /// 输出文件
-        #[arg(short = 'o', long, default_value = "output-table.txt")]
+        #[arg(short = 'o', long, default_value = "全码表.txt")]
         output: String,
     },
     /// 生成字根图（HTML）
     #[command(name = "chart")]
     Chart {
-        /// 键位映射文件（output-keymap.txt）
+        /// 键位映射文件（字根键位表.txt）
         #[arg(short = 'k', long)]
         keymap: String,
 
@@ -153,7 +153,7 @@ enum Commands {
         mapping: Option<String>,
 
         /// 输出文件
-        #[arg(short = 'o', long, default_value = "root-chart.html")]
+        #[arg(short = 'o', long, default_value = "字根图.html")]
         output: String,
     },
 }
@@ -754,7 +754,7 @@ fn seed_index(thread_id: usize, k: usize) -> usize {
 /// - 两者均为 `None`：返回空 `Vec`（不播种，保持基线行为）。
 /// - 同时指定：返回 `Err`（互斥）。
 /// - `--seed-keymap <FILE>`：校验文件存在 → 返回 `vec![FILE]`（K = 1）。
-/// - `--seed-dir <DIR>`：枚举 `{DIR}/thread-{NN}/output-keymap.txt`（NN 为两位数字），
+/// - `--seed-dir <DIR>`：枚举 `{DIR}/thread-{NN}/字根键位表.txt`（NN 为两位数字），
 ///   按 NN 升序收集；为空则 `Err`。仅触碰 thread-NN 子目录，不读 `inputs/`、`checkpoint/`。
 fn resolve_seed_paths(
     seed_dir: Option<&str>,
@@ -795,14 +795,14 @@ fn resolve_seed_paths(
                     }
                     _ => continue,
                 };
-                let keymap = entry.path().join("output-keymap.txt");
+                let keymap = entry.path().join("字根键位表.txt");
                 if keymap.is_file() {
                     found.push((nn, keymap.to_string_lossy().to_string()));
                 }
             }
             if found.is_empty() {
                 return Err(format!(
-                    "--seed-dir {} 下未找到任何 thread-NN/output-keymap.txt",
+                    "--seed-dir {} 下未找到任何 thread-NN/字根键位表.txt",
                     dir
                 ));
             }
@@ -1361,9 +1361,9 @@ fn finalize_and_save(
     save_summary(cfg, &all_results, best_thread, output_dir, elapsed);
 
     println!("\n所有结果已保存至 {}/", output_dir);
-    println!("  - summary.txt              汇总排名");
+    println!("  - 汇总.txt              汇总排名");
     println!("  - output-*.txt             全局最优结果");
-    println!("  - output-simple-codes.txt  简码分配");
+    println!("  - 简码表.txt  简码分配");
     println!("  - thread-XX/               各线程结果");
     if interrupted {
         println!("\n⏸️  已暂停。继续续算：");
@@ -1659,24 +1659,24 @@ mod seed_path_tests {
     #[test]
     fn seed_dir_collects_thread_dirs_sorted() {
         let base = tmp_base("sd");
-        // 故意乱序创建 thread-02, thread-00, thread-10，且各含 output-keymap.txt
+        // 故意乱序创建 thread-02, thread-00, thread-10，且各含 字根键位表.txt
         for nn in ["02", "00", "10"] {
             let d = base.join(format!("thread-{}", nn));
             std::fs::create_dir_all(&d).unwrap();
-            std::fs::write(d.join("output-keymap.txt"), "口\tWko\t1\n").unwrap();
+            std::fs::write(d.join("字根键位表.txt"), "口\tWko\t1\n").unwrap();
         }
         // 干扰项：inputs/ 与 checkpoint/ 不应被收集（需求 1.5）
         std::fs::create_dir_all(base.join("inputs")).unwrap();
         std::fs::create_dir_all(base.join("checkpoint")).unwrap();
-        // 干扰项：thread-03 无 output-keymap.txt → 不收集
+        // 干扰项：thread-03 无 字根键位表.txt → 不收集
         std::fs::create_dir_all(base.join("thread-03")).unwrap();
 
         let paths = resolve_seed_paths(Some(&base.to_string_lossy()), None).unwrap();
         assert_eq!(paths.len(), 3, "应只收集 3 个含 keymap 的 thread 目录");
         // 按 NN 升序：00, 02, 10
-        assert!(paths[0].ends_with("thread-00/output-keymap.txt"));
-        assert!(paths[1].ends_with("thread-02/output-keymap.txt"));
-        assert!(paths[2].ends_with("thread-10/output-keymap.txt"));
+        assert!(paths[0].ends_with("thread-00/字根键位表.txt"));
+        assert!(paths[1].ends_with("thread-02/字根键位表.txt"));
+        assert!(paths[2].ends_with("thread-10/字根键位表.txt"));
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -1684,7 +1684,7 @@ mod seed_path_tests {
     fn seed_dir_empty_errors() {
         let base = tmp_base("empty");
         std::fs::create_dir_all(&base).unwrap();
-        // 无任何 thread-NN/output-keymap.txt → Err（需求 1.4）
+        // 无任何 thread-NN/字根键位表.txt → Err（需求 1.4）
         assert!(resolve_seed_paths(Some(&base.to_string_lossy()), None).is_err());
         // 不存在的目录 → Err
         assert!(resolve_seed_paths(Some("/no/such/dir"), None).is_err());
