@@ -133,7 +133,8 @@ fn 编码(序列: &[(&str, 码位)], 键位: &HashMap<String, Vec<char>>) -> Opt
             return None;
         }
         let 下标 = 位.序号().min(键.len() - 1);
-        码.push(键[下标]);
+        // keymap 里同一字根的两个键位用大小写区分（.0 大写、.1 小写），输出统一小写
+        码.push(键[下标].to_ascii_lowercase());
     }
     Some(码)
 }
