@@ -188,6 +188,32 @@ fn 收集(目录: &Path, 文件名: &str) -> Vec<PathBuf> {
     结果
 }
 
+/// 去掉名字里任意位置的 `-run<数字>`（artifact 名带运行号）
+fn 去运行号(s: &str) -> String {
+    let 字节: Vec<char> = s.chars().collect();
+    let mut 输出 = String::new();
+    let mut i = 0;
+    while i < 字节.len() {
+        if 字节[i] == '-'
+            && 字节.get(i + 1) == Some(&'r')
+            && 字节.get(i + 2) == Some(&'u')
+            && 字节.get(i + 3) == Some(&'n')
+        {
+            let mut j = i + 4;
+            while j < 字节.len() && 字节[j].is_ascii_digit() {
+                j += 1;
+            }
+            if j > i + 4 {
+                i = j;
+                continue;
+            }
+        }
+        输出.push(字节[i]);
+        i += 1;
+    }
+    输出
+}
+
 /// 把 artifact 目录名整理成好读的方案名
 ///
 /// `codegenie-out-auto-run17-s1/out-auto/thread-03`
@@ -200,16 +226,12 @@ fn 整理名字(段: &[String]) -> String {
 
     let mut 清理: Vec<String> = 段.to_vec();
 
-    // 第一段：去掉 codegenie- 前缀与 -run<数字> 尾巴
+    // 第一段：去掉 codegenie- 前缀与任意位置的 -run<数字>
     if let Some(首) = 清理.first_mut() {
         if let Some(rest) = 首.strip_prefix("codegenie-") {
             *首 = rest.to_string();
         }
-        if let Some(pos) = 首.rfind("-run") {
-            if 首[pos + 4..].chars().all(|c| c.is_ascii_digit()) && pos + 4 < 首.len() {
-                首.truncate(pos);
-            }
-        }
+        *首 = 去运行号(首);
     }
 
     // 丢掉被其他段包含的冗余段（out-auto 出现在 out-auto-s1 里）
