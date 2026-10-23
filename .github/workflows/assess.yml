@@ -1,0 +1,94 @@
+name: 宇浩测评
+
+on:
+  workflow_dispatch:
+    inputs:
+      keymap:
+        description: 键位映射文件（仓库内路径）
+        required: true
+        default: runs/s4-export/output-keymap.txt
+      simple:
+        description: 简码表（仓库内路径，留空表示无简码）
+        required: false
+        default: runs/s4-export/output-simple-codes.txt
+
+permissions:
+  contents: read
+
+jobs:
+  assess:
+    name: 导出码表并跑宇浩测评
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: 检出 code_genie
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: 检出 yuhao-assess
+        uses: actions/checkout@v7
+        with:
+          repository: forfudan/yuhao-assess
+          path: yuhao-assess
+          fetch-depth: 1
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 安装测评器依赖并拉数据
+        working-directory: yuhao-assess
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tail -n 5
+          pnpm fetch 2>&1 | tail -n 5
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+
+      - name: 编译
+        run: |
+          set -o pipefail
+          cargo build --release 2>&1 | tail -n 5
+
+      - name: 导出码表
+        env:
+          KEYMAP: ${{ inputs.keymap }}
+          SIMPLE: ${{ inputs.simple }}
+        run: |
+          mkdir -p out-assess
+          ARG=""
+          if [ -n "$SIMPLE" ]; then ARG="--simple $SIMPLE"; fi
+          ./target/release/code_genie export \
+            --keymap "$KEYMAP" --chaifen moling/chaifen-all.txt $ARG \
+            --output out-assess/全码表.txt
+          wc -l < out-assess/全码表.txt
+
+      - name: 跑测评
+        run: |
+          ./target/release/code_genie assess \
+            --dir out-assess \
+            --scheme codegenie-s4.jsonc \
+            --yuhao-dir yuhao-assess \
+            --keep out-assess/结果
+
+      - name: 上传结果
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: assess-run${{ github.run_number }}
+          path: out-assess/
+          if-no-files-found: warn
+          retention-days: 14
