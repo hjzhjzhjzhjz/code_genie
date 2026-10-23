@@ -219,9 +219,17 @@ enum Commands {
         #[arg(long)]
         simple: Option<String>,
 
-        /// 要查看的字，空格分隔
+        /// 同键组表 input-fixed.txt（可选），用来标出归并关系
         #[arg(long)]
+        fixed: Option<String>,
+
+        /// 要查看的字，空格分隔
+        #[arg(long, default_value = "")]
         chars: String,
+
+        /// 不给 --chars 时，按频次取前 N 个字
+        #[arg(long, default_value = "0")]
+        top: usize,
 
         /// 写到该文件（Markdown）
         #[arg(long)]
@@ -333,13 +341,17 @@ fn main() {
             keymap,
             chaifen,
             simple,
+            fixed,
             chars,
+            top,
             output,
         }) => pipeline::流水线(
             &keymap,
             &chaifen,
+            fixed.as_deref(),
             simple.as_deref(),
             &chars,
+            top,
             output.as_deref(),
         ),
 
