@@ -188,6 +188,51 @@ fn 收集(目录: &Path, 文件名: &str) -> Vec<PathBuf> {
     结果
 }
 
+/// 把 artifact 目录名整理成好读的方案名
+///
+/// `codegenie-out-auto-run17-s1/out-auto/thread-03`
+///   → 去掉 `codegenie-` 前缀、`-run17` 尾巴，再丢掉被别的段包含的冗余段
+///   → `out-auto-s1/thread-03`
+fn 整理名字(段: &[String]) -> String {
+    if 段.is_empty() {
+        return "码表".to_string();
+    }
+
+    let mut 清理: Vec<String> = 段.to_vec();
+
+    // 第一段：去掉 codegenie- 前缀与 -run<数字> 尾巴
+    if let Some(首) = 清理.first_mut() {
+        if let Some(rest) = 首.strip_prefix("codegenie-") {
+            *首 = rest.to_string();
+        }
+        if let Some(pos) = 首.rfind("-run") {
+            if 首[pos + 4..].chars().all(|c| c.is_ascii_digit()) && pos + 4 < 首.len() {
+                首.truncate(pos);
+            }
+        }
+    }
+
+    // 丢掉被其他段包含的冗余段（out-auto 出现在 out-auto-s1 里）
+    let 保留: Vec<String> = 清理
+        .iter()
+        .enumerate()
+        .filter(|(i, s)| {
+            !清理
+                .iter()
+                .enumerate()
+                .any(|(j, other)| j != *i && other.len() > s.len() && other.contains(s.as_str()))
+        })
+        .map(|(_, s)| s.clone())
+        .filter(|s| s != ".")
+        .collect();
+
+    if 保留.is_empty() {
+        "码表".to_string()
+    } else {
+        保留.join("/")
+    }
+}
+
 /// 入口
 pub fn run(
     表: Option<&str>,
@@ -215,13 +260,17 @@ pub fn run(
     if let Some(d) = 目录 {
         let 根 = PathBuf::from(d);
         for 路径 in 收集(&根, 文件名) {
-            let 名 = 路径
+            let 段: Vec<String> = 路径
                 .strip_prefix(&根)
                 .ok()
                 .and_then(|p| p.parent())
-                .map(|p| p.to_string_lossy().replace('\\', "/"))
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "码表".to_string());
+                .map(|p| {
+                    p.components()
+                        .map(|c| c.as_os_str().to_string_lossy().to_string())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let 名 = 整理名字(&段);
             清单.push((路径, 名));
         }
     }
