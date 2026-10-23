@@ -16,7 +16,7 @@ on:
       limit:
         description: 最多测多少句（0 = 全部）
         required: false
-        default: "3000"
+        default: "0"
         type: string
       max_len:
         description: 句长上限
@@ -31,7 +31,7 @@ jobs:
   sentence:
     name: 整句准确率
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - name: 检出
         uses: actions/checkout@v7
@@ -55,93 +55,20 @@ jobs:
             exit 1
           fi
 
-      - name: 装 librime
-        run: |
-          set -e
-          apt() { timeout 300 sudo apt-get -o DPkg::Lock::Timeout=180 "$@"; }
-          MODE=""
-          for i in 1 2 3; do
-            echo "--- 第 $i 次尝试系统包 ---"
-            apt update -qq || true
-            if apt install -y librime-dev > /tmp/apt.log 2>&1; then
-              if pkg-config --exists rime 2>/dev/null \
-                 || [ -f /usr/include/rime_api.h ] \
-                 || [ -f /usr/include/rime/rime_api.h ]; then
-                MODE=apt
-                break
-              fi
-            else
-              tail -n 3 /tmp/apt.log || true
-            fi
-            sleep 10
-          done
-
-          if [ -z "$MODE" ]; then
-            echo "系统包拿不到，改从源码编"
-            apt install -y cmake g++ pkg-config libleveldb-dev libmarisa-dev \
-              libopencc-dev libyaml-cpp-dev libgoogle-glog-dev libboost-dev
-            git clone --depth 1 https://github.com/rime/librime.git
-            cmake -S librime -B librime/build -DCMAKE_BUILD_TYPE=Release -DBUILD_TEST=OFF
-            cmake --build librime/build -j"$(nproc)"
-            MODE=src
-          fi
-          echo "MODE=$MODE" >> "$GITHUB_ENV"
-          echo "librime 来源：$MODE"
-
-      - name: 编解码器
-        run: |
-          set -e
-          if [ "$MODE" = src ]; then
-            LIB="$PWD/librime/build/lib"
-            g++ -O2 -std=c++17 -I librime/src tools/rime_eval.cc -o rime_eval \
-              -L "$LIB" -lrime -Wl,-rpath,"$LIB"
-          else
-            CF="$(pkg-config --cflags rime 2>/dev/null || true)"
-            LF="$(pkg-config --libs rime 2>/dev/null || true)"
-            echo "cflags=[$CF] libs=[$LF]"
-            g++ -O2 -std=c++17 $CF tools/rime_eval.cc -o rime_eval $LF -lrime
-          fi
-          echo "--- 依赖 ---"
-          ldd rime_eval | grep -i rime || true
-          echo "--- 自检（预期报错，只验证能跑起来）---"
-          echo "的" | ./rime_eval --shared /nonexistent --user /tmp/u 2>&1 | head -3 || true
-
       - name: 生成方案包
+        env:
+          KEYMAP: ${{ inputs.keymap }}
+          SIMPLE: ${{ inputs.simple }}
         run: |
           set -e
           ./target/release/code_genie rime \
             --keymap "$KEYMAP" --chaifen moling/chaifen-all.txt \
             --simple "$SIMPLE" --words ceping-data/词表.txt \
             --out rime-pkg --id xingyun --name 星云
-          echo "--- 导出全码表 ---"
-          ARG=""
-          if [ -n "$SIMPLE" ]; then ARG="--simple $SIMPLE"; fi
-          ./target/release/code_genie export \
-            --keymap "$KEYMAP" --chaifen moling/chaifen-all.txt $ARG \
-            --output 全码表.txt
-          wc -l < 全码表.txt
-        env:
-          KEYMAP: ${{ inputs.keymap }}
-          SIMPLE: ${{ inputs.simple }}
-
-      - name: 准备 librime 数据目录
-        run: |
-          set -e
-          mkdir -p rime-data rime-user
-          cp rime-pkg/xingyun_test.schema.yaml rime-data/
-          cp rime-pkg/xingyun_test.dict.yaml rime-data/
-          cp rime-pkg/xingyun.full.dict.yaml rime-data/
-          cp rime-pkg/xingyun.words.dict.yaml rime-data/
-          cat > rime-data/default.yaml <<'EOF'
-          config_version: "1"
-          schema_list:
-            - schema: xingyun_test
-          EOF
-          echo "--- 拉 essay（整句要靠它做语言模型）---"
-          curl -fsSL --retry 3 -o rime-data/essay.txt \
-            https://raw.githubusercontent.com/rime/rime-essay-simp/master/essay-zh-hans.txt \
-            || echo "没拉到 essay，整句合成会退化成纯词频"
-          ls -l rime-data
+          echo "--- 词典规模 ---"
+          for f in rime-pkg/xingyun.full.dict.yaml rime-pkg/xingyun.words.dict.yaml; do
+            echo "$f: $(grep -c $'\t' "$f") 条"
+          done
 
       - name: 跑整句测评
         env:
@@ -150,27 +77,14 @@ jobs:
         run: |
           set -o pipefail
           ./target/release/code_genie sentence \
-            --table 全码表.txt \
+            --full-dict rime-pkg/xingyun.full.dict.yaml \
+            --words-dict rime-pkg/xingyun.words.dict.yaml \
             --corpus yuhao-text/literature.txt \
-            --decoder ./rime_eval \
-            --shared "$PWD/rime-data" \
-            --user "$PWD/rime-user" \
-            --schema xingyun_test --verbose \
             --limit "$LIMIT" --max-len "$MAXLEN" \
             --dump 整句中间 \
             --out 整句.md 2>&1 | tee sentence.log
           echo "--- 摘要 ---"
           cat 整句.md >> "$GITHUB_STEP_SUMMARY" || true
-
-      - name: 部署日志
-        if: always()
-        run: |
-          echo "--- 用户目录 ---"
-          ls -lR rime-user | head -40 || true
-          echo "--- librime 日志 ---"
-          for f in rime-user/*.log; do
-            [ -f "$f" ] && { echo "== $f =="; tail -n 40 "$f"; }
-          done
 
       - name: 上传结果
         if: always()
@@ -180,7 +94,6 @@ jobs:
           path: |
             整句.md
             sentence.log
-            全码表.txt
             整句中间/
             rime-pkg/
           if-no-files-found: warn
