@@ -2,17 +2,17 @@
 // 📮 整句准确率
 // =========================================================================
 //
-// 流程与 hanzi-chai/sentence 一致：
-//   语料句子 → 每字取全码 → 串成一条按键流 → librime 解码 → 与原文比对
+// 四码定长方案的「整句」有两种口径，两个都算：
 //
-// 解码器是外部进程（tools/rime_eval.cc 编译出来的），一条输入一行输出，
-// 这样 librime 版本、方案内容都能在 CI 里换，Rust 这边不绑死。
+//   A 逐单元（真实操作）
+//     每个字打满自己的码 → 空格上屏第一个候选。所以逐字看「该码的第一候选
+//     是不是这个字」，一句里全对才算整句正确。这是用户真实感受到的准确率。
 //
-// 指标：
-//   整句准确率  编辑距离为 0 的句子占比
-//   字准确率    1 − Σ编辑距离 / Σ字数
-//   选字错      长度一致但字不同（重码选错）
-//   切分错      长度不同（词组/简码把码流切歪了）
+//   B 连续解码（把整句的码首尾相连，让解码器自己切）
+//     用词频做 Viterbi，衡量词组能不能帮忙、以及三码字会不会把对齐带歪。
+//
+// 两者都不依赖 librime：词典就是 Rime 的 dict.yaml，权重就是字频/词频，
+// 结果可复现，也不受外部库版本影响。
 // =========================================================================
 
 use std::collections::HashMap;
@@ -21,9 +21,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 pub struct 参数 {
-    pub 码表: PathBuf,
+    pub 全码词典: PathBuf,
+    pub 词组词典: Option<PathBuf>,
     pub 语料: PathBuf,
-    pub 解码器: PathBuf,
+    pub 解码器: Option<PathBuf>,
     pub 共享目录: PathBuf,
     pub 用户目录: PathBuf,
     pub 方案: String,
@@ -34,6 +35,13 @@ pub struct 参数 {
     pub 详细: bool,
 }
 
+/// 一条词典条目
+#[derive(Clone)]
+struct 条目 {
+    文本: String,
+    权重: u64,
+}
+
 fn 是汉字(c: char) -> bool {
     let u = c as u32;
     (0x4E00..=0x9FFF).contains(&u)
@@ -41,50 +49,54 @@ fn 是汉字(c: char) -> bool {
         || (0x20000..=0x2A6DF).contains(&u)
 }
 
-fn 读码表(路径: &Path) -> HashMap<char, String> {
-    let mut 表 = HashMap::new();
+/// 读 Rime dict.yaml：跳过头部，读「文本 码 权重」
+fn 读词典(路径: &Path) -> Vec<(String, String, u64)> {
     let Ok(文本) = std::fs::read_to_string(路径) else {
-        eprintln!("⚠️ 读不了码表 {}", 路径.display());
-        return 表;
+        eprintln!("⚠️ 读不了词典 {}", 路径.display());
+        return Vec::new();
     };
+    let mut 出 = Vec::new();
+    let mut 开始 = false;
     for 行 in 文本.lines() {
+        if !开始 {
+            if 行.trim() == "..." {
+                开始 = true;
+            }
+            continue;
+        }
         let 列: Vec<&str> = 行.split('\t').collect();
         if 列.len() < 2 {
             continue;
         }
-        let 字 = 列[0].trim();
+        let 文本 = 列[0].trim();
         let 码 = 列[1].trim();
-        let mut it = 字.chars();
-        if let (Some(c), None) = (it.next(), it.next()) {
-            if !码.is_empty() && 码.chars().all(|x| x.is_ascii_lowercase()) {
-                let e = 表.entry(c).or_insert_with(String::new);
-                if 码.chars().count() > e.chars().count() {
-                    *e = 码.to_string();
-                }
-            }
+        if 文本.is_empty() || 码.is_empty() {
+            continue;
         }
+        let 权重 = 列.get(2).and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(1);
+        出.push((文本.to_string(), 码.to_string(), 权重));
     }
-    表
+    出
 }
 
-fn 切句(文本: &str, 码表: &HashMap<char, String>, 最长: usize) -> Vec<String> {
+fn 切句(文本: &str, 字码: &HashMap<char, String>, 最长: usize) -> Vec<String> {
     let mut 句们 = Vec::new();
     let mut 当前 = String::new();
-    let mut 收 = |buf: &mut String, 出: &mut Vec<String>| {
-        let n = buf.chars().count();
-        if (2..=最长).contains(&n) && buf.chars().all(|c| 码表.contains_key(&c)) {
-            出.push(buf.clone());
-        }
-        buf.clear();
-    };
     for c in 文本.chars() {
         if 是汉字(c) {
             当前.push(c);
-        } else {
-            收(&mut 当前, &mut 句们);
+            continue;
         }
+        let n = 当前.chars().count();
+        if (2..=最长).contains(&n) && 当前.chars().all(|x| 字码.contains_key(&x)) {
+            句们.push(当前.clone());
+        }
+        当前.clear();
     }
-    收(&mut 当前, &mut 句们);
+    let n = 当前.chars().count();
+    if (2..=最长).contains(&n) && 当前.chars().all(|x| 字码.contains_key(&x)) {
+        句们.push(当前);
+    }
     句们
 }
 
@@ -109,165 +121,83 @@ fn 编辑距离(a: &[char], b: &[char]) -> usize {
     上行[m]
 }
 
-pub fn run(参: &参数) {
-    let 码表 = 读码表(&参.码表);
-    if 码表.is_empty() {
-        eprintln!("❌ 码表为空，退出");
-        return;
-    }
+/// Viterbi：在码流上找一条总权重最大的切分
+fn 连续解码(
+    码流: &str,
+    码表: &HashMap<String, Vec<条目>>,
+) -> (String, usize) {
+    let 字节 = 码流.as_bytes();
+    let n = 字节.len();
+    let 无穷 = f64::NEG_INFINITY;
+    let mut 分数 = vec![无穷; n + 1];
+    let mut 前驱 = vec![usize::MAX; n + 1];
+    let mut 用的码长 = vec![0usize; n + 1];
+    分数[0] = 0.0;
 
-    let 语料 = std::fs::read_to_string(&参.语料).unwrap_or_default();
-    let mut 句们 = 切句(&语料, &码表, 参.最长);
-    if 参.上限 > 0 && 句们.len() > 参.上限 {
-        句们.truncate(参.上限);
-    }
-    if 句们.is_empty() {
-        eprintln!("❌ 语料里没有可用句子");
-        return;
-    }
-
-    // 编码
-    let mut 按键流们: Vec<String> = Vec::with_capacity(句们.len());
-    let mut 击键数 = 0usize;
-    for 句 in &句们 {
-        let mut 行 = String::new();
-        for c in 句.chars() {
-            let 码 = &码表[&c];
-            行.push_str(码);
-            击键数 += 码.chars().count();
-        }
-        行.push(' ');
-        按键流们.push(行);
-    }
-    let 总字数: usize = 句们.iter().map(|s| s.chars().count()).sum();
-
-    println!(
-        "语料 {} 句，{} 字，平均击键 {:.3}/字",
-        句们.len(),
-        总字数,
-        击键数 as f64 / 总字数 as f64
-    );
-
-    // 跑解码器
-    let 开始 = std::time::Instant::now();
-    let 解码 = match 起解码器(&参.解码器, &参.共享目录, &参.用户目录, &参.方案, &按键流们, 参.详细) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("❌ 解码失败: {}", e);
-            return;
-        }
-    };
-    let 耗时 = 开始.elapsed();
-
-    if 解码.len() < 句们.len() {
-        eprintln!(
-            "⚠️ 只拿到 {} 条解码结果（应有 {} 条），后面按空处理",
-            解码.len(),
-            句们.len()
-        );
-    }
-
-    if let Some(目录) = &参.导出 {
-        std::fs::create_dir_all(目录).ok();
-        let _ = std::fs::write(
-            目录.join("按键流.txt"),
-            按键流们.join("\n") + "\n",
-        );
-        let _ = std::fs::write(目录.join("原文.txt"), 句们.join("\n") + "\n");
-        let _ = std::fs::write(目录.join("解码.txt"), 解码.join("\n") + "\n");
-        println!("排查用中间文件已写入 {}", 目录.display());
-    }
-
-    // 打分
-    let mut 全对 = 0usize;
-    let mut 距离和 = 0usize;
-    let mut 选字错 = 0usize;
-    let mut 切分错 = 0usize;
-    let mut 桶: Vec<(usize, usize, usize, usize)> = vec![(0, 0, 0, 0); 参.最长 + 1];
-    // (句数, 字数, 全对句数, 距离和)
-
-    let mut 例子: Vec<(String, String)> = Vec::new();
-    for (i, 期望) in 句们.iter().enumerate() {
-        let 实 = 解码.get(i).map(|s| s.as_str()).unwrap_or("");
-        let a: Vec<char> = 期望.chars().collect();
-        let b: Vec<char> = 实.chars().collect();
-        let d = 编辑距离(&a, &b);
-        let n = a.len();
-
-        let r = &mut 桶[n.min(参.最长)];
-        r.0 += 1;
-        r.1 += n;
-        r.3 += d;
-
-        if d == 0 {
-            全对 += 1;
-            桶[n.min(参.最长)].2 += 1;
-        } else if a.len() == b.len() {
-            选字错 += 1;
-        } else {
-            切分错 += 1;
-            例子.push((期望.clone(), 实.to_string()));
-        }
-        距离和 += d;
-    }
-    例子.truncate(6);
-
-    let 整句率 = 全对 as f64 / 句们.len() as f64 * 100.0;
-    let 字准确率 = (1.0 - 距离和 as f64 / 总字数 as f64) * 100.0;
-
-    let mut md = String::from("## 整句准确率\n\n");
-    md.push_str(&format!(
-        "语料 {} 句 / {} 字　解码方案 `{}`　耗时 {:.1}s\n\n",
-        句们.len(),
-        总字数,
-        参.方案,
-        耗时.as_secs_f64()
-    ));
-    md.push_str("| 指标 | 值 |\n|---|---:|\n");
-    md.push_str(&format!("| 整句全对 | {} / {} = **{:.2}%** |\n", 全对, 句们.len(), 整句率));
-    md.push_str(&format!("| 字准确率 | **{:.2}%**（编辑距离 {}） |\n", 字准确率, 距离和));
-    md.push_str(&format!("| 选字错（长度一致） | {} 句 |\n", 选字错));
-    md.push_str(&format!("| 切分错（长度不同） | {} 句 |\n", 切分错));
-    md.push_str(&format!(
-        "| 平均击键 | {:.3}/字 |\n",
-        击键数 as f64 / 总字数 as f64
-    ));
-
-    md.push_str("\n### 按句长\n\n| 句长 | 句数 | 字准确率 | 整句全对 |\n|---:|---:|---:|---:|\n");
-    for (n, (句数, 字数, 全, 距)) in 桶.iter().enumerate() {
-        if *句数 == 0 || n == 0 {
+    for i in 0..n {
+        if 分数[i] == 无穷 {
             continue;
         }
-        let 率 = (1.0 - *距 as f64 / *字数 as f64) * 100.0;
-        md.push_str(&format!(
-            "| {} | {} | {:.2}% | {:.2}% |\n",
-            n,
-            *句数,
-            率,
-            *全 as f64 / *句数 as f64 * 100.0
-        ));
-    }
-
-    if !例子.is_empty() {
-        md.push_str("\n### 切分错例\n\n| 原文 | 解出 |\n|---|---|\n");
-        for (原, 出) in 例子.iter().take(6) {
-            md.push_str(&format!(
-                "| {} | {} |\n",
-                原,
-                if 出.is_empty() { "（空）" } else { 出 }
-            ));
+        // 码长 1~4（单根字可能只有 3 码）
+        for 长 in 1..=4usize {
+            if i + 长 > n {
+                break;
+            }
+            let 片 = &码流[i..i + 长];
+            let Some(候选们) = 码表.get(片) else {
+                continue;
+            };
+            let 最重 = 候选们
+                .iter()
+                .map(|e| e.权重 as f64)
+                .fold(0.0_f64, f64::max);
+            if 最重 <= 0.0 {
+                continue;
+            }
+            let 新分 = 分数[i] + 最重.ln();
+            let 更优 = 新分 > 分数[i + 长] + 1e-9
+                || ((新分 - 分数[i + 长]).abs() <= 1e-9 && 长 > 用的码长[i + 长]);
+            if 更优 {
+                分数[i + 长] = 新分;
+                前驱[i + 长] = i;
+                用的码长[i + 长] = 长;
+            }
         }
     }
 
-    println!("{}", md);
-    if let Some(路径) = &参.结果 {
-        match std::fs::write(路径, &md) {
-            Ok(_) => println!("结果已写入 {}", 路径.display()),
-            Err(e) => eprintln!("⚠️ 写不了结果: {}", e),
+    if 分数[n] == 无穷 {
+        return (String::new(), 0);
+    }
+
+    let mut 片段 = Vec::new();
+    let mut 位置 = n;
+    while 位置 > 0 {
+        let 起 = 前驱[位置];
+        if 起 == usize::MAX {
+            return (String::new(), 0);
+        }
+        片段.push(&码流[起..位置]);
+        位置 = 起;
+    }
+    片段.reverse();
+
+    let mut 文本 = String::new();
+    let mut 单元 = 0usize;
+    for 片 in 片段 {
+        单元 += 1;
+        if let Some(候选们) = 码表.get(片) {
+            let 最重 = 候选们
+                .iter()
+                .max_by_key(|e| e.权重)
+                .map(|e| e.文本.clone())
+                .unwrap_or_default();
+            文本.push_str(&最重);
         }
     }
+    (文本, 单元)
 }
 
+#[allow(dead_code)]
 fn 起解码器(
     程序: &Path,
     共享: &Path,
@@ -311,4 +241,177 @@ fn 起解码器(
     let _ = 写线程.join();
     let _ = 子.wait();
     Ok(结果)
+}
+
+pub fn run(参: &参数) {
+    // ---- 词典 ----
+    let mut 字码: HashMap<char, String> = HashMap::new();
+    let mut 码表: HashMap<String, Vec<条目>> = HashMap::new();
+
+    for (文本, 码, 权重) in 读词典(&参.全码词典) {
+        let mut it = 文本.chars();
+        if let (Some(c), None) = (it.next(), it.next()) {
+            字码.insert(c, 码.clone());
+        }
+        码表.entry(码).or_default().push(条目 { 文本, 权重 });
+    }
+    if let Some(词径) = &参.词组词典 {
+        for (文本, 码, 权重) in 读词典(词径) {
+            码表.entry(码).or_default().push(条目 { 文本, 权重 });
+        }
+    }
+    if 字码.is_empty() {
+        eprintln!("❌ 全码词典为空，退出");
+        return;
+    }
+    for v in 码表.values_mut() {
+        v.sort_by(|a, b| b.权重.cmp(&a.权重));
+    }
+
+    // ---- 语料 ----
+    let 语料 = std::fs::read_to_string(&参.语料).unwrap_or_default();
+    let mut 句们 = 切句(&语料, &字码, 参.最长);
+    if 参.上限 > 0 && 句们.len() > 参.上限 {
+        句们.truncate(参.上限);
+    }
+    if 句们.is_empty() {
+        eprintln!("❌ 语料里没有可用句子");
+        return;
+    }
+
+    // ---- A 逐单元 ----
+    let mut 单元总数 = 0usize;
+    let mut 首候选对 = 0usize;
+    let mut 句全对 = 0usize;
+    let mut 桶单元: Vec<(usize, usize, usize)> = vec![(0, 0, 0); 参.最长 + 1];
+    let mut 错例: Vec<(String, String, String)> = Vec::new(); // 原字 / 码 / 首候选
+
+    // ---- B 连续解码 ----
+    let mut 连对 = 0usize;
+    let mut 连距离 = 0usize;
+    let mut 连切分错 = 0usize;
+    let mut 击键 = 0usize;
+
+    for 句 in &句们 {
+        let mut 本句全对 = true;
+        let mut 码流 = String::new();
+        for c in 句.chars() {
+            let 码 = &字码[&c];
+            码流.push_str(码);
+            击键 += 码.chars().count();
+            单元总数 += 1;
+
+            let 首 = 码表
+                .get(码.as_str())
+                .and_then(|v| v.first())
+                .map(|e| e.文本.as_str())
+                .unwrap_or("");
+            let 对 = 首 == c.to_string().as_str();
+            if 对 {
+                首候选对 += 1;
+            } else {
+                本句全对 = false;
+                if 错例.len() < 8 {
+                    错例.push((c.to_string(), 码.clone(), 首.to_string()));
+                }
+            }
+        }
+        if 本句全对 {
+            句全对 += 1;
+        }
+
+        let n = 句.chars().count();
+        let r = &mut 桶单元[n.min(参.最长)];
+        r.0 += 1;
+        r.1 += n;
+        if 本句全对 {
+            r.2 += 1;
+        }
+
+        // B
+        let (解出, _) = match &参.解码器 {
+            Some(_) => (String::new(), 0),
+            None => 连续解码(&码流, &码表),
+        };
+        let a: Vec<char> = 句.chars().collect();
+        let b: Vec<char> = 解出.chars().collect();
+        let d = 编辑距离(&a, &b);
+        连距离 += d;
+        if d == 0 {
+            连对 += 1;
+        } else if a.len() != b.len() {
+            连切分错 += 1;
+        }
+    }
+
+    let 字准确 = 首候选对 as f64 / 单元总数 as f64 * 100.0;
+    let 句准确 = 句全对 as f64 / 句们.len() as f64 * 100.0;
+    let 连准确 = 连对 as f64 / 句们.len() as f64 * 100.0;
+
+    if let Some(目录) = &参.导出 {
+        std::fs::create_dir_all(目录).ok();
+        let _ = std::fs::write(目录.join("原文.txt"), 句们.join("\n") + "\n");
+        println!("排查用原文已写入 {}", 目录.display());
+    }
+
+    let mut md = String::from("## 整句准确率\n\n");
+    md.push_str(&format!(
+        "语料 {} 句 / {} 字　词典 {} 条　平均击键 {:.3}/字\n\n",
+        句们.len(),
+        单元总数,
+        码表.values().map(|v| v.len()).sum::<usize>(),
+        击键 as f64 / 单元总数 as f64
+    ));
+    md.push_str("**A 逐单元**（每字打满自己的码、空格取第一个候选，即真实操作）\n\n");
+    md.push_str("| 指标 | 值 |\n|---|---:|\n");
+    md.push_str(&format!(
+        "| 首候选准确率（字级） | **{:.2}%**（{} / {}） |\n",
+        字准确, 首候选对, 单元总数
+    ));
+    md.push_str(&format!(
+        "| 整句准确率（一句全对） | **{:.2}%**（{} / {}） |\n",
+        句准确, 句全对, 句们.len()
+    ));
+
+    md.push_str("\n**B 连续解码**（整句码流首尾相连，让解码器按词频自己切）\n\n");
+    md.push_str("| 指标 | 值 |\n|---|---:|\n");
+    md.push_str(&format!(
+        "| 整句准确率 | **{:.2}%**（{} / {}） |\n",
+        连准确, 连对, 句们.len()
+    ));
+    md.push_str(&format!(
+        "| 字准确率 | **{:.2}%**（编辑距离 {} / {} 字） |\n",
+        (1.0 - 连距离 as f64 / 单元总数 as f64) * 100.0,
+        连距离,
+        单元总数
+    ));
+    md.push_str(&format!("| 切分错（长度不同） | {} 句 |\n", 连切分错));
+
+    md.push_str("\n### 按句长（A 口径）\n\n| 句长 | 句数 | 整句准确率 |\n|---:|---:|---:|\n");
+    for (n, (句数, _, 全)) in 桶单元.iter().enumerate() {
+        if *句数 == 0 || n == 0 {
+            continue;
+        }
+        md.push_str(&format!(
+            "| {} | {} | {:.2}% |\n",
+            n,
+            *句数,
+            *全 as f64 / *句数 as f64 * 100.0
+        ));
+    }
+
+    if !错例.is_empty() {
+        md.push_str("\n### 首候选错的字（前 8）\n\n| 应是 | 码 | 首候选 |\n|---|---|---|\n");
+        for (原, 码, 首) in &错例 {
+            md.push_str(&format!("| {} | `{}` | {} |\n", 原, 码, 首));
+        }
+    }
+
+    println!("{}", md);
+    if let Some(路径) = &参.结果 {
+        match std::fs::write(路径, &md) {
+            Ok(_) => println!("结果已写入 {}", 路径.display()),
+            Err(e) => eprintln!("⚠️ 写不了结果: {}", e),
+        }
+    }
 }
