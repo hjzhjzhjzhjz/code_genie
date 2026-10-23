@@ -93,6 +93,8 @@ fn pnpm() -> String {
 
 /// 对一张码表跑测评，返回 (结果 JSON, 输出文件路径)
 fn 测评一张(码表: &Path, 方案: &Path, 工作目录: &Path) -> Result<(Value, PathBuf), String> {
+    // CLI 在 yuhao 目录里跑，必须给绝对路径
+    let 码表 = &std::fs::canonicalize(码表).unwrap_or_else(|_| 码表.to_path_buf());
     let 名 = 码表
         .parent()
         .and_then(|p| p.file_name())
