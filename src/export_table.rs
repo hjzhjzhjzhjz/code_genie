@@ -16,14 +16,14 @@ use std::fs;
 
 /// 码位标签：A=首码、S=次码、Y=末码（对应 keymap 里键位串的第 1/2/3 个字母）
 #[derive(Clone, Copy)]
-enum 码位 {
+pub(crate) enum 码位 {
     A,
     S,
     Y,
 }
 
 impl 码位 {
-    fn 序号(self) -> usize {
+    pub(crate) fn 序号(self) -> usize {
         match self {
             码位::A => 0,
             码位::S => 1,
@@ -33,7 +33,7 @@ impl 码位 {
 }
 
 /// 读取 keymap：`字根 <TAB> 键位串 <TAB> 频次`，只取前两列
-fn 加载键位表(path: &str) -> HashMap<String, Vec<char>> {
+pub(crate) fn 加载键位表(path: &str) -> HashMap<String, Vec<char>> {
     let 文本 = fs::read_to_string(path).expect("无法读取 keymap");
     let mut 表 = HashMap::new();
     for 行 in 文本.lines() {
@@ -50,7 +50,7 @@ fn 加载键位表(path: &str) -> HashMap<String, Vec<char>> {
 }
 
 /// 读取纯拆分表：`字 <TAB> 根 根 … <TAB> 频次`
-fn 加载拆分表(path: &str) -> Vec<(String, Vec<String>, u64)> {
+pub(crate) fn 加载拆分表(path: &str) -> Vec<(String, Vec<String>, u64)> {
     let 文本 = fs::read_to_string(path).expect("无法读取拆分表");
     let mut 表 = Vec::new();
     for 行 in 文本.lines() {
@@ -72,7 +72,7 @@ fn 加载拆分表(path: &str) -> Vec<(String, Vec<String>, u64)> {
 }
 
 /// 读取简码表：`字 <TAB> 码 <TAB> 频次`，码尾的 `_` 去掉
-fn 加载简码表(path: &str) -> HashMap<String, String> {
+pub(crate) fn 加载简码表(path: &str) -> HashMap<String, String> {
     let 文本 = fs::read_to_string(path).expect("无法读取简码表");
     let mut 表 = HashMap::new();
     for 行 in 文本.lines() {
@@ -94,7 +94,7 @@ fn 加载简码表(path: &str) -> HashMap<String, String> {
 }
 
 /// 魔灵取码序列：返回 (字根, 码位) 列表，已截断到最大码长
-fn 取码序列<'a>(
+pub(crate) fn 取码序列<'a>(
     根: &'a [String],
     键位: &HashMap<String, Vec<char>>,
     最大码长: usize,
@@ -126,7 +126,7 @@ fn 取码序列<'a>(
 }
 
 /// 按序列把字根翻成键位字母
-fn 编码(序列: &[(&str, 码位)], 键位: &HashMap<String, Vec<char>>) -> Option<String> {
+pub(crate) fn 编码(序列: &[(&str, 码位)], 键位: &HashMap<String, Vec<char>>) -> Option<String> {
     let mut 码 = String::with_capacity(序列.len());
     for (根, 位) in 序列 {
         let 键 = 键位.get(*根)?;
@@ -156,15 +156,32 @@ pub fn run(keymap_path: &str, chaifen_path: &str, simple_path: Option<&str>, out
 
     println!("  字根 {} 个，汉字 {} 个，简码 {} 条", 键位.len(), 拆分.len(), 简码.len());
 
+    let (输出, 全码条数, 简码条数, 缺根) = 生成表(&键位, &拆分, &简码);
+    fs::write(output_path, 输出).expect("无法写入输出文件");
+    println!(
+        "  完成：全码 {} 条，简码 {} 条，跳过（缺字根）{} 条",
+        全码条数, 简码条数, 缺根
+    );
+    println!("  已写入 {}", output_path);
+}
+
+/// 把「键位 + 拆分 + 简码」合成码表文本
+///
+/// 返回 (文本, 全码条数, 简码条数, 缺根条数)
+pub(crate) fn 生成表(
+    键位: &HashMap<String, Vec<char>>,
+    拆分: &[(String, Vec<String>, u64)],
+    简码: &HashMap<String, String>,
+) -> (String, usize, usize, usize) {
     let 最大码长 = 4usize;
     let mut 输出 = String::with_capacity(拆分.len() * 12);
     let mut 缺根 = 0usize;
     let mut 简码条数 = 0usize;
     let mut 全码条数 = 0usize;
 
-    for (字, 根, _频次) in &拆分 {
-        let 序列 = 取码序列(根, &键位, 最大码长);
-        let Some(全码) = 编码(&序列, &键位) else {
+    for (字, 根, _频次) in 拆分 {
+        let 序列 = 取码序列(根, 键位, 最大码长);
+        let Some(全码) = 编码(&序列, 键位) else {
             缺根 += 1;
             continue;
         };
@@ -180,10 +197,5 @@ pub fn run(keymap_path: &str, chaifen_path: &str, simple_path: Option<&str>, out
         全码条数 += 1;
     }
 
-    fs::write(output_path, 输出).expect("无法写入输出文件");
-    println!(
-        "  完成：全码 {} 条，简码 {} 条，跳过（缺字根）{} 条",
-        全码条数, 简码条数, 缺根
-    );
-    println!("  已写入 {}", output_path);
+    (输出, 全码条数, 简码条数, 缺根)
 }
