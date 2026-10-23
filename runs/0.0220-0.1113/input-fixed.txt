@@ -1,0 +1,517 @@
+干.0	h
+干.1	d
+弓.0	r
+弓.1	e
+丰.0	r
+丰.1	u
+鬥.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+鬥.1	w e i s d f j k l m v n h g u
+{穀框}.0 殳.0 風.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{穀框}.1 殳.1 風.1	w e i s d f j k l m v n h g u
+气.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+气.1	w e i s d f j k l m v n h g u
+ス.0 マ.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+ス.1 マ.1	w e i s d f j k l m v n h g u
+又.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+又.1	w e i s d f j k l m v n h g u
+非.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+非.1	w e i s d f j k l m v n h g u
+三.0	v
+三.1	i
+几.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+几.1	w e i s d f j k l m v n h g u
+{鼠下}.0 {龍右}.0	p
+{鼠下}.1 {龍右}.1	d
+食.0	q
+食.1	n
+{乍下}.0	r
+{乍下}.1	w
+門.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+門.1	w e i s d f j k l m v n h g u
+亍.0	u
+亍.1	g
+千.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+千.1	w e i s d f j k l m v n h g u
+钅.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+钅.1	w e i s d f j k l m v n h g u
+甲.0	b
+甲.1	d
+{鸟上}.0 鸟.0	b
+{鸟上}.1 鸟.1	g
+乌.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+乌.1	w e i s d f j k l m v n h g u
+⺽.0 臼.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+⺽.1 臼.1	w e i s d f j k l m v n h g u
+田.0	t
+田.1	s
+囗.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+囗.1	w e i s d f j k l m v n h g u
+由.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+由.1	w e i s d f j k l m v n h g u
+言.0	b
+言.1	k
+雨.0	b
+雨.1	l
+申.0	b
+申.1	m
+里.0	b
+里.1	n
+禺.0	b
+禺.1	s
+电.0	b
+电.1	w
+{鳥上}.0 鳥.0	c
+{鳥上}.1 鳥.1	g
+瓜.0	c
+瓜.1	h
+山.0	c
+山.1	j
+贝.0	c
+贝.1	k
+{姬右}.0 匚.0 臣.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{姬右}.1 匚.1 臣.1	w e i s d f j k l m v n h g u
+{弬右}.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{弬右}.1	w e i s d f j k l m v n h g u
+火.0	c
+火.1	m
+巛.0 川.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+巛.1 川.1	w e i s d f j k l m v n h g u
+巜.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+巜.1	w e i s d f j k l m v n h g u
+爪.0	c
+爪.1	s
+十.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+十.1	w e i s d f j k l m v n h g u
+皮.0	d
+皮.1	f
+{烏上}.0 烏.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{烏上}.1	w e i s d f j k l m v n h g u
+烏.1	w e i s d f j k l m v n h g u
+{炙上}.0 {祭上}.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{炙上}.1 {祭上}.1	w e i s d f j k l m v n h g u
+月.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+月.1	w e i s d f j k l m v n h g u
+日.0	d
+日.1	i
+夕.0	d
+夕.1	j
+貝.0	d
+貝.1	k
+乀.0 入.0	d
+乀.1 入.1	l
+用.0	d
+用.1	m
+见.0	d
+见.1	n
+业.0	d
+业.1	s
+甫.0	d
+甫.1	w
+{⺮右}.0 {乞上}.0 ⺮.0 竹.0	e
+{⺮右}.1 {乞上}.1 ⺮.1 竹.1	f
+魚.0	e
+魚.1	g
+{具上}.0 且.0	e
+{具上}.1 且.1	h
+酉.0	e
+酉.1	i
+{五下}.0 丑.0	e
+{五下}.1 丑.1	j
+正.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+正.1	w e i s d f j k l m v n h g u
+丶.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+丶.1	w e i s d f j k l m v n h g u
+齒.0	e
+齒.1	l
+走.0	e
+走.1	m
+止.0 龰.0	e
+止.1 龰.1	n
+{冂丶}.0 {雋下}.0 冂.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{冂丶}.1 {雋下}.1 冂.1	w e i s d f j k l m v n h g u
+西.0	e
+西.1	r
+ナ.0 丆.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+ナ.1 丆.1	w e i s d f j k l m v n h g u
+{亜下}.0 {亞下}.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{亜下}.1 {亞下}.1	w e i s d f j k l m v n h g u
+{亞中}.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{亞中}.1	w e i s d f j k l m v n h g u
+其.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+其.1	w e i s d f j k l m v n h g u
+{曾中}.0 {横日}.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{曾中}.1 {横日}.1	w e i s d f j k l m v n h g u
+曰.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+曰.1	w e i s d f j k l m v n h g u
+自.1	w e i s d f j k l m v n h g u
+{奉下}.0 㐄.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{奉下}.1 㐄.1	w e i s d f j k l m v n h g u
+身.1	w e i s d f j k l m v n h g u
+白.1	w e i s d f j k l m v n h g u
+疒.0	f
+疒.1	f
+自.0 白.0 身.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+目.1	w e i s d f j k l m v n h g u
+目.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+リ.0 丷.0	x
+⺁.1 厂.1	d
+厂.0 ⺁.0	y
+リ.1 丷.1	k
+䒑.0	f
+䒑.1	s
+丂.0 文.0	g
+丂.1 文.1	d
+壬.0	g
+壬.1	e
+门.0	g
+门.1	g
+亥.0	g
+亥.1	h
+土.0 士.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+土.1	w e i s d f j k l m v n h g u
+ㄗ.0 卩.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+ㄗ.1 卩.1	w e i s d f j k l m v n h g u
+亠.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+亠.1	w e i s d f j k l m v n h g u
+亦.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+亦.1	w e i s d f j k l m v n h g u
+至.0	g
+至.1	k
+{京上}.0 {亮上}.0 {襄上}.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{京上}.1 {亮上}.1 {襄上}.1	w e i s d f j k l m v n h g u
+高.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+高.1	w e i s d f j k l m v n h g u
+方.0	g
+方.1	m
+辛.0	g
+辛.1	n
+士.1	w e i s d f j k l m v n h g u
+立.0	g
+立.1	w
+〢.0 〣.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+〢.1 〣.1	w e i s d f j k l m v n h g u
+丨.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+丨.1	w e i s d f j k l m v n h g u
+刀.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+刀.1	w e i s d f j k l m v n h g u
+刂.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+刂.1	w e i s d f j k l m v n h g u
+{爲下}.0 乃.0 廴.0	h
+{爲下}.1 乃.1 廴.1	g
+亻.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+亻.1	w e i s d f j k l m v n h g u
+{荒下}.0 儿.0	h
+{荒下}.1 儿.1	r
+页.0	h
+页.1	f
+{即左}.0 艮.0	i
+{即左}.1 艮.1	d
+口.0	i
+口.1	e
+來.0 朩.0	i
+來.1 朩.1	f
+コ.0 ユ.0	i
+コ.1 ユ.1	g
+{微框}.0 彳.0	i
+{微框}.1 彳.1	k
+亡.0	i
+亡.1	r
+工.0	i
+工.1	s
+見.0	i
+見.1	w
+{南心}.0 ⺶.0 ⺷.0 羊.0	j
+{南心}.1 ⺶.1 ⺷.1 羊.1	d
+世.0	j
+世.1	e
+大.0	j
+大.1	f
+{兴上}.0 {步下}.0 ⺌.0 ⺍.0 小.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{兴上}.1 {步下}.1 ⺌.1 ⺍.1 小.1	w e i s d f j k l m v n h g u
+癶.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+癶.1	w e i s d f j k l m v n h g u
+夭.0	j
+夭.1	k
+足.0	j
+足.1	l
+失.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+失.1	w e i s d f j k l m v n h g u
+石.0	j
+石.1	s
+缶.0	k
+缶.1	d
+{纟上}.0 厶.0 幺.0 纟.0	k
+{纟上}.1 厶.1 幺.1 纟.1	e
+{贏框}.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{贏框}.1	w e i s d f j k l m v n h g u
+㔾.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+㔾.1	w e i s d f j k l m v n h g u	
+也.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+也.1	w e i s d f j k l m v n h g u
+乜.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+乜.1	w e i s d f j k l m v n h g u
+〇.0	k
+〇.1	g
+毛.0	k
+毛.1	j
+七.0	k
+七.1	l
+舟.0	k
+舟.1	r
+匕.0	k
+匕.1	s
+乂.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+乂.1	w e i s d f j k l m v n h g u
+{鬯中}.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{鬯中}.1	w e i s d f j k l m v n h g u
+已.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+已.1	w e i s d f j k l m v n h g u
+阝.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+阝.1	w e i s d f j k l m v n h g u
+丬.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+丬.1	w e i s d f j k l m v n h g u
+生.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+生.1	w e i s d f j k l m v n h g u
+巾.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+巾.1	w e i s d f j k l m v n h g u
+{乐上}.0 {卬左}.0 {卯左}.0 卯.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{乐上}.1 {卬左}.1 {卯左}.1 卯.1	w e i s d f j k l m v n h g u
+{齊右}.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{齊右}.1	w e i s d f j k l m v n h g u
+{眉上}.0 尸.0	l
+{眉上}.1 尸.1	j
+女.0	l
+女.1	k
+⺧.0 牛.0	l
+⺧.1 牛.1	l
+欠.0	l
+欠.1	r
+己.0	l
+己.1	s
+巳.0	l
+巳.1	w
+面.0 而.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+面.1	w e i s d f j k l m v n h g u
+而.1	w e i s d f j k l m v n h g u
+水.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+水.1	w e i s d f j k l m v n h g u
+氵.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+氵.1	w e i s d f j k l m v n h g u
+早.0	m
+早.1	r
+手.0 隹.0 龵.0 龶.0	m
+手.1 隹.1 龵.1 龶.1	s
+{于下}.0 寸.0 扌.0	n
+{于下}.1 寸.1 扌.1	d
+{发左}.0 {阜上}.0 戶.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{发左}.1 {阜上}.1 戶.1	w e i s d f j k l m v n h g u
+戸.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+戸.1	w e i s d f j k l m v n h g u
+乚.0	n
+乚.1	f
+习.0	n
+习.1	g
+牙.0	n
+牙.1	k
+乙.0	n
+乙.1	s
+一.0	o
+一.1	d
+冊.0	o
+冊.1	g
+黑.0	o
+黑.1	r
+心.0 忄.0	o
+心.1 忄.1	s
+力.0	o
+力.1	f
+豕.0 豸.0 {豕下}.0	q
+豕.1 豸.1 {豕下}.1	m
+革.0	q
+革.1	i
+鱼.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+鱼.1	w e i s d f j k l m v n h g u
+{反彐}.0 彐.0 肀.0 隶.0	q
+{反彐}.1 彐.1 肀.1 隶.1	j
+九.0	q
+九.1	l
+{鹿上}.0 鹿.0	p
+{鹿上}.1 鹿.1	i
+{華中}.0 卄.0 卌.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{華中}.1 卄.1 卌.1	w e i s d f j k l m v n h g u
+艹.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+艹.1	w e i s d f j k l m v n h g u
+{冓上}.0 龷.0	p
+{冓上}.1 龷.1	u
+卅.0 廾.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+卅.1 廾.1	w e i s d f j k l m v n h g u
+{龠上}.0 僉.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{龠上}.1 僉.1	w e i s d f j k l m v n h g u
+{僉上}.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{僉上}.1	w e i s d f j k l m v n h g u
+{向框}.0 {囟框}.0 向.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{向框}.1 {囟框}.1 向.1	w e i s d f j k l m v n h g u
+丿.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+丿.1	w e i s d f j k l m v n h g u
+末.0	r
+末.1	i
+未.0	r
+未.1	j
+糸.0	r
+糸.1	k
+{飞右}.0 ⺀.0 冫.0	r
+{飞右}.1 ⺀.1 冫.1	l
+二.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+二.1	w e i s d f j k l m v n h g u
+{二撇}.0 彡.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{二撇}.1 彡.1	w e i s d f j k l m v n h g u
+母.0 {母框}.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+母.1 {母框}.1	w e i s d f j k l m v n h g u
+{互中}.0 彑.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{互中}.1 彑.1	w e i s d f j k l m v n h g u
+丁.0	r
+丁.1	n
+頁.0	r
+頁.1	w
+夊.0	s
+夊.1	f
+户.0	s
+户.1	g
+ᅲ.0 丌.0 兀.0	s
+ᅲ.1 丌.1 兀.1	h
+尢.0 尤.0	s
+尢.1 尤.1	i
+耳.0	s
+耳.1	j
+古.0	s
+古.1	k
+舌.0	s
+舌.1	l
+矢.0	s
+矢.1	m
+犬.0 犭.0	s
+犬.1 犭.1	n
+穴.0 宀.0	s
+穴.1	s
+丩.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+丩.1	w e i s d f j k l m v n h g u
+丱.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+丱.1	w e i s d f j k l m v n h g u
+宀.1	d
+ㄩ.1	s
+屮.0 ㄩ.0	y
+屮.1	j
+戊.0	t
+戊.1	d
+弋.0	t
+弋.1	e
+镸.0 髟.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+镸.1 髟.1	w e i s d f j k l m v n h g u
+長.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+長.1	w e i s d f j k l m v n h g u
+𡗗.0 夫.0	y
+𡗗.1	s
+夫.1	g
+广.0	t
+广.1	i
+车.0	t
+车.1	j
+金.0	t
+金.1	k
+戈.0	t
+戈.1	l
+斤.0	v
+斤.1	n
+爿.0 片.0	t
+爿.1 片.1	n
+子.0	u
+子.1	d
+了.0	u
+了.1	e
+之.0 辶.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+之.1 辶.1	w e i s d f j k l m v n h g u
+⻍.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+⻍.1	w e i s d f j k l m v n h g u
+孑.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+孑.1	w e i s d f j k l m v n h g u
+冎.0 咼.0	u
+冎.1 咼.1	h
+{虍上}.0 虍.0 虎.0	u
+{虍上}.1 虍.1 虎.1	i
+禾.0	u
+禾.1	j
+骨.0	u
+骨.1	k
+予.0	u
+予.1	l
+饣.0	u
+饣.1	m
+王.0	u
+王.1	v
+尚.0 龸.0	u
+尚.1 龸.1	s
+皿.0 罒.0	u
+皿.1 罒.1	w
+{奐上}.0 ⺈.0 冖.0	v
+{奐上}.1 ⺈.1 冖.1	d
+灬.0 麻.0	v
+灬.1 麻.1	j
+木.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+木.1	w e i s d f j k l m v n h g u
+合.0	q
+合.1	h
+八.0 {介下}.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+八.1	w e i s d f j k l m v n h g u
+{介下}.1	w e i s d f j k l m v n h g u
+{專上}.0 車.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{專上}.1 車.1	w e i s d f j k l m v n h g u
+叀.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+叀.1	w e i s d f j k l m v n h g u
+辰.0	w
+辰.1	h
+{畏下}.0 {衣下}.0 不.0 衤.0	w
+{畏下}.1 {衣下}.1 不.1 衤.1	i
+马.0	w
+马.1	j
+人.0	w
+人.1	k
+壴.0	m
+壴.1	k
+米.0	w
+米.1	m
+长.0	w
+长.1	n
+{曹上}.0 曲.0	w
+{曹上}.1 曲.1	r
+示.0	w
+示.1	v
+飛.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+飛.1	w e i s d f j k l m v n h g u
+{丄丶}.0 上.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{丄丶}.1 上.1	w e i s d f j k l m v n h g u
+耂.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+耂.1	w e i s d f j k l m v n h g u
+丄.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+丄.1	w e i s d f j k l m v n h g u
+⺊.0 卜.0 鹵.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+⺊.1 卜.1 鹵.1	w e i s d f j k l m v n h g u
+虫.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+虫.1	w e i s d f j k l m v n h g u
+{黽中}.0 丅.0 下.0	x
+{黽中}.1 丅.1 下.1	m
+巴.0	x
+巴.1	n
+瓦.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+瓦.1	w e i s d f j k l m v n h g u
+讠.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+讠.1	w e i s d f j k l m v n h g u
+{馬上}.0 馬.0	y
+{馬上}.1 馬.1	e
+{卑上}.0 鬼.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{卑上}.1 鬼.1	w e i s d f j k l m v n h g u
+{鬼左}.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+{鬼左}.1	w e i s d f j k l m v n h g u
+甶.0	q w e r t y u i o p a s d f g h j k l x c v b n m
+甶.1	w e i s d f j k l m v n h g u
+勹.0 {周框}.0	j
+勹.1 {周框}.1	k
