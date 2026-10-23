@@ -13,6 +13,7 @@ use rayon::prelude::*;
 
 mod annealing;
 mod assess;
+mod diagnose;
 mod handfeel;
 mod bucket_store;
 mod calibrate;
@@ -201,6 +202,26 @@ enum Commands {
         #[arg(long, default_value = "")]
         version: String,
     },
+
+    /// 按形码测评口径做诊断：手感七项、字频分段、词组测评、二码离散图
+    #[command(name = "diagnose")]
+    Diagnose {
+        /// 码表目录（递归找 全码表.txt）
+        #[arg(long)]
+        dir: String,
+
+        /// 测评数据目录（当量表／字频表／词表）
+        #[arg(long, default_value = "ceping-data")]
+        data: String,
+
+        /// 目录里要匹配的文件名
+        #[arg(long = "file-name", default_value = "全码表.txt")]
+        file_name: String,
+
+        /// 报告写到该文件（Markdown）
+        #[arg(long)]
+        summary: Option<String>,
+    },
 }
 
 // =========================================================================
@@ -255,6 +276,13 @@ fn main() {
             mapping,
             output,
         }) => root_chart::run(&keymap, mapping.as_deref(), &output),
+        Some(Commands::Diagnose {
+            dir,
+            data,
+            file_name,
+            summary,
+        }) => diagnose::run(&dir, &data, &file_name, summary.as_deref()),
+
         Some(Commands::Assess {
             table,
             dir,
