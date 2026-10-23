@@ -52,7 +52,7 @@ permissions:
 jobs:
   optimize:
     name: 编译并运行模拟退火（分片 ${{ matrix.shard }}）
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # 单个分片不跑时不启动
     strategy:
       fail-fast: false
@@ -72,7 +72,7 @@ jobs:
 
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 1
@@ -238,7 +238,7 @@ jobs:
 
       - name: 上传结果
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: codegenie-${{ inputs.out_dir }}-run${{ github.run_number }}-s${{ matrix.shard }}
           path: |
