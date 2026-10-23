@@ -228,10 +228,10 @@ jobs:
       - name: 清理中间产物
         if: always()
         run: |
-          rm -f "$OUT_DIR/单字编码表.txt" "$OUT_DIR/汇总.txt" "$OUT_DIR/简码表.txt"
+          rm -f "$OUT_DIR/单字编码表.txt" "$OUT_DIR/汇总.txt" "$OUT_DIR/简码表.txt" "$OUT_DIR/合并码表.txt"
           for d in "$OUT_DIR"/thread-*; do
             [ -d "$d" ] || continue
-            rm -f "$d/单字编码表.txt" "$d/简码表.txt"
+            rm -f "$d/单字编码表.txt" "$d/简码表.txt" "$d/合并码表.txt"
           done
           echo "剩余文件："
           ls -1 "$OUT_DIR"
