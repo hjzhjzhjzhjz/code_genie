@@ -306,6 +306,54 @@ pub fn 找词表(yuhao目录: &Path) -> Option<std::path::PathBuf> {
 ///   全码表 = 每字取最长码；简码表 = 每字取最短码（没有简码的字保留其全码）
 ///   重码字数 = 撞码桶里的字总数；重码组数 = 撞码的桶数
 ///   选重个数 = 重码字数 − 重码组数（首选字直接上屏，其余各多敲一次选重键）
+/// 宇浩认的 CJK 区段（Unicode 17.0）。运行时会优先读 yuhao 自带的
+/// cjkBlocks.json，读不到再用这里的兜底值。
+pub const 默认区块: [(u32, u32); 11] = [
+    (0x4E00, 0x9FFF),
+    (0x3400, 0x4DBF),
+    (0x20000, 0x2A6DF),
+    (0x2A700, 0x2B73F),
+    (0x2B740, 0x2B81D),
+    (0x2B820, 0x2CEAD),
+    (0x2CEB0, 0x2EBE0),
+    (0x30000, 0x3134A),
+    (0x31350, 0x323AF),
+    (0x323B0, 0x33479),
+    (0x2EBF0, 0x2EE5D),
+];
+
+fn 在区块(c: char, 区块: &[(u32, u32)]) -> bool {
+    let o = c as u32;
+    区块.iter().any(|(a, z)| o >= *a && o <= *z)
+}
+
+fn 解十六(s: &str) -> Option<u32> {
+    let t = s.trim();
+    let t = t
+        .strip_prefix("0x")
+        .or_else(|| t.strip_prefix("0X"))
+        .unwrap_or(t);
+    u32::from_str_radix(t, 16).ok()
+}
+
+/// 读宇浩的 cjkBlocks.json，拿到它自己用的区段边界
+pub fn 读区块(路径: &Path) -> Option<Vec<(u32, u32)>> {
+    let 文本 = std::fs::read_to_string(路径).ok()?;
+    let 值: Value = serde_json::from_str(&文本).ok()?;
+    let 块 = 值.get("blocks")?.as_object()?;
+    let mut 结果 = Vec::new();
+    for (_, b) in 块 {
+        let a = 解十六(b.get("start")?.as_str()?)?;
+        let z = 解十六(b.get("end")?.as_str()?)?;
+        结果.push((a, z));
+    }
+    if 结果.is_empty() {
+        None
+    } else {
+        Some(结果)
+    }
+}
+
 pub struct 选重统计 {
     pub 全码: u64,
     pub 简码: u64,
@@ -314,7 +362,7 @@ pub struct 选重统计 {
 }
 
 /// 算一份码表在全表范围内的选重个数
-pub fn 算选重(码表: &Path) -> Result<选重统计, String> {
+pub fn 算选重(码表: &Path, 区块: &[(u32, u32)]) -> Result<选重统计, String> {
     let 文本 = std::fs::read_to_string(码表).map_err(|e| format!("读不了码表: {}", e))?;
 
     let mut 分组: HashMap<char, Vec<String>> = HashMap::new();
@@ -322,6 +370,10 @@ pub fn 算选重(码表: &Path) -> Result<选重统计, String> {
         if let Some((左, 右)) = 行.split_once('\t') {
             let mut 字 = 左.chars();
             if let (Some(c), None) = (字.next(), 字.next()) {
+                // 只统计宇浩认的 CJK 区段，否则和网页版对不上
+                if !在区块(c, 区块) {
+                    continue;
+                }
                 分组
                     .entry(c)
                     .or_insert_with(Vec::new)
