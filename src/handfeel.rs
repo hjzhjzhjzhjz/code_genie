@@ -8,7 +8,7 @@
 //   · 字内连击 → 单个编码内部相邻两击同指的比例
 // =========================================================================
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use serde_json::Value;
