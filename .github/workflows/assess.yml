@@ -1,30 +1,41 @@
 name: 宇浩测评
 
 on:
+  # 退火优化跑完 → 自动对比该轮所有线程的码表
+  workflow_run:
+    workflows: ["CodeGenie 退火优化"]
+    types: [completed]
   workflow_dispatch:
     inputs:
-      keymap:
-        description: 键位映射文件（仓库内路径）
-        required: true
-        default: runs/s4-export/output-keymap.txt
-      simple:
-        description: 简码表（仓库内路径，留空表示无简码）
-        required: false
-        default: runs/s4-export/output-simple-codes.txt
-
       run_id:
         description: 要对比的 optimize 运行 id（留空则测评下面给定的 keymap）
         required: false
         default: ""
         type: string
+      keymap:
+        description: 键位映射文件（仓库内路径，仅 run_id 为空时用）
+        required: false
+        default: runs/s4-export/output-keymap.txt
+        type: string
+      simple:
+        description: 简码表（仓库内路径，可留空）
+        required: false
+        default: runs/s4-export/output-simple-codes.txt
+        type: string
+
 permissions:
   contents: read
+  actions: read
 
 jobs:
   assess:
-    name: 导出码表并跑宇浩测评
+    name: 测评与对比
+    # 优化失败就不测了
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 45
     steps:
       - name: 检出 code_genie
         uses: actions/checkout@v7
@@ -73,8 +84,9 @@ jobs:
           set -o pipefail
           cargo build --release 2>&1 | tail -n 5
 
+      # ---- 手动模式：只测给定的一份码表 ----
       - name: 导出码表
-        if: inputs.run_id == ''
+        if: github.event_name == 'workflow_dispatch' && inputs.run_id == ''
         env:
           KEYMAP: ${{ inputs.keymap }}
           SIMPLE: ${{ inputs.simple }}
@@ -87,40 +99,53 @@ jobs:
             --output out-assess/全码表.txt
           wc -l < out-assess/全码表.txt
 
-      - name: 下载优化产物
-        if: inputs.run_id != ''
-        uses: actions/download-artifact@v8
-        with:
-          pattern: codegenie-*
-          path: artifacts
-          run-id: ${{ inputs.run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-
       - name: 跑测评（单表）
-        if: inputs.run_id == ''
+        if: github.event_name == 'workflow_dispatch' && inputs.run_id == ''
         run: |
+          set -e
           ./target/release/code_genie assess \
             --dir out-assess \
             --scheme codegenie-s4.jsonc \
             --yuhao-dir yuhao-assess \
-            --keep out-assess/结果
+            --keep out-assess/结果 \
+            --summary 汇总.md
+          cat 汇总.md >> "$GITHUB_STEP_SUMMARY"
+
+      # ---- 自动/对比模式：拉整轮所有分片产物一起测 ----
+      - name: 下载优化产物
+        if: github.event_name == 'workflow_run' || inputs.run_id != ''
+        uses: actions/download-artifact@v8
+        with:
+          pattern: codegenie-*
+          path: artifacts
+          run-id: ${{ github.event.workflow_run.id || inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
 
       - name: 跑测评（对比整轮）
-        if: inputs.run_id != ''
+        if: github.event_name == 'workflow_run' || inputs.run_id != ''
         run: |
-          find artifacts -name 全码表.txt | sort
+          echo "### 参与对比的码表" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          find artifacts -name 全码表.txt | sort | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
           ./target/release/code_genie assess \
             --dir artifacts \
             --scheme codegenie-s4.jsonc \
             --yuhao-dir yuhao-assess \
-            --keep artifacts/结果
+            --keep artifacts/结果 \
+            --summary 汇总.md
+          cat 汇总.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: 上传结果
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: assess-run${{ github.run_number }}
-          path: out-assess/
+          path: |
+            out-assess/
+            artifacts/
+            汇总.md
           if-no-files-found: warn
           retention-days: 14
