@@ -102,7 +102,7 @@ simple_protect_top_n = 0          # 简码占用保护：禁止简码等于受�
 
 [[simple_levels]]
 level = 1
-code_num = 0
+code_num = 1
 rules = ["Aa"]
 space_commit = false     # 是否需要空格上屏（默认 false）；为 true 时该级简码效率长度+1，且输出末尾追加 "_"
 
