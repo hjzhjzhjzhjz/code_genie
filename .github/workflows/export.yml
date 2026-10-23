@@ -83,11 +83,11 @@ jobs:
           MAPPING: ${{ inputs.mapping }}
         run: |
           if [ -z "$MAPPING" ]; then
-            ./target/release/code_genie chart --keymap "$KEYMAP" --output root-chart.html
+            ./target/release/code_genie chart --keymap "$KEYMAP" --output 字根图.html
           else
-            ./target/release/code_genie chart --keymap "$KEYMAP" --mapping "$MAPPING" --output root-chart.html
+            ./target/release/code_genie chart --keymap "$KEYMAP" --mapping "$MAPPING" --output 字根图.html
           fi
-          ls -l root-chart.html
+          ls -l 字根图.html
 
       - name: 上传码表
         if: always()
@@ -97,6 +97,6 @@ jobs:
           path: |
             ${{ inputs.out_name }}
             build.log
-            root-chart.html
+            字根图.html
           if-no-files-found: warn
           retention-days: 14
