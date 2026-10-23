@@ -282,6 +282,15 @@ pub fn run(参: &参数) {
     for v in 简表.values_mut() {
         v.sort_by(|a, b| b.权重.cmp(&a.权重));
     }
+    // 合表 = 全码 + 词组 + 简码。Rime 里它们同在一份词典，
+    // 所以 3 码字有可能和某个 3 码简码撞在一起，必须一起比。
+    let mut 合表 = 码表.clone();
+    for (码, 条们) in &简表 {
+        合表.entry(码.clone()).or_default().extend(条们.clone());
+    }
+    for v in 合表.values_mut() {
+        v.sort_by(|a, b| b.权重.cmp(&a.权重));
+    }
 
     // ---- 语料 ----
     let 语料 = std::fs::read_to_string(&参.语料).unwrap_or_default();
@@ -330,7 +339,7 @@ pub fn run(参: &参数) {
             全击键 += 全.chars().count();
             码流.push_str(全);
 
-            let 全首选 = 首(&码表, 全);
+            let 全首选 = 首(&合表, 全);
             if 全首选 == c.to_string() {
                 全码对 += 1;
             } else {
@@ -345,7 +354,7 @@ pub fn run(参: &参数) {
                 Some(简) => {
                     简单元数 += 1;
                     简击键 += 简.chars().count();
-                    let 简首选 = 首(&简表, 简);
+                    let 简首选 = 首(&合表, 简);
                     if 简首选 == c.to_string() {
                         简对 += 1;
                     } else {
