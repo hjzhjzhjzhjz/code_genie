@@ -18,6 +18,11 @@ on:
         required: true
         default: moling/chaifen-all.txt
         type: string
+      mapping:
+        description: 字根映射表（仓库内路径，留空表示不用）
+        required: false
+        default: runs/s4-export/mapping.tsv
+        type: string
       out_name:
         description: 输出文件名
         required: true
@@ -57,6 +62,7 @@ jobs:
           SIMPLE: ${{ inputs.simple }}
           CHAIFEN: ${{ inputs.chaifen }}
           OUT_NAME: ${{ inputs.out_name }}
+          MAPPING: ${{ inputs.mapping }}
         run: |
           set -o pipefail
           if [ -n "$SIMPLE" ]; then
@@ -70,6 +76,16 @@ jobs:
           head -n 6 "$OUT_NAME"
           echo "--- 行数 ---"
           wc -l < "$OUT_NAME"
+
+      - name: 生成字根图
+        if: always()
+        run: |
+          if [ -z "$MAPPING" ]; then
+            ./target/release/code_genie chart --keymap "$KEYMAP" --output root-chart.html
+          else
+            ./target/release/code_genie chart --keymap "$KEYMAP" --mapping "$MAPPING" --output root-chart.html
+          fi
+          ls -l root-chart.html
 
       - name: 上传码表
         if: always()
