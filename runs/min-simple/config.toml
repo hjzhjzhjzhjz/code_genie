@@ -104,19 +104,19 @@ simple_protect_top_n = 0          # 简码占用保护：禁止简码等于受�
 level = 1
 code_num = 1
 rules = ["Aa"]
-space_commit = false     # 是否需要空格上屏（默认 false）；为 true 时该级简码效率长度+1，且输出末尾追加 "_"
+yield_full_code = false   # 四定方案：出简不占全码位，全码照常参与重码统计
 
 [[simple_levels]]
 level = 2
 code_num = 1
-rules = ["AaZz"]
-space_commit = false
+rules = ["AaBa"]
+yield_full_code = false   # 四定方案：出简不占全码位，全码照常参与重码统计
 
 [[simple_levels]]
 level = 3
 code_num = 1
-rules = ["AaBaZz"]
-space_commit = false
+rules = ["AaBaCa"]
+yield_full_code = false   # 四定方案：出简不占全码位，全码照常参与重码统计
 
 # -------------------------------------------------------------------------
 # 🔒 固定简码映射（可选，默认整段注释）
