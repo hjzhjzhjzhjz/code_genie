@@ -320,7 +320,8 @@ engine:
 speller:
   alphabet: zyxwvutsrqponmlkjihgfedcba
   delimiter: "`"
-  max_code_length: 4
+  # 不设 max_code_length：整句要一口气吃下几十上百个键，
+  # 限死 4 会把长输入直接截掉。
 
 translator:
   dictionary: {测评名}
