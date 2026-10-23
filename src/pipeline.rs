@@ -57,7 +57,7 @@ pub fn 流水线(
 
     for 字 in 要查 {
         md.push_str(&format!("\n### {}\n\n", 字));
-        let Some(根) = 索引.get(字) else {
+        let Some(根) = 索引.get(*字).copied() else {
             md.push_str("拆分表里没有这个字。\n");
             continue;
         };
