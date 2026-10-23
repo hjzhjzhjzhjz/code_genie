@@ -104,19 +104,19 @@ simple_protect_top_n = 0          # 简码占用保护：禁止简码等于受�
 level = 1
 code_num = 1
 rules = ["Aa"]
-yield_full_code = false   # 四定方案：出简不占全码位，全码照常参与重码统计
+commit_keys = "_"   # 空格上屏（86 五笔式）
 
 [[simple_levels]]
 level = 2
 code_num = 1
 rules = ["AaBa"]
-yield_full_code = false   # 四定方案：出简不占全码位，全码照常参与重码统计
+commit_keys = "_"   # 空格上屏（86 五笔式）
 
 [[simple_levels]]
 level = 3
 code_num = 1
 rules = ["AaBaCa"]
-yield_full_code = false   # 四定方案：出简不占全码位，全码照常参与重码统计
+commit_keys = "_"   # 空格上屏（86 五笔式）
 
 # -------------------------------------------------------------------------
 # 🔒 固定简码映射（可选，默认整段注释）
