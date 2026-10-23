@@ -108,7 +108,7 @@ jobs:
             --scheme codegenie-s4.jsonc \
             --yuhao-dir yuhao-assess \
             --keep out-assess/结果 \
-            --summary 汇总.md
+            --summary 汇总.md \
             --profile 方案档案
           if [ -f 汇总.md ]; then cat 汇总.md >> "$GITHUB_STEP_SUMMARY"; else echo "::warning::没有生成汇总表（可能没找到码表）"; fi
 
@@ -136,7 +136,7 @@ jobs:
             --scheme codegenie-s4.jsonc \
             --yuhao-dir yuhao-assess \
             --keep artifacts/结果 \
-            --summary 汇总.md
+            --summary 汇总.md \
             --profile 方案档案
           if [ -f 汇总.md ]; then cat 汇总.md >> "$GITHUB_STEP_SUMMARY"; else echo "::warning::没有生成汇总表（可能没找到码表）"; fi
 
