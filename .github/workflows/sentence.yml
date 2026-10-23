@@ -66,7 +66,7 @@ jobs:
             --simple "$SIMPLE" --words ceping-data/词表.txt \
             --out rime-pkg --id xingyun --name 星云
           echo "--- 词典规模 ---"
-          for f in rime-pkg/xingyun.full.dict.yaml rime-pkg/xingyun.words.dict.yaml; do
+          for f in rime-pkg/xingyun.full.dict.yaml rime-pkg/xingyun.short.dict.yaml rime-pkg/xingyun.words.dict.yaml; do
             echo "$f: $(grep -c $'\t' "$f") 条"
           done
 
@@ -78,6 +78,7 @@ jobs:
           set -o pipefail
           ./target/release/code_genie sentence \
             --full-dict rime-pkg/xingyun.full.dict.yaml \
+            --short-dict rime-pkg/xingyun.short.dict.yaml \
             --words-dict rime-pkg/xingyun.words.dict.yaml \
             --corpus yuhao-text/literature.txt \
             --limit "$LIMIT" --max-len "$MAXLEN" \
