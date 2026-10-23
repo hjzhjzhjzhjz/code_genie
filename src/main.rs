@@ -18,6 +18,7 @@ mod checkpoint;
 mod config;
 mod context;
 mod evaluator;
+mod export_table;
 mod fsutil;
 mod loader;
 mod output;
@@ -119,6 +120,25 @@ enum Commands {
         #[arg(short = 'd', long)]
         dir: String,
     },
+
+    /// 导出测评用码表（字<TAB>码，简码在前、全码在后）
+    ExportTable {
+        /// 键位映射文件（output-keymap.txt）
+        #[arg(short = 'k', long)]
+        keymap: String,
+
+        /// 纯拆分表（chaifen.txt：字<TAB>根 根 …<TAB>频次）
+        #[arg(short = 'c', long)]
+        chaifen: String,
+
+        /// 简码表（output-simple-codes.txt，可选）
+        #[arg(short = 's', long)]
+        simple: Option<String>,
+
+        /// 输出文件
+        #[arg(short = 'o', long, default_value = "output-table.txt")]
+        output: String,
+    },
 }
 
 // =========================================================================
@@ -162,6 +182,12 @@ fn main() {
             );
         }
         Some(Commands::Resume { dir }) => run_resume(&dir),
+        Some(Commands::ExportTable {
+            keymap,
+            chaifen,
+            simple,
+            output,
+        }) => export_table::run(&keymap, &chaifen, simple.as_deref(), &output),
         Some(Commands::Optimize {
             output_dir,
             seed_dir,
