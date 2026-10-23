@@ -1,0 +1,158 @@
+name: 整句测评
+
+on:
+  workflow_dispatch:
+    inputs:
+      keymap:
+        description: 键位映射文件（仓库内路径）
+        required: false
+        default: runs/s4-export/output-keymap.txt
+        type: string
+      simple:
+        description: 简码表（仓库内路径，可留空）
+        required: false
+        default: runs/s4-export/output-simple-codes.txt
+        type: string
+      limit:
+        description: 最多测多少句（0 = 全部）
+        required: false
+        default: "3000"
+        type: string
+      max_len:
+        description: 句长上限
+        required: false
+        default: "20"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  sentence:
+    name: 整句准确率
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: 检出
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+
+      - name: 编译 code_genie
+        run: |
+          set -o pipefail
+          if ! cargo build --release 2>&1 | tee build.log | tail -n 5; then
+            echo "=== 编译错误 ==="
+            grep -E -A 14 '^error' build.log || tail -n 80 build.log
+            exit 1
+          fi
+
+      - name: 装 librime
+        run: |
+          set -e
+          apt() { timeout 300 sudo apt-get -o DPkg::Lock::Timeout=180 "$@"; }
+          apt update -qq || true
+          MODE=""
+          if apt install -y -qq librime-dev > /dev/null 2>&1; then
+            if [ -f /usr/include/rime_api.h ] || pkg-config --exists rime 2>/dev/null; then
+              MODE=apt
+            fi
+          fi
+          if [ -z "$MODE" ]; then
+            echo "系统包没装上，改从源码编"
+            apt install -y -qq cmake g++ pkg-config libleveldb-dev libmarisa-dev \
+              libopencc-dev libyaml-cpp-dev libglog-dev libboost-dev
+            git clone --depth 1 https://github.com/rime/librime.git
+            cmake -S librime -B librime/build -DCMAKE_BUILD_TYPE=Release -DBUILD_TEST=OFF
+            cmake --build librime/build -j"$(nproc)"
+            MODE=src
+          fi
+          echo "MODE=$MODE" >> "$GITHUB_ENV"
+          echo "librime 来源：$MODE"
+
+      - name: 编解码器
+        run: |
+          set -e
+          if [ "$MODE" = apt ]; then
+            FLAGS="$(pkg-config --cflags --libs rime 2>/dev/null || echo '-lrime')"
+            g++ -O2 -std=c++17 工具/rime_eval.cc -o rime_eval $FLAGS
+          else
+            LIB="$PWD/librime/build/lib"
+            g++ -O2 -std=c++17 -I librime/src 工具/rime_eval.cc -o rime_eval \
+              -L "$LIB" -lrime -Wl,-rpath,"$LIB"
+          fi
+          ldd rime_eval | grep -i rime || true
+          echo "--- 自检 ---"
+          echo "的" | ./rime_eval --shared /nonexistent --user /tmp/u 2>&1 | head -3 || true
+
+      - name: 生成方案包
+        run: |
+          set -e
+          ./target/release/code_genie rime \
+            --keymap "$KEYMAP" --chaifen moling/chaifen-all.txt \
+            --simple "$SIMPLE" --words ceping-data/词表.txt \
+            --out rime-pkg --id xingyun --name 星云
+          echo "--- 导出全码表 ---"
+          ARG=""
+          if [ -n "$SIMPLE" ]; then ARG="--simple $SIMPLE"; fi
+          ./target/release/code_genie export \
+            --keymap "$KEYMAP" --chaifen moling/chaifen-all.txt $ARG \
+            --output 全码表.txt
+          wc -l < 全码表.txt
+        env:
+          KEYMAP: ${{ inputs.keymap }}
+          SIMPLE: ${{ inputs.simple }}
+
+      - name: 准备 librime 数据目录
+        run: |
+          set -e
+          mkdir -p rime-data rime-user
+          cp rime-pkg/xingyun_test.schema.yaml rime-data/
+          cp rime-pkg/xingyun_test.dict.yaml rime-data/
+          cp rime-pkg/xingyun.full.dict.yaml rime-data/
+          cp rime-pkg/xingyun.words.dict.yaml rime-data/
+          echo "--- 拉 essay（整句要靠它做语言模型）---"
+          curl -fsSL --retry 3 -o rime-data/essay.txt \
+            https://raw.githubusercontent.com/rime/rime-essay-simp/master/essay-zh-hans.txt \
+            || echo "没拉到 essay，整句合成会退化成纯词频"
+          ls -l rime-data
+
+      - name: 跑整句测评
+        env:
+          LIMIT: ${{ inputs.limit }}
+          MAXLEN: ${{ inputs.max_len }}
+        run: |
+          set -o pipefail
+          ./target/release/code_genie sentence \
+            --table 全码表.txt \
+            --corpus yuhao-text/literature.txt \
+            --decoder ./rime_eval \
+            --shared "$PWD/rime-data" \
+            --user "$PWD/rime-user" \
+            --schema xingyun_test \
+            --limit "$LIMIT" --max-len "$MAXLEN" \
+            --dump 整句中间 \
+            --out 整句.md 2>&1 | tee sentence.log
+          echo "--- 摘要 ---"
+          cat 整句.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: 上传结果
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: 整句测评
+          path: |
+            整句.md
+            sentence.log
+            全码表.txt
+            整句中间/
+            rime-pkg/
+          if-no-files-found: warn
