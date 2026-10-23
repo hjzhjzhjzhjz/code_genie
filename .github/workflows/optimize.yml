@@ -1,0 +1,150 @@
+name: CodeGenie 退火优化
+
+# 放在 fork 的默认分支（main）上，用 workflow_dispatch 手动触发，
+# 代码从 inputs.ref 指定的分支检出（默认 moling），不必改动工作分支。
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 要运行的代码分支或 tag
+        required: true
+        default: moling
+        type: string
+      total_steps:
+        description: total_steps（2 万步冒烟 / 200 万步正式）
+        required: true
+        default: "20000"
+        type: string
+      threads:
+        description: 并行线程数（ubuntu-latest 是 4 vCPU）
+        required: true
+        default: "4"
+        type: string
+      out_dir:
+        description: 输出目录名（同时作为 artifact 名的一部分）
+        required: true
+        default: out-smoke
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codegenie-${{ inputs.ref }}-${{ inputs.out_dir }}
+  cancel-in-progress: false
+
+jobs:
+  optimize:
+    name: 编译并运行模拟退火
+    runs-on: ubuntu-latest
+    # GitHub 单 job 硬上限 360 分钟，留 10 分钟余量给 artifact 上传
+    timeout-minutes: 350
+    env:
+      OUT_DIR: ${{ inputs.out_dir }}
+      TOTAL_STEPS: ${{ inputs.total_steps }}
+      THREADS: ${{ inputs.threads }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 1
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 cargo 依赖与 target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+
+      - name: 生成 config.toml
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, re, sys
+
+          steps = os.environ["TOTAL_STEPS"].strip()
+          threads = os.environ["THREADS"].strip()
+          if not steps.isdigit() or int(steps) <= 0:
+              sys.exit(f"total_steps 非法: {steps!r}")
+          if not threads.isdigit() or int(threads) <= 0:
+              sys.exit(f"threads 非法: {threads!r}")
+
+          example = pathlib.Path("config.toml.example")
+          if not example.is_file():
+              sys.exit("找不到 config.toml.example")
+          lines = example.read_text(encoding="utf-8").splitlines()
+
+          section, hit_steps, hit_threads, out = None, False, False, []
+          for line in lines:
+              stripped = line.strip()
+              if stripped.startswith("[") and stripped.endswith("]"):
+                  section = stripped.strip("[]").strip()
+              if section == "annealing":
+                  m = re.match(r"^(\s*total_steps\s*=\s*)([0-9_]+)(\s*#.*)?$", line)
+                  if m:
+                      line = m.group(1) + steps + (m.group(3) or "")
+                      hit_steps = True
+                  m = re.match(r"^(\s*threads\s*=\s*)([0-9_]+)(\s*#.*)?$", line)
+                  if m:
+                      line = m.group(1) + threads + (m.group(3) or "")
+                      hit_threads = True
+              out.append(line)
+
+          if not (hit_steps and hit_threads):
+              sys.exit(f"未在 [annealing] 中定位到 total_steps/threads（steps={hit_steps}, threads={hit_threads}）")
+
+          pathlib.Path("config.toml").write_text("\n".join(out) + "\n", encoding="utf-8")
+          print(f"config.toml 已生成：total_steps={steps}, threads={threads}")
+          PY
+          grep -nE '^\s*(threads|total_steps|simple_start_progress)\s*=' config.toml
+
+      - name: 编译（release + LTO）
+        run: |
+          set -o pipefail
+          cargo build --release 2>&1 | tee build.log
+
+      - name: 运行退火
+        env:
+          RUST_BACKTRACE: "1"
+        run: |
+          set -o pipefail
+          # 用 SIGINT 限时：程序自带 Ctrl-C 处理，会写好 checkpoint 后正常退出，
+          # 避免 job 被硬超时杀掉、checkpoint 来不及落盘。
+          timeout --signal=INT --kill-after=60s 300m \
+            ./target/release/code_genie -c config.toml optimize -d "$OUT_DIR" 2>&1 | tee run.log \
+            || echo "::warning::运行被 300 分钟时限中断（exit=$?），artifacts 中保留了最新 checkpoint，可 resume 续算"
+
+      - name: 写入 Job Summary
+        if: always()
+        run: |
+          {
+            echo "### CodeGenie 退火结果"
+            echo ""
+            echo "- 分支：\`${{ inputs.ref }}\`"
+            echo "- total_steps：\`$TOTAL_STEPS\`"
+            echo "- 线程数：\`$THREADS\`"
+            echo "- 输出目录：\`$OUT_DIR\`"
+            echo ""
+            if [ -f "$OUT_DIR/summary.txt" ]; then
+              echo '```'
+              head -n 20 "$OUT_DIR/summary.txt"
+              echo '```'
+            else
+              echo "未找到 \`$OUT_DIR/summary.txt\`，运行可能未完成。"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codegenie-${{ inputs.out_dir }}-run${{ github.run_number }}
+          path: |
+            ${{ inputs.out_dir }}/
+            run.log
+            build.log
+            config.toml
+          if-no-files-found: warn
+          retention-days: 14
