@@ -30,10 +30,10 @@ on:
         required: true
         default: "4"
         type: string
-      shards:
-        description: 分片数（每个分片一个独立 job，每 job threads 条链；1=不分片）
+      shard_list:
+        description: 分片列表（JSON 数组，[1] 表示不分片，[1,2,3,4] 表示四片并行）
         required: true
-        default: "1"
+        default: "[1]"
         type: string
       out_dir:
         description: 输出目录名（同时作为 artifact 名的一部分）
@@ -49,11 +49,10 @@ jobs:
     name: 编译并运行模拟退火（分片 ${{ matrix.shard }}）
     runs-on: ubuntu-latest
     # 单个分片不跑时不启动
-    if: ${{ matrix.shard <= fromJSON(inputs.shards) }}
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: ${{ fromJSON(inputs.shard_list) }}
     concurrency:
       group: codegenie-${{ inputs.ref }}-${{ inputs.out_dir }}-s${{ matrix.shard }}
       cancel-in-progress: false
