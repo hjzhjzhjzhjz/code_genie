@@ -83,10 +83,10 @@ jobs:
           set -e
           if [ "$MODE" = apt ]; then
             FLAGS="$(pkg-config --cflags --libs rime 2>/dev/null || echo '-lrime')"
-            g++ -O2 -std=c++17 工具/rime_eval.cc -o rime_eval $FLAGS
+            g++ -O2 -std=c++17 tools/rime_eval.cc -o rime_eval $FLAGS
           else
             LIB="$PWD/librime/build/lib"
-            g++ -O2 -std=c++17 -I librime/src 工具/rime_eval.cc -o rime_eval \
+            g++ -O2 -std=c++17 -I librime/src tools/rime_eval.cc -o rime_eval \
               -L "$LIB" -lrime -Wl,-rpath,"$LIB"
           fi
           ldd rime_eval | grep -i rime || true
