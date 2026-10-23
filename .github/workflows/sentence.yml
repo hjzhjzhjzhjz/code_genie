@@ -59,17 +59,27 @@ jobs:
         run: |
           set -e
           apt() { timeout 300 sudo apt-get -o DPkg::Lock::Timeout=180 "$@"; }
-          apt update -qq || true
           MODE=""
-          if apt install -y -qq librime-dev > /dev/null 2>&1; then
-            if [ -f /usr/include/rime_api.h ] || pkg-config --exists rime 2>/dev/null; then
-              MODE=apt
+          for i in 1 2 3; do
+            echo "--- 第 $i 次尝试系统包 ---"
+            apt update -qq || true
+            if apt install -y librime-dev > /tmp/apt.log 2>&1; then
+              if pkg-config --exists rime 2>/dev/null \
+                 || [ -f /usr/include/rime_api.h ] \
+                 || [ -f /usr/include/rime/rime_api.h ]; then
+                MODE=apt
+                break
+              fi
+            else
+              tail -n 3 /tmp/apt.log || true
             fi
-          fi
+            sleep 10
+          done
+
           if [ -z "$MODE" ]; then
-            echo "系统包没装上，改从源码编"
-            apt install -y -qq cmake g++ pkg-config libleveldb-dev libmarisa-dev \
-              libopencc-dev libyaml-cpp-dev libglog-dev libboost-dev
+            echo "系统包拿不到，改从源码编"
+            apt install -y cmake g++ pkg-config libleveldb-dev libmarisa-dev \
+              libopencc-dev libyaml-cpp-dev libgoogle-glog-dev libboost-dev
             git clone --depth 1 https://github.com/rime/librime.git
             cmake -S librime -B librime/build -DCMAKE_BUILD_TYPE=Release -DBUILD_TEST=OFF
             cmake --build librime/build -j"$(nproc)"
@@ -81,16 +91,19 @@ jobs:
       - name: 编解码器
         run: |
           set -e
-          if [ "$MODE" = apt ]; then
-            FLAGS="$(pkg-config --cflags --libs rime 2>/dev/null || echo '-lrime')"
-            g++ -O2 -std=c++17 tools/rime_eval.cc -o rime_eval $FLAGS
-          else
+          if [ "$MODE" = src ]; then
             LIB="$PWD/librime/build/lib"
             g++ -O2 -std=c++17 -I librime/src tools/rime_eval.cc -o rime_eval \
               -L "$LIB" -lrime -Wl,-rpath,"$LIB"
+          else
+            CF="$(pkg-config --cflags rime 2>/dev/null || true)"
+            LF="$(pkg-config --libs rime 2>/dev/null || true)"
+            echo "cflags=[$CF] libs=[$LF]"
+            g++ -O2 -std=c++17 $CF tools/rime_eval.cc -o rime_eval $LF -lrime
           fi
+          echo "--- 依赖 ---"
           ldd rime_eval | grep -i rime || true
-          echo "--- 自检 ---"
+          echo "--- 自检（预期报错，只验证能跑起来）---"
           echo "的" | ./rime_eval --shared /nonexistent --user /tmp/u 2>&1 | head -3 || true
 
       - name: 生成方案包
