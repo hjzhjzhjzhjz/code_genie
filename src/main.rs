@@ -241,6 +241,9 @@ enum Commands {
         /// 全码词典（Rime dict.yaml，字 / 码 / 权重）
         #[arg(long)]
         full_dict: String,
+        /// 简码词典（可选，有就多算一个「简码优先」口径）
+        #[arg(long)]
+        short_dict: Option<String>,
         /// 词组词典（可选）
         #[arg(long)]
         words_dict: Option<String>,
@@ -431,6 +434,7 @@ fn main() {
 
         Some(Commands::Sentence {
             full_dict,
+            short_dict,
             words_dict,
             corpus,
             decoder,
@@ -444,6 +448,7 @@ fn main() {
             verbose,
         }) => sentence::run(&sentence::参数 {
             全码词典: full_dict.into(),
+            简码词典: short_dict.map(Into::into),
             词组词典: words_dict.map(Into::into),
             语料: corpus.into(),
             解码器: decoder.map(Into::into),
