@@ -12,6 +12,11 @@ on:
         required: false
         default: runs/s4-export/output-simple-codes.txt
 
+      run_id:
+        description: 要对比的 optimize 运行 id（留空则测评下面给定的 keymap）
+        required: false
+        default: ""
+        type: string
 permissions:
   contents: read
 
@@ -69,6 +74,7 @@ jobs:
           cargo build --release 2>&1 | tail -n 5
 
       - name: 导出码表
+        if: inputs.run_id == ''
         env:
           KEYMAP: ${{ inputs.keymap }}
           SIMPLE: ${{ inputs.simple }}
@@ -81,13 +87,34 @@ jobs:
             --output out-assess/全码表.txt
           wc -l < out-assess/全码表.txt
 
-      - name: 跑测评
+      - name: 下载优化产物
+        if: inputs.run_id != ''
+        uses: actions/download-artifact@v8
+        with:
+          pattern: codegenie-*
+          path: artifacts
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+
+      - name: 跑测评（单表）
+        if: inputs.run_id == ''
         run: |
           ./target/release/code_genie assess \
             --dir out-assess \
             --scheme codegenie-s4.jsonc \
             --yuhao-dir yuhao-assess \
             --keep out-assess/结果
+
+      - name: 跑测评（对比整轮）
+        if: inputs.run_id != ''
+        run: |
+          find artifacts -name 全码表.txt | sort
+          ./target/release/code_genie assess \
+            --dir artifacts \
+            --scheme codegenie-s4.jsonc \
+            --yuhao-dir yuhao-assess \
+            --keep artifacts/结果
 
       - name: 上传结果
         if: always()
