@@ -188,6 +188,18 @@ enum Commands {
         /// 汇总表写到该文件（Markdown）
         #[arg(long)]
         summary: Option<String>,
+
+        /// 把每份结果另存成可导入宇浩测评网页版的「方案档案」，写到该目录
+        #[arg(long = "profile")]
+        profile: Option<String>,
+
+        /// 方案档案里的作者
+        #[arg(long, default_value = "CodeGenie")]
+        author: String,
+
+        /// 方案档案里的版本号（留空用当天日期）
+        #[arg(long, default_value = "")]
+        version: String,
     },
 }
 
@@ -251,6 +263,9 @@ fn main() {
             yuhao_dir,
             keep,
             summary,
+            profile,
+            author,
+            version,
         }) => assess::run(
             table.as_deref(),
             dir.as_deref(),
@@ -259,6 +274,9 @@ fn main() {
             &yuhao_dir,
             keep.as_deref(),
             summary.as_deref(),
+            profile.as_deref(),
+            &author,
+            &version,
         ),
         Some(Commands::Optimize {
             output_dir,
