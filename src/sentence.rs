@@ -31,6 +31,7 @@ pub struct 参数 {
     pub 最长: usize,
     pub 导出: Option<PathBuf>,
     pub 结果: Option<PathBuf>,
+    pub 详细: bool,
 }
 
 fn 是汉字(c: char) -> bool {
@@ -149,7 +150,7 @@ pub fn run(参: &参数) {
 
     // 跑解码器
     let 开始 = std::time::Instant::now();
-    let 解码 = match 起解码器(&参.解码器, &参.共享目录, &参.用户目录, &参.方案, &按键流们) {
+    let 解码 = match 起解码器(&参.解码器, &参.共享目录, &参.用户目录, &参.方案, &按键流们, 参.详细) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("❌ 解码失败: {}", e);
@@ -273,6 +274,7 @@ fn 起解码器(
     用户: &Path,
     方案: &str,
     输入: &[String],
+    详细: bool,
 ) -> std::io::Result<Vec<String>> {
     let mut 子 = Command::new(程序)
         .arg("--shared")
@@ -281,6 +283,7 @@ fn 起解码器(
         .arg(用户)
         .arg("--schema")
         .arg(方案)
+        .args(if 详细 { vec!["--verbose"] } else { Vec::new() })
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
