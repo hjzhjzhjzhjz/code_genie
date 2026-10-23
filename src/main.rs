@@ -16,6 +16,7 @@ mod assess;
 mod diagnose;
 mod handfeel;
 mod pipeline;
+mod rime;
 mod bucket_store;
 mod calibrate;
 mod checkpoint;
@@ -204,6 +205,35 @@ enum Commands {
         version: String,
     },
 
+    /// 生成可加载的 Rime 方案包（schema + dict）
+    #[command(name = "rime")]
+    Rime {
+        /// 字根键位表
+        #[arg(long)]
+        keymap: String,
+        /// 纯拆分表
+        #[arg(long)]
+        chaifen: String,
+        /// 简码表（可选）
+        #[arg(long)]
+        simple: Option<String>,
+        /// 词组频表（可选，给了就生成词组词典）
+        #[arg(long)]
+        words: Option<String>,
+        /// 输出目录
+        #[arg(long, default_value = "rime")]
+        out: String,
+        /// 方案标识，同时是文件名前缀
+        #[arg(long, default_value = "moling")]
+        id: String,
+        /// 方案显示名
+        #[arg(long, default_value = "魔灵")]
+        name: String,
+        /// 作者
+        #[arg(long, default_value = "CodeGenie")]
+        author: String,
+    },
+
     /// 摊开一个字的取码链路：拆分 → 码位 → 键位 → 编码
     #[command(name = "pipeline")]
     Pipeline {
@@ -337,6 +367,26 @@ fn main() {
             mapping,
             output,
         }) => root_chart::run(&keymap, mapping.as_deref(), &output),
+        Some(Commands::Rime {
+            keymap,
+            chaifen,
+            simple,
+            words,
+            out,
+            id,
+            name,
+            author,
+        }) => rime::run(
+            &keymap,
+            &chaifen,
+            simple.as_deref(),
+            words.as_deref(),
+            &out,
+            &id,
+            &name,
+            &author,
+        ),
+
         Some(Commands::Pipeline {
             keymap,
             chaifen,
