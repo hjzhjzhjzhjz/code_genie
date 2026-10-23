@@ -14,8 +14,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
+use serde_json::Value;
 
 use crate::handfeel;
 
@@ -33,9 +32,10 @@ struct 指标 {
     通用简码: (u64, u64),
     常用全码: (u64, u64),
     常用简码: (u64, u64),
+    语料速度: Vec<(String, f64)>,
+    语料码长: Vec<(String, f64)>,
     指位: Option<handfeel::指位分布>,
     连击: Option<handfeel::连击>,
-    选重: Option<handfeel::选重统计>,
 }
 
 impl 指标 {
@@ -85,7 +85,6 @@ fn 解析(
     结果: &Value,
     指位: Option<handfeel::指位分布>,
     连击: Option<handfeel::连击>,
-    选重: Option<handfeel::选重统计>,
 ) -> Option<指标> {
     let r = 结果.get("測評結果")?;
     let 码长 = r
@@ -99,6 +98,34 @@ fn 解析(
         .and_then(|n| n.as_f64())?;
 
     let 速度 = |k: &str| 取数(r, &["速度當量分析", k]);
+
+    // 五套字频口径：速度当量与加权码长
+    let 语料们 = ["北語簡體", "知乎簡體", "臺標繁體", "古籍繁體", "繁簡聯合"];
+    let mut 语料速度 = Vec::new();
+    let mut 语料码长 = Vec::new();
+    for 语 in 语料们 {
+        let 键 = format!("{}字頻全部簡碼速度當量", 语);
+        if let Some(v) = 取数(r, &["速度當量分析", 键.as_str()]) {
+            语料速度.push((语.to_string(), v));
+        }
+        let 键 = format!("{}字頻下之簡碼效率", 语);
+        let 值 = r
+            .get("簡碼效率分析")
+            .and_then(|x| x.get(键.as_str()))
+            .and_then(|x| x.get("N值結果"))
+            .and_then(|x| x.as_array())
+            .and_then(|arr| {
+                arr.iter()
+                    .find(|x| {
+                        x.get("最有效率的簡碼個數").and_then(|n| n.as_u64()) == Some(500)
+                    })
+                    .and_then(|x| x.get("字頻加權碼長"))
+                    .and_then(|n| n.as_f64())
+            });
+        if let Some(v) = 值 {
+            语料码长.push((语.to_string(), v));
+        }
+    }
 
     Some(指标 {
         名: 名.to_string(),
@@ -125,9 +152,10 @@ fn 解析(
             取整(r, &["靜態重碼分析", "常用國字", "簡碼重碼字數"]),
             取整(r, &["靜態重碼分析", "常用國字", "簡碼重碼組數"]),
         ),
+        语料速度,
+        语料码长,
         指位,
         连击,
-        选重,
     })
 }
 
@@ -202,13 +230,6 @@ fn 百分比(x: Option<f64>) -> String {
     }
 }
 
-fn 数量(x: Option<u64>) -> String {
-    match x {
-        Some(v) => v.to_string(),
-        None => "—".to_string(),
-    }
-}
-
 fn 带符号(x: Option<f64>) -> String {
     match x {
         Some(v) => format!("{:+.2}%", v),
@@ -218,13 +239,13 @@ fn 带符号(x: Option<f64>) -> String {
 
 fn 打印(表: &[指标]) {
     println!(
-        "{:<22}{:>9}{:>9}{:>11}{:>11}{:>9}{:>10}{:>10}{:>9}{:>9}{:>10}{:>10}",
-        "方案", "速度全码", "速度简码", "动态选重全", "动态选重简", "码长N500", "通用全码", "通用简码", "常用全码", "常用简码", "全码选重数", "简码选重数"
+        "{:<22}{:>9}{:>9}{:>10}{:>10}{:>9}{:>10}{:>10}{:>9}{:>9}",
+        "方案", "速度全码", "速度简码", "选重全码", "选重简码", "码长N500", "通用全码", "通用简码", "常用全码", "常用简码"
     );
-    println!("{}", "-".repeat(129));
+    println!("{}", "-".repeat(108));
     for m in 表 {
         println!(
-            "{:<22}{:>9.4}{:>9.4}{:>11.6}{:>11.6}{:>9.4}{:>5}/{:<4}{:>5}/{:<4}{:>4}/{:<4}{:>4}/{:<4}{:>10}{:>10}",
+            "{:<22}{:>9.4}{:>9.4}{:>10.6}{:>10.6}{:>9.4}{:>5}/{:<4}{:>5}/{:<4}{:>4}/{:<4}{:>4}/{:<4}",
             m.名,
             m.速度全码,
             m.速度简码,
@@ -238,10 +259,42 @@ fn 打印(表: &[指标]) {
             m.常用全码.0,
             m.常用全码.1,
             m.常用简码.0,
-            m.常用简码.1,
-            数量(m.选重.as_ref().map(|x| x.全码)),
-            数量(m.选重.as_ref().map(|x| x.简码))
+            m.常用简码.1
         );
+    }
+
+    if 表.iter().any(|m| m.语料速度.len() > 1) {
+        for (标题, 取) in [
+            (
+                "速度当量（全部简码）",
+                (|m: &指标| m.语料速度.clone()) as fn(&指标) -> Vec<(String, f64)>,
+            ),
+            (
+                "加权码长 N=500",
+                (|m: &指标| m.语料码长.clone()) as fn(&指标) -> Vec<(String, f64)>,
+            ),
+        ] {
+            println!("\n── 不同字频口径 · {} ──", 标题);
+            print!("{:<22}", "方案");
+            for (名, _) in 取(&表[0]) {
+                print!("{:>10}", 名.chars().take(2).collect::<String>());
+            }
+            println!("{:>9}", "极差");
+
+            for m in 表 {
+                let 值 = 取(m);
+                if 值.is_empty() {
+                    continue;
+                }
+                print!("{:<22}", m.名);
+                for (_, v) in &值 {
+                    print!("{:>10.4}", v);
+                }
+                let 大 = 值.iter().map(|x| x.1).fold(f64::MIN, f64::max);
+                let 小 = 值.iter().map(|x| x.1).fold(f64::MAX, f64::min);
+                println!("{:>9.4}", 大 - 小);
+            }
+        }
     }
 
     let 有心跳 = 表
@@ -377,19 +430,7 @@ pub fn run(
     yuhao目录: &str,
     保留: Option<&str>,
     汇总: Option<&str>,
-    档案: Option<&str>,
-    作者: &str,
-    版本: &str,
 ) {
-    // 版本留空就用当天日期
-    let 版本默认;
-    let 版本 = if 版本.trim().is_empty() {
-        版本默认 = chrono::Local::now().format("%Y%m%d").to_string();
-        &版本默认[..]
-    } else {
-        版本
-    };
-
     let 工作目录 =
         std::fs::canonicalize(yuhao目录).unwrap_or_else(|_| PathBuf::from(yuhao目录));
     let 方案路径 = std::fs::canonicalize(方案).unwrap_or_else(|_| PathBuf::from(方案));
@@ -430,15 +471,6 @@ pub fn run(
         std::fs::create_dir_all(目录).ok();
     }
 
-    // 宇浩自己用的 CJK 区段，选重统计要和它一致
-    let 区块 = handfeel::读区块(
-        &工作目录
-            .join("public")
-            .join("settings")
-            .join("cjkBlocks.json"),
-    )
-    .unwrap_or_else(|| handfeel::默认区块.to_vec());
-
     // 词表用于算连击
     let 词表 = handfeel::找词表(&工作目录);
     match &词表 {
@@ -460,15 +492,8 @@ pub fn run(
                     .and_then(|r| handfeel::从热力(r, "簡碼"))
                     .filter(|f| f.中排() > 0.0);
                 let 连 = 词表.as_ref().and_then(|w| handfeel::算连击(路径, w).ok());
-                let 选 = handfeel::算选重(路径, &区块).ok();
-                if let Some(m) = 解析(名, &值, 指位, 连, 选) {
+                if let Some(m) = 解析(名, &值, 指位, 连) {
                     指标表.push(m);
-                }
-                if let Some(目录) = 档案 {
-                    match 生成方案档案(&值, 名, 路径, Path::new(目录), 作者, 版本) {
-                        Ok(p) => println!("  方案档案: {}", p.display()),
-                        Err(e) => eprintln!("⚠️ 方案档案「{}」生成失败: {}", 名, e),
-                    }
                 }
                 输出文件.push(文件);
             }
@@ -520,11 +545,11 @@ fn 生成汇总(表: &[指标]) -> Result<String, String> {
     // ---- 表一：速度与重码 ----
     s.push_str("### 速度与重码\n\n");
     s.push_str("按加权码长 N=500 升序，越小越快。重码列写作「字数/组数」。\n\n");
-    s.push_str("| 方案 | 速度当量(全码) | 速度当量(简码) | 动态选重(全码) | 码长 N=500 | 通用规范重码 | 常用国字重码 | 全码选重数 | 简码选重数 |\n");
-    s.push_str("|---|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+    s.push_str("| 方案 | 速度当量(全码) | 速度当量(简码) | 动态选重(全码) | 码长 N=500 | 通用规范重码 | 常用国字重码 |\n");
+    s.push_str("|---|---:|---:|---:|---:|---:|---:|\n");
     for m in 表 {
         s.push_str(&format!(
-            "| {} | {:.4} | {:.4} | {:.6} | **{:.4}** | {}/{} | {}/{} | {} | {} |\n",
+            "| {} | {:.4} | {:.4} | {:.6} | **{:.4}** | {}/{} | {}/{} |\n",
             m.名,
             m.速度全码,
             m.速度简码,
@@ -533,12 +558,49 @@ fn 生成汇总(表: &[指标]) -> Result<String, String> {
             m.通用全码.0,
             m.通用全码.1,
             m.常用全码.0,
-            m.常用全码.1,
-            数量(m.选重.as_ref().map(|x| x.全码)),
-            数量(m.选重.as_ref().map(|x| x.简码))
+            m.常用全码.1
         ));
     }
-    s.push_str("\n> 选重数按宇浩的 CJK 区段统计（等同网页版「到CJK擴J」那行）：选重个数 = 重码字数 − 重码组数。全码取每字最长码，简码取每字最短码（没有简码的字保留全码）。\n");
+
+    // ---- 表：多字频口径 ----
+    if 表.iter().any(|m| m.语料速度.len() > 1) {
+        for (标题, 取) in [
+            (
+                "不同字频口径下的速度当量（全部简码）",
+                (|m: &指标| m.语料速度.clone()) as fn(&指标) -> Vec<(String, f64)>,
+            ),
+            (
+                "不同字频口径下的加权码长（N=500）",
+                (|m: &指标| m.语料码长.clone()) as fn(&指标) -> Vec<(String, f64)>,
+            ),
+        ] {
+            s.push_str(&format!("\n### {}\n\n", 标题));
+            s.push_str("极差越小越稳，说明方案对语料简繁不敏感。\n\n");
+            s.push_str("| 方案 |");
+            for (名, _) in 取(&表[0]) {
+                s.push_str(&format!(" {} |", 名));
+            }
+            s.push_str(" 极差 |\n|---|");
+            for _ in 取(&表[0]) {
+                s.push_str("---:|");
+            }
+            s.push_str("---:|\n");
+
+            for m in 表 {
+                let 值 = 取(m);
+                if 值.is_empty() {
+                    continue;
+                }
+                s.push_str(&format!("| {} |", m.名));
+                for (_, v) in &值 {
+                    s.push_str(&format!(" {:.4} |", v));
+                }
+                let 大 = 值.iter().map(|x| x.1).fold(f64::MIN, f64::max);
+                let 小 = 值.iter().map(|x| x.1).fold(f64::MAX, f64::min);
+                s.push_str(&format!(" {:.4} |\n", 大 - 小));
+            }
+        }
+    }
 
     // ---- 表二：指位与连击 ----
     if 表.iter().any(|m| m.指位.is_some() || m.连击.is_some()) {
@@ -636,114 +698,4 @@ fn 生成汇总(表: &[指标]) -> Result<String, String> {
     }
 
     Ok(s)
-}
-
-// -------------------------------------------------------------------------
-// 宇浩测评「方案档案」——可直接导入网页版的 JSON
-// -------------------------------------------------------------------------
-
-/// 把方案名转成文件名用的标识符
-fn 标识符(名: &str) -> String {
-    let mut 原 = String::from("codegenie-");
-    for c in 名.chars() {
-        if c.is_ascii_alphanumeric() || c == '_' {
-            原.push(c.to_ascii_lowercase());
-        } else {
-            原.push('-');
-        }
-    }
-    let mut 结果 = String::new();
-    let mut 上横 = false;
-    for c in 原.chars() {
-        if c == '-' {
-            if !上横 {
-                结果.push(c);
-            }
-            上横 = true;
-        } else {
-            结果.push(c);
-            上横 = false;
-        }
-    }
-    结果.trim_matches('-').to_string()
-}
-
-fn 生成方案档案(
-    值: &Value,
-    名: &str,
-    码表: &Path,
-    目录: &Path,
-    作者: &str,
-    版本: &str,
-) -> Result<PathBuf, String> {
-    let 时间 = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
-    let 标识 = 标识符(名);
-
-    let 字数 = 值
-        .get("測評結果")
-        .and_then(|r| r.get("候選個數分析"))
-        .and_then(|c| c.get("字符數"))
-        .and_then(|n| n.as_u64());
-
-    let 字节 = std::fs::read(码表).map_err(|e| format!("读不了码表: {}", e))?;
-    let 摘要 = format!("{:x}", Sha256::digest(&字节));
-
-    let mut 档 = 值.clone();
-    {
-        let obj = 档
-            .as_object_mut()
-            .ok_or_else(|| "测评结果不是 JSON 对象".to_string())?;
-
-        {
-            let 元 = obj.entry("元數據".to_string()).or_insert_with(|| json!({}));
-            if let Some(m) = 元.as_object_mut() {
-                m.insert("方案名".into(), json!(名));
-                m.insert("標識符".into(), json!(标识));
-                m.insert("作者".into(), json!(作者));
-                m.insert("版本".into(), json!(版本));
-                m.insert(
-                    "描述".into(),
-                    json!("魔靈四碼定長，一／二／三級簡碼取全碼前綴，空格上屏"),
-                );
-                m.insert("標籤".into(), json!(["形碼", "四碼定長", "簡碼"]));
-                m.entry("創建時間".to_string())
-                    .or_insert_with(|| json!(时间));
-                m.insert("更新時間".into(), json!(时间));
-            }
-        }
-
-        {
-            let 参 = obj
-                .entry("方案參數".to_string())
-                .or_insert_with(|| json!({}));
-            if let Some(m) = 参.as_object_mut() {
-                m.entry("選重編碼化".to_string())
-                    .or_insert_with(|| json!(false));
-                m.entry("出簡不出全".to_string())
-                    .or_insert_with(|| json!(false));
-                m.entry("最大碼長".to_string()).or_insert_with(|| json!(4));
-            }
-        }
-
-        {
-            let 码元 = obj
-                .entry("碼表元數據".to_string())
-                .or_insert_with(|| json!({}));
-            if let Some(m) = 码元.as_object_mut() {
-                m.insert("分隔符".into(), json!("製表符"));
-                m.insert("第一列類型".into(), json!("字符"));
-                if let Some(n) = 字数 {
-                    m.insert("總字符數".into(), json!(n));
-                }
-                m.insert("哈希值".into(), json!(摘要));
-            }
-        }
-    }
-
-    let 文本 =
-        serde_json::to_string_pretty(&档).map_err(|e| format!("序列化方案档案失败: {}", e))?;
-    std::fs::create_dir_all(目录).ok();
-    let 路径 = 目录.join(format!("{}.json", 标识));
-    std::fs::write(&路径, 文本).map_err(|e| format!("写不了方案档案: {}", e))?;
-    Ok(路径)
 }
