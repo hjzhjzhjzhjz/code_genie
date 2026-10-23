@@ -297,3 +297,68 @@ pub fn 找词表(yuhao目录: &Path) -> Option<std::path::PathBuf> {
     }
     None
 }
+
+// -------------------------------------------------------------------------
+// 选重个数（全表口径）
+// -------------------------------------------------------------------------
+
+/// 口径与宇浩一致，已对 593/289、125/60、115/57、26/13 四组数校验：
+///   全码表 = 每字取最长码；简码表 = 每字取最短码（没有简码的字保留其全码）
+///   重码字数 = 撞码桶里的字总数；重码组数 = 撞码的桶数
+///   选重个数 = 重码字数 − 重码组数（首选字直接上屏，其余各多敲一次选重键）
+pub struct 选重统计 {
+    pub 全码: u64,
+    pub 简码: u64,
+    pub 全码组: u64,
+    pub 简码组: u64,
+}
+
+/// 算一份码表在全表范围内的选重个数
+pub fn 算选重(码表: &Path) -> Result<选重统计, String> {
+    let 文本 = std::fs::read_to_string(码表).map_err(|e| format!("读不了码表: {}", e))?;
+
+    let mut 分组: HashMap<char, Vec<String>> = HashMap::new();
+    for 行 in 文本.lines() {
+        if let Some((左, 右)) = 行.split_once('\t') {
+            let mut 字 = 左.chars();
+            if let (Some(c), None) = (字.next(), 字.next()) {
+                分组
+                    .entry(c)
+                    .or_insert_with(Vec::new)
+                    .push(右.trim().to_string());
+            }
+        }
+    }
+
+    let mut 全桶: HashMap<String, u64> = HashMap::new();
+    let mut 简桶: HashMap<String, u64> = HashMap::new();
+    for (_, mut 列) in 分组 {
+        列.sort_by_key(|s| s.len());
+        let 最长 = 列.last().unwrap().clone();
+        let 最短 = 列.first().unwrap().clone();
+        *全桶.entry(最长).or_insert(0) += 1;
+        *简桶.entry(最短).or_insert(0) += 1;
+    }
+
+    let 汇总 = |桶: &HashMap<String, u64>| -> (u64, u64) {
+        let mut 组 = 0u64;
+        let mut 字 = 0u64;
+        for n in 桶.values() {
+            if *n > 1 {
+                组 += 1;
+                字 += *n;
+            }
+        }
+        (组, 字)
+    };
+
+    let (全组, 全字) = 汇总(&全桶);
+    let (简组, 简字) = 汇总(&简桶);
+
+    Ok(选重统计 {
+        全码: 全字 - 全组,
+        简码: 简字 - 简组,
+        全码组: 全组,
+        简码组: 简组,
+    })
+}
