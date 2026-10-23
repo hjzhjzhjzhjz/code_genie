@@ -524,7 +524,7 @@ fn 去标点(s: &str) -> String {
 }
 
 /// 取词规则：两字符一组，`x` 表末字，字母表第 N 字，数字表该字第 N 码
-fn 取词码(词: &[char], 规则: &str, 字码: &HashMap<char, String>) -> String {
+pub(crate) fn 取词码(词: &[char], 规则: &str, 字码: &HashMap<char, String>) -> String {
     let 单码 = |c: char| -> String {
         let u = c as u32;
         if (65..=122).contains(&u) {
