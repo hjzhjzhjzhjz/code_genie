@@ -235,25 +235,28 @@ enum Commands {
         author: String,
     },
 
-    /// 整句准确率：语料按全码串成按键流交给 librime 解码，与原文比对
+    /// 整句准确率：逐单元首候选 + 连续码流解码，两个口径一起给
     #[command(name = "sentence")]
     Sentence {
-        /// 全码表（字<TAB>码）
+        /// 全码词典（Rime dict.yaml，字 / 码 / 权重）
         #[arg(long)]
-        table: String,
+        full_dict: String,
+        /// 词组词典（可选）
+        #[arg(long)]
+        words_dict: Option<String>,
         /// 语料文件，一行一句；也接受整段，按非汉字切开
         #[arg(long)]
         corpus: String,
-        /// 解码器可执行文件（tools/rime_eval.cc 编译产物）
+        /// 改用外部解码器（librime），给了就不走内置 Viterbi
         #[arg(long)]
-        decoder: String,
-        /// librime 共享数据目录（放 schema / dict / essay）
-        #[arg(long)]
+        decoder: Option<String>,
+        /// librime 共享数据目录（仅外部解码器用）
+        #[arg(long, default_value = ".")]
         shared: String,
-        /// librime 用户数据目录
+        /// librime 用户数据目录（仅外部解码器用）
         #[arg(long, default_value = "rime-user")]
         user: String,
-        /// 方案 id
+        /// librime 方案 id（仅外部解码器用）
         #[arg(long, default_value = "xingyun_test")]
         schema: String,
         /// 最多测多少句，0 = 全部
@@ -262,13 +265,13 @@ enum Commands {
         /// 句长上限
         #[arg(long, default_value = "20")]
         max_len: usize,
-        /// 导出中间文件（按键流 / 原文 / 解码）的目录
+        /// 导出中间文件的目录
         #[arg(long)]
         dump: Option<String>,
         /// 结果 Markdown
         #[arg(long)]
         out: Option<String>,
-        /// 让解码器输出候选诊断
+        /// 让外部解码器输出诊断
         #[arg(long)]
         verbose: bool,
     },
@@ -427,7 +430,8 @@ fn main() {
         ),
 
         Some(Commands::Sentence {
-            table,
+            full_dict,
+            words_dict,
             corpus,
             decoder,
             shared,
@@ -439,9 +443,10 @@ fn main() {
             out,
             verbose,
         }) => sentence::run(&sentence::参数 {
-            码表: table.into(),
+            全码词典: full_dict.into(),
+            词组词典: words_dict.map(Into::into),
             语料: corpus.into(),
-            解码器: decoder.into(),
+            解码器: decoder.map(Into::into),
             共享目录: shared.into(),
             用户目录: user.into(),
             方案: schema,
