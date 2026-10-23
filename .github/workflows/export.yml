@@ -62,7 +62,6 @@ jobs:
           SIMPLE: ${{ inputs.simple }}
           CHAIFEN: ${{ inputs.chaifen }}
           OUT_NAME: ${{ inputs.out_name }}
-          MAPPING: ${{ inputs.mapping }}
         run: |
           set -o pipefail
           if [ -n "$SIMPLE" ]; then
@@ -79,6 +78,9 @@ jobs:
 
       - name: 生成字根图
         if: always()
+        env:
+          KEYMAP: ${{ inputs.keymap }}
+          MAPPING: ${{ inputs.mapping }}
         run: |
           if [ -z "$MAPPING" ]; then
             ./target/release/code_genie chart --keymap "$KEYMAP" --output root-chart.html
