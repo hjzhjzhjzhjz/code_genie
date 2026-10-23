@@ -132,6 +132,11 @@ jobs:
           cp rime-pkg/xingyun_test.dict.yaml rime-data/
           cp rime-pkg/xingyun.full.dict.yaml rime-data/
           cp rime-pkg/xingyun.words.dict.yaml rime-data/
+          cat > rime-data/default.yaml <<'EOF'
+          config_version: "1"
+          schema_list:
+            - schema: xingyun_test
+          EOF
           echo "--- 拉 essay（整句要靠它做语言模型）---"
           curl -fsSL --retry 3 -o rime-data/essay.txt \
             https://raw.githubusercontent.com/rime/rime-essay-simp/master/essay-zh-hans.txt \
@@ -156,6 +161,16 @@ jobs:
             --out 整句.md 2>&1 | tee sentence.log
           echo "--- 摘要 ---"
           cat 整句.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: 部署日志
+        if: always()
+        run: |
+          echo "--- 用户目录 ---"
+          ls -lR rime-user | head -40 || true
+          echo "--- librime 日志 ---"
+          for f in rime-user/*.log; do
+            [ -f "$f" ] && { echo "== $f =="; tail -n 40 "$f"; }
+          done
 
       - name: 上传结果
         if: always()
