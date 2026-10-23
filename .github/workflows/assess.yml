@@ -140,6 +140,16 @@ jobs:
             --profile 方案档案
           if [ -f 汇总.md ]; then cat 汇总.md >> "$GITHUB_STEP_SUMMARY"; else echo "::warning::没有生成汇总表（可能没找到码表）"; fi
 
+      - name: 形码测评诊断
+        run: |
+          set -e
+          if [ -d artifacts ]; then TARGET=artifacts; else TARGET=out-assess; fi
+          ./target/release/code_genie diagnose \
+            --dir "$TARGET" \
+            --data ceping-data \
+            --summary 诊断.md
+          if [ -f 诊断.md ]; then cat 诊断.md >> "$GITHUB_STEP_SUMMARY"; fi
+
       - name: 上传结果
         if: always()
         uses: actions/upload-artifact@v7
@@ -150,5 +160,6 @@ jobs:
             artifacts/
             方案档案/
             汇总.md
+            诊断.md
           if-no-files-found: warn
           retention-days: 14
