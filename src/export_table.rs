@@ -50,7 +50,7 @@ fn 加载键位表(path: &str) -> HashMap<String, Vec<char>> {
 }
 
 /// 读取纯拆分表：`字 <TAB> 根 根 … <TAB> 频次`
-fn 加载拆分表(path: &str) -> Vec<(char, Vec<String>, u64)> {
+fn 加载拆分表(path: &str) -> Vec<(String, Vec<String>, u64)> {
     let 文本 = fs::read_to_string(path).expect("无法读取拆分表");
     let mut 表 = Vec::new();
     for 行 in 文本.lines() {
@@ -62,7 +62,8 @@ fn 加载拆分表(path: &str) -> Vec<(char, Vec<String>, u64)> {
         if 列.len() < 2 {
             continue;
         }
-        let Some(字) = 列[0].chars().next() else { continue };
+        // 首列可能带变体选择符（如「直」+ VS），按原字符串保留，避免截成同一个字
+        let 字 = 列[0].to_string();
         let 根: Vec<String> = 列[1].split_whitespace().map(|s| s.to_string()).collect();
         let 频次 = 列.get(2).and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
         表.push((字, 根, 频次));
@@ -71,7 +72,7 @@ fn 加载拆分表(path: &str) -> Vec<(char, Vec<String>, u64)> {
 }
 
 /// 读取简码表：`字 <TAB> 码 <TAB> 频次`，码尾的 `_` 去掉
-fn 加载简码表(path: &str) -> HashMap<char, String> {
+fn 加载简码表(path: &str) -> HashMap<String, String> {
     let 文本 = fs::read_to_string(path).expect("无法读取简码表");
     let mut 表 = HashMap::new();
     for 行 in 文本.lines() {
@@ -83,7 +84,7 @@ fn 加载简码表(path: &str) -> HashMap<char, String> {
         if 列.len() < 2 {
             continue;
         }
-        let Some(字) = 列[0].chars().next() else { continue };
+        let 字 = 列[0].to_string();
         let 码 = 列[1].trim_end_matches('_');
         if !码.is_empty() {
             表.insert(字, 码.to_string());
@@ -168,7 +169,7 @@ pub fn run(keymap_path: &str, chaifen_path: &str, simple_path: Option<&str>, out
             continue;
         };
 
-        if let Some(简) = 简码.get(字) {
+        if let Some(简) = 简码.get(字.as_str()) {
             // 简码必须是全码前缀，否则视为脏数据跳过
             if 全码.starts_with(简.as_str()) {
                 输出.push_str(&format!("{}\t{}\n", 字, 简));
