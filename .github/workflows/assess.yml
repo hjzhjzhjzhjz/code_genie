@@ -158,6 +158,21 @@ jobs:
             --profile 方案档案
           if [ -f 汇总.md ]; then cat 汇总.md >> "$GITHUB_STEP_SUMMARY"; else echo "::warning::没有生成汇总表（可能没找到码表）"; fi
 
+      - name: 生成 Rime 方案
+        if: github.event_name == 'workflow_dispatch' && inputs.run_id == ''
+        run: |
+          set -e
+          ./target/release/code_genie rime \
+            --keymap runs/s4-export/output-keymap.txt \
+            --chaifen moling/chaifen-all.txt \
+            --simple runs/s4-export/output-simple-codes.txt \
+            --words ceping-data/词表.txt \
+            --out rime --id moling --name 魔灵
+          echo "--- schema 头 ---"
+          head -18 rime/moling.schema.yaml
+          echo "--- 词典头 ---"
+          head -10 rime/moling.dict.yaml
+
       - name: 拆分流水线与归并
         if: github.event_name == 'workflow_dispatch' && inputs.run_id == ''
         env:
@@ -221,5 +236,6 @@ jobs:
             流水线.md
             归并.md
             归并对比/
+            rime/
           if-no-files-found: warn
           retention-days: 14
