@@ -15,6 +15,7 @@ mod annealing;
 mod assess;
 mod diagnose;
 mod handfeel;
+mod pipeline;
 mod bucket_store;
 mod calibrate;
 mod checkpoint;
@@ -203,6 +204,58 @@ enum Commands {
         version: String,
     },
 
+    /// 摊开一个字的取码链路：拆分 → 码位 → 键位 → 编码
+    #[command(name = "pipeline")]
+    Pipeline {
+        /// 字根键位表
+        #[arg(long)]
+        keymap: String,
+
+        /// 纯拆分表
+        #[arg(long)]
+        chaifen: String,
+
+        /// 简码表（可选）
+        #[arg(long)]
+        simple: Option<String>,
+
+        /// 要查看的字，空格分隔
+        #[arg(long)]
+        chars: String,
+
+        /// 写到该文件（Markdown）
+        #[arg(long)]
+        output: Option<String>,
+    },
+
+    /// 按归并规则改键位，重新编码后对比结构指标
+    #[command(name = "merge")]
+    Merge {
+        /// 字根键位表
+        #[arg(long)]
+        keymap: String,
+
+        /// 纯拆分表
+        #[arg(long)]
+        chaifen: String,
+
+        /// 简码表（可选）
+        #[arg(long)]
+        simple: Option<String>,
+
+        /// 归并规则，可重复。写法：`还=人` 或 `你 1=人 2`，多条用分号分隔
+        #[arg(long = "rules")]
+        rules: Vec<String>,
+
+        /// 变体码表输出目录
+        #[arg(long, default_value = "归并对比")]
+        out: String,
+
+        /// 对比表写到该文件（Markdown）
+        #[arg(long)]
+        summary: Option<String>,
+    },
+
     /// 按形码测评口径做诊断：手感七项、字频分段、词组测评、二码离散图
     #[command(name = "diagnose")]
     Diagnose {
@@ -276,6 +329,36 @@ fn main() {
             mapping,
             output,
         }) => root_chart::run(&keymap, mapping.as_deref(), &output),
+        Some(Commands::Pipeline {
+            keymap,
+            chaifen,
+            simple,
+            chars,
+            output,
+        }) => pipeline::流水线(
+            &keymap,
+            &chaifen,
+            simple.as_deref(),
+            &chars,
+            output.as_deref(),
+        ),
+
+        Some(Commands::Merge {
+            keymap,
+            chaifen,
+            simple,
+            rules,
+            out,
+            summary,
+        }) => pipeline::归并(
+            &keymap,
+            &chaifen,
+            simple.as_deref(),
+            &rules,
+            &out,
+            summary.as_deref(),
+        ),
+
         Some(Commands::Diagnose {
             dir,
             data,
