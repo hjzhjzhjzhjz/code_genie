@@ -43,12 +43,17 @@ jobs:
         with:
           node-version: 22
 
-      - name: 安装测评器依赖并拉数据
+      - name: 安装测评器依赖
         working-directory: yuhao-assess
         run: |
           set -o pipefail
           pnpm install --frozen-lockfile 2>&1 | tail -n 5
-          pnpm fetch 2>&1 | tail -n 5
+
+      - name: 准备测评数据
+        run: |
+          mkdir -p yuhao-assess/public/data
+          cp yuhao-data/*.json yuhao-assess/public/data/
+          ls -1 yuhao-assess/public/data
 
       - name: 安装 Rust
         uses: dtolnay/rust-toolchain@stable
