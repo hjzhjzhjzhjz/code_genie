@@ -79,28 +79,33 @@ fn 解析(名: &str, 结果: &Value) -> Option<指标> {
 /// 找可用的 pnpm 命令（Windows 上是 pnpm.cmd）
 fn pnpm() -> String {
     for 候选 in ["pnpm", "pnpm.cmd"] {
-        if Command::new(候选).arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
+        if Command::new(候选)
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
             return 候选.to_string();
         }
     }
     String::from("pnpm")
 }
 
-/// 对一张码表跑测评，返回解析后的 JSON
-fn 测评一张(
-    码表: &Path,
-    方案: &Path,
-    工作目录: &Path,
-    临时目录: &Path,
-) -> Result<Value, String> {
+/// 对一张码表跑测评，返回 (结果 JSON, 输出文件路径)
+fn 测评一张(码表: &Path, 方案: &Path, 工作目录: &Path) -> Result<(Value, PathBuf), String> {
     let 名 = 码表
         .parent()
         .and_then(|p| p.file_name())
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "码表".to_string());
-    let 输出 = 临时目录.join(format!("{}.json", 名));
 
-    let 状态 = Command::new(pnpm())
+    let 子目录 = 工作目录.join("assess-tmp");
+    std::fs::create_dir_all(&子目录).map_err(|e| format!("建不了临时目录: {}", e))?;
+    let 相对 = format!("assess-tmp/{}.json", 名);
+    let 绝对 = 工作目录.join(&相对);
+    let _ = std::fs::remove_file(&绝对);
+
+    let 输出 = Command::new(pnpm())
         .current_dir(工作目录)
         .arg("cli")
         .arg(码表)
@@ -109,22 +114,27 @@ fn 测评一张(
         .arg("--format")
         .arg("json")
         .arg("--output")
-        .arg(&输出)
+        .arg(&相对)
         .output()
         .map_err(|e| format!("无法执行 pnpm: {}", e))?;
 
-    if !状态.status.success() {
-        let 尾部: String = String::from_utf8_lossy(&状态.stderr)
+    let 错误尾 = || -> String {
+        String::from_utf8_lossy(&输出.stderr)
             .lines()
             .rev()
-            .take(5)
+            .take(4)
             .collect::<Vec<_>>()
-            .join(" / ");
-        return Err(format!("测评失败: {} ({})", 码表.display(), 尾部));
+            .join(" / ")
+    };
+
+    if !输出.status.success() {
+        return Err(format!("测评失败: {} ({})", 码表.display(), 错误尾()));
     }
 
-    let 文本 = std::fs::read_to_string(&输出).map_err(|e| format!("读不到测评结果: {}", e))?;
-    serde_json::from_str(&文本).map_err(|e| format!("解析测评结果失败: {}", e))
+    let 文本 = std::fs::read_to_string(&绝对)
+        .map_err(|e| format!("读不到 {}: {} / {}", 绝对.display(), e, 错误尾()))?;
+    let 值 = serde_json::from_str(&文本).map_err(|e| format!("解析测评结果失败: {}", e))?;
+    Ok((值, 绝对))
 }
 
 fn 打印(表: &[指标]) {
@@ -159,7 +169,9 @@ fn 收集(目录: &Path, 文件名: &str) -> Vec<PathBuf> {
     let mut 结果 = Vec::new();
     let mut 栈 = vec![目录.to_path_buf()];
     while let Some(当前) = 栈.pop() {
-        let Ok(条目) = std::fs::read_dir(&当前) else { continue };
+        let Ok(条目) = std::fs::read_dir(&当前) else {
+            continue;
+        };
         for 项 in 条目.flatten() {
             let 路径 = 项.path();
             if 路径.is_dir() {
@@ -182,8 +194,8 @@ pub fn run(
     yuhao目录: &str,
     保留: Option<&str>,
 ) {
-    let 工作目录 = std::fs::canonicalize(yuhao目录)
-        .unwrap_or_else(|_| PathBuf::from(yuhao目录));
+    let 工作目录 =
+        std::fs::canonicalize(yuhao目录).unwrap_or_else(|_| PathBuf::from(yuhao目录));
     let 方案路径 = std::fs::canonicalize(方案).unwrap_or_else(|_| PathBuf::from(方案));
 
     let mut 清单: Vec<PathBuf> = Vec::new();
@@ -198,18 +210,17 @@ pub fn run(
         return;
     }
 
-    println!("=== 宇浩测评（{} 份）===", 清单.len());
-    let 临时 = std::env::temp_dir().join(format!("codegenie-assess-{}", std::process::id()));
-    std::fs::create_dir_all(&临时).ok();
-
     if let Some(目录) = 保留 {
         std::fs::create_dir_all(目录).ok();
     }
 
+    println!("=== 宇浩测评（{} 份）===", 清单.len());
     let mut 指标表: Vec<指标> = Vec::new();
+    let mut 输出文件: Vec<PathBuf> = Vec::new();
+
     for 路径 in &清单 {
-        match 测评一张(路径, &方案路径, &工作目录, &临时) {
-            Ok(值) => {
+        match 测评一张(路径, &方案路径, &工作目录) {
+            Ok((值, 文件)) => {
                 let 名 = 路径
                     .parent()
                     .and_then(|p| p.file_name())
@@ -218,13 +229,22 @@ pub fn run(
                 if let Some(m) = 解析(&名, &值) {
                     指标表.push(m);
                 }
-                if let Some(目录) = 保留 {
-                    let 目标 = Path::new(目录).join(format!("{}.json", 名));
-                    std::fs::copy(临时.join(format!("{}.json", 名)), 目标).ok();
-                }
+                输出文件.push(文件);
             }
             Err(e) => eprintln!("⚠️ {}", e),
         }
+    }
+
+    // 保留结果 JSON
+    if let Some(目录) = 保留 {
+        for 文件 in &输出文件 {
+            if let Some(名) = 文件.file_name() {
+                std::fs::copy(文件, Path::new(目录).join(名)).ok();
+            }
+        }
+    }
+    for 文件 in &输出文件 {
+        let _ = std::fs::remove_file(文件);
     }
 
     指标表.sort_by(|a, b| {
@@ -239,5 +259,4 @@ pub fn run(
     });
     println!();
     打印(&指标表);
-    std::fs::remove_dir_all(&临时).ok();
 }
