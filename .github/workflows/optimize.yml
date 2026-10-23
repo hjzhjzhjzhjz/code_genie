@@ -1,7 +1,7 @@
 name: CodeGenie 退火优化
 
-# 放在 fork 的默认分支（main）上，用 workflow_dispatch 手动触发，
-# 代码从 inputs.ref 指定的分支检出（默认 moling），不必改动工作分支。
+# 放在默认分支上，用 workflow_dispatch 手动触发。
+# 代码从 inputs.ref 检出；配置以 inputs.config_base 为基础；输入文件从 inputs.files_dir 取。
 on:
   workflow_dispatch:
     inputs:
@@ -10,8 +10,18 @@ on:
         required: true
         default: moling
         type: string
+      config_base:
+        description: 基础配置（仓库内路径，默认 config.toml.example）
+        required: true
+        default: config.toml.example
+        type: string
+      files_dir:
+        description: 输入文件所在目录（. 表示仓库根目录）
+        required: true
+        default: "."
+        type: string
       total_steps:
-        description: total_steps（2 万步冒烟 / 200 万步正式）
+        description: total_steps（2 万步冒烟 / 200 万步 / 4000 万步）
         required: true
         default: "20000"
         type: string
@@ -43,6 +53,8 @@ jobs:
       OUT_DIR: ${{ inputs.out_dir }}
       TOTAL_STEPS: ${{ inputs.total_steps }}
       THREADS: ${{ inputs.threads }}
+      CONFIG_BASE: ${{ inputs.config_base }}
+      FILES_DIR: ${{ inputs.files_dir }}
 
     steps:
       - name: 检出代码
@@ -66,21 +78,26 @@ jobs:
 
           steps = os.environ["TOTAL_STEPS"].strip()
           threads = os.environ["THREADS"].strip()
+          files_dir = (os.environ.get("FILES_DIR") or ".").strip().rstrip("/")
+          base = (os.environ.get("CONFIG_BASE") or "config.toml.example").strip()
+
           if not steps.isdigit() or int(steps) <= 0:
               sys.exit(f"total_steps 非法: {steps!r}")
           if not threads.isdigit() or int(threads) <= 0:
               sys.exit(f"threads 非法: {threads!r}")
 
-          example = pathlib.Path("config.toml.example")
-          if not example.is_file():
-              sys.exit("找不到 config.toml.example")
-          lines = example.read_text(encoding="utf-8").splitlines()
+          src = pathlib.Path(base)
+          if not src.is_file():
+              sys.exit(f"找不到基础配置: {base}")
+          lines = src.read_text(encoding="utf-8").splitlines()
 
+          FILE_KEYS = ("fixed", "dynamic", "splits", "pair_equiv", "key_dist")
           section, hit_steps, hit_threads, out = None, False, False, []
           for line in lines:
               stripped = line.strip()
               if stripped.startswith("[") and stripped.endswith("]"):
                   section = stripped.strip("[]").strip()
+
               if section == "annealing":
                   m = re.match(r"^(\s*total_steps\s*=\s*)([0-9_]+)(\s*#.*)?$", line)
                   if m:
@@ -90,15 +107,33 @@ jobs:
                   if m:
                       line = m.group(1) + threads + (m.group(3) or "")
                       hit_threads = True
+
+              if section == "files" and files_dir not in ("", "."):
+                  m = re.match(r'^(\s*(' + "|".join(FILE_KEYS) + r')\s*=\s*")([^"]*)(")', line)
+                  if m:
+                      name = os.path.basename(m.group(3).replace("\\", "/"))
+                      line = f"{m.group(1)}{files_dir}/{name}{m.group(4)}"
+
               out.append(line)
 
           if not (hit_steps and hit_threads):
-              sys.exit(f"未在 [annealing] 中定位到 total_steps/threads（steps={hit_steps}, threads={hit_threads}）")
+              sys.exit(f"未定位到 total_steps/threads（steps={hit_steps}, threads={hit_threads}）")
 
           pathlib.Path("config.toml").write_text("\n".join(out) + "\n", encoding="utf-8")
-          print(f"config.toml 已生成：total_steps={steps}, threads={threads}")
+          print(f"config.toml 已生成：base={base} total_steps={steps} threads={threads} files_dir={files_dir}")
           PY
-          grep -nE '^\s*(threads|total_steps|simple_start_progress)\s*=' config.toml
+          echo "--- [annealing] ---"
+          grep -nE '^\s*(threads|total_steps)\s*=' config.toml
+          echo "--- [files] ---"
+          sed -n '/^\[files\]/,/^\[/p' config.toml | grep -vE '^\[' || true
+          echo "--- 输入文件 ---"
+          for f in $(sed -n '/^\[files\]/,/^\[/p' config.toml | grep -oE '"[^"]+"' | tr -d '"'); do
+            if [ -f "$f" ]; then
+              echo "OK   $f ($(wc -c < "$f") bytes, $(wc -l < "$f") lines)"
+            else
+              echo "MISS $f"
+            fi
+          done
 
       - name: 编译（release + LTO）
         run: |
@@ -123,6 +158,8 @@ jobs:
             echo "### CodeGenie 退火结果"
             echo ""
             echo "- 分支：\`${{ inputs.ref }}\`"
+            echo "- 配置基础：\`$CONFIG_BASE\`"
+            echo "- 输入目录：\`$FILES_DIR\`"
             echo "- total_steps：\`$TOTAL_STEPS\`"
             echo "- 线程数：\`$THREADS\`"
             echo "- 输出目录：\`$OUT_DIR\`"
