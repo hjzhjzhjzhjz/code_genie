@@ -183,6 +183,10 @@ enum Commands {
         /// 保留每份测评 JSON 到该目录
         #[arg(long)]
         keep: Option<String>,
+
+        /// 汇总表写到该文件（Markdown）
+        #[arg(long)]
+        summary: Option<String>,
     },
 }
 
@@ -245,6 +249,7 @@ fn main() {
             scheme,
             yuhao_dir,
             keep,
+            summary,
         }) => assess::run(
             table.as_deref(),
             dir.as_deref(),
@@ -252,6 +257,7 @@ fn main() {
             &scheme,
             &yuhao_dir,
             keep.as_deref(),
+            summary.as_deref(),
         ),
         Some(Commands::Optimize {
             output_dir,
