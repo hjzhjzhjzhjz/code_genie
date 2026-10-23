@@ -57,7 +57,7 @@ pub fn 流水线(
 
     for 字 in 要查 {
         md.push_str(&format!("\n### {}\n\n", 字));
-        let Some(根) = 索引.get(*字).copied() else {
+        let Some(根) = 索引.get(字).copied() else {
             md.push_str("拆分表里没有这个字。\n");
             continue;
         };
@@ -109,7 +109,7 @@ pub fn 流水线(
         }
 
         md.push_str(&format!("\n**全码**　`{}`\n\n", 码));
-        match 简码.get(*字) {
+        match 简码.get(字) {
             Some(简) if 码.starts_with(简.as_str()) => {
                 md.push_str(&format!("**简码**　`{}`（是全码前缀 ✓）\n", 简))
             }
