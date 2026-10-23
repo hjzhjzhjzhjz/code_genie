@@ -93,7 +93,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: export-${{ inputs.out_name }}
+          name: export-table-run${{ github.run_number }}
           path: |
             ${{ inputs.out_name }}
             build.log
