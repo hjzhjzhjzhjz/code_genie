@@ -149,6 +149,27 @@ jobs:
           set -o pipefail
           cargo build --release 2>&1 | tee build.log
 
+      - name: 导出全码表
+        if: always()
+        run: |
+          if [ ! -f "$OUT_DIR/output-keymap.txt" ]; then
+            echo "::warning::没有 output-keymap.txt，跳过导出"
+            exit 0
+          fi
+          SIMPLE_ARG=""
+          if [ -f "$OUT_DIR/output-simple-codes.txt" ]; then
+            SIMPLE_ARG="--simple $OUT_DIR/output-simple-codes.txt"
+          fi
+          ./target/release/code_genie export \
+            --keymap "$OUT_DIR/output-keymap.txt" \
+            --chaifen moling/chaifen-all.txt \
+            $SIMPLE_ARG \
+            --output "$OUT_DIR/output-table.txt"
+          echo "--- 前 4 行 ---"
+          head -n 4 "$OUT_DIR/output-table.txt"
+          echo "--- 行数 ---"
+          wc -l < "$OUT_DIR/output-table.txt"
+
       - name: 运行退火
         env:
           RUST_BACKTRACE: "1"
