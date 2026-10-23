@@ -97,5 +97,6 @@ jobs:
           path: |
             ${{ inputs.out_name }}
             build.log
+            root-chart.html
           if-no-files-found: warn
           retention-days: 14
