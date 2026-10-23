@@ -149,6 +149,17 @@ jobs:
           set -o pipefail
           cargo build --release 2>&1 | tee build.log
 
+      - name: 运行退火
+        env:
+          RUST_BACKTRACE: "1"
+        run: |
+          set -o pipefail
+          # 用 SIGINT 限时：程序自带 Ctrl-C 处理，会写好 checkpoint 后正常退出，
+          # 避免 job 被硬超时杀掉、checkpoint 来不及落盘。
+          timeout --signal=INT --kill-after=60s 300m \
+            ./target/release/code_genie -c config.toml optimize -d "$OUT_DIR" 2>&1 | tee run.log \
+            || echo "::warning::运行被 300 分钟时限中断（exit=$?），artifacts 中保留了最新 checkpoint，可 resume 续算"
+
       - name: 导出全码表
         if: always()
         run: |
@@ -169,17 +180,6 @@ jobs:
           head -n 4 "$OUT_DIR/output-table.txt"
           echo "--- 行数 ---"
           wc -l < "$OUT_DIR/output-table.txt"
-
-      - name: 运行退火
-        env:
-          RUST_BACKTRACE: "1"
-        run: |
-          set -o pipefail
-          # 用 SIGINT 限时：程序自带 Ctrl-C 处理，会写好 checkpoint 后正常退出，
-          # 避免 job 被硬超时杀掉、checkpoint 来不及落盘。
-          timeout --signal=INT --kill-after=60s 300m \
-            ./target/release/code_genie -c config.toml optimize -d "$OUT_DIR" 2>&1 | tee run.log \
-            || echo "::warning::运行被 300 分钟时限中断（exit=$?），artifacts 中保留了最新 checkpoint，可 resume 续算"
 
       - name: 写入 Job Summary
         if: always()
