@@ -14,7 +14,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use serde_json::Value;
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use crate::handfeel;
 
@@ -376,7 +377,19 @@ pub fn run(
     yuhao目录: &str,
     保留: Option<&str>,
     汇总: Option<&str>,
+    档案: Option<&str>,
+    作者: &str,
+    版本: &str,
 ) {
+    // 版本留空就用当天日期
+    let 版本默认;
+    let 版本 = if 版本.trim().is_empty() {
+        版本默认 = chrono::Local::now().format("%Y%m%d").to_string();
+        &版本默认[..]
+    } else {
+        版本
+    };
+
     let 工作目录 =
         std::fs::canonicalize(yuhao目录).unwrap_or_else(|_| PathBuf::from(yuhao目录));
     let 方案路径 = std::fs::canonicalize(方案).unwrap_or_else(|_| PathBuf::from(方案));
@@ -441,6 +454,12 @@ pub fn run(
                 let 选 = handfeel::算选重(路径).ok();
                 if let Some(m) = 解析(名, &值, 指位, 连, 选) {
                     指标表.push(m);
+                }
+                if let Some(目录) = 档案 {
+                    match 生成方案档案(&值, 名, 路径, Path::new(目录), 作者, 版本) {
+                        Ok(p) => println!("  方案档案: {}", p.display()),
+                        Err(e) => eprintln!("⚠️ 方案档案「{}」生成失败: {}", 名, e),
+                    }
                 }
                 输出文件.push(文件);
             }
@@ -608,4 +627,114 @@ fn 生成汇总(表: &[指标]) -> Result<String, String> {
     }
 
     Ok(s)
+}
+
+// -------------------------------------------------------------------------
+// 宇浩测评「方案档案」——可直接导入网页版的 JSON
+// -------------------------------------------------------------------------
+
+/// 把方案名转成文件名用的标识符
+fn 标识符(名: &str) -> String {
+    let mut 原 = String::from("codegenie-");
+    for c in 名.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            原.push(c.to_ascii_lowercase());
+        } else {
+            原.push('-');
+        }
+    }
+    let mut 结果 = String::new();
+    let mut 上横 = false;
+    for c in 原.chars() {
+        if c == '-' {
+            if !上横 {
+                结果.push(c);
+            }
+            上横 = true;
+        } else {
+            结果.push(c);
+            上横 = false;
+        }
+    }
+    结果.trim_matches('-').to_string()
+}
+
+fn 生成方案档案(
+    值: &Value,
+    名: &str,
+    码表: &Path,
+    目录: &Path,
+    作者: &str,
+    版本: &str,
+) -> Result<PathBuf, String> {
+    let 时间 = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    let 标识 = 标识符(名);
+
+    let 字数 = 值
+        .get("測評結果")
+        .and_then(|r| r.get("候選個數分析"))
+        .and_then(|c| c.get("字符數"))
+        .and_then(|n| n.as_u64());
+
+    let 字节 = std::fs::read(码表).map_err(|e| format!("读不了码表: {}", e))?;
+    let 摘要 = format!("{:x}", Sha256::digest(&字节));
+
+    let mut 档 = 值.clone();
+    {
+        let obj = 档
+            .as_object_mut()
+            .ok_or_else(|| "测评结果不是 JSON 对象".to_string())?;
+
+        {
+            let 元 = obj.entry("元數據".to_string()).or_insert_with(|| json!({}));
+            if let Some(m) = 元.as_object_mut() {
+                m.insert("方案名".into(), json!(名));
+                m.insert("標識符".into(), json!(标识));
+                m.insert("作者".into(), json!(作者));
+                m.insert("版本".into(), json!(版本));
+                m.insert(
+                    "描述".into(),
+                    json!("魔靈四碼定長，一／二／三級簡碼取全碼前綴，空格上屏"),
+                );
+                m.insert("標籤".into(), json!(["形碼", "四碼定長", "簡碼"]));
+                m.entry("創建時間".to_string())
+                    .or_insert_with(|| json!(时间));
+                m.insert("更新時間".into(), json!(时间));
+            }
+        }
+
+        {
+            let 参 = obj
+                .entry("方案參數".to_string())
+                .or_insert_with(|| json!({}));
+            if let Some(m) = 参.as_object_mut() {
+                m.entry("選重編碼化".to_string())
+                    .or_insert_with(|| json!(false));
+                m.entry("出簡不出全".to_string())
+                    .or_insert_with(|| json!(false));
+                m.entry("最大碼長".to_string()).or_insert_with(|| json!(4));
+            }
+        }
+
+        {
+            let 码元 = obj
+                .entry("碼表元數據".to_string())
+                .or_insert_with(|| json!({}));
+            if let Some(m) = 码元.as_object_mut() {
+                m.insert("分隔符".into(), json!("製表符"));
+                m.insert("第一列類型".into(), json!("字符"));
+                if let Some(n) = 字数 {
+                    m.insert("總字符數".into(), json!(n));
+                }
+                m.insert("哈希值".into(), json!(摘要));
+            }
+        }
+    }
+
+    let 文本 =
+        serde_json::to_string_pretty(&档).map_err(|e| format!("序列化方案档案失败: {}", e))?;
+    std::fs::create_dir_all(目录).ok();
+    let 路径 = 目录.join(format!("{}.json", 标识));
+    std::fs::write(&路径, 文本).map_err(|e| format!("写不了方案档案: {}", e))?;
+    Ok(路径)
 }
