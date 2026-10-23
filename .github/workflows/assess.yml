@@ -167,11 +167,11 @@ jobs:
           ./target/release/code_genie rime \
             --keymap "$K" --chaifen moling/chaifen-all.txt \
             --simple "$S" --words ceping-data/词表.txt \
-            --out rime --id moling --name 魔灵
+            --out rime --id xingyun --name 星云
           echo "--- schema 头 ---"
-          head -18 rime/moling.schema.yaml
+          head -18 rime/xingyun.schema.yaml
           echo "--- 词典头 ---"
-          head -10 rime/moling.dict.yaml
+          head -10 rime/xingyun.dict.yaml
 
       - name: 拆分流水线与归并
         if: github.event_name == 'workflow_dispatch' && inputs.run_id == ''
