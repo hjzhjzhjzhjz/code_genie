@@ -22,6 +22,7 @@ use std::process::{Command, Stdio};
 
 pub struct 参数 {
     pub 全码词典: PathBuf,
+    pub 简码词典: Option<PathBuf>,
     pub 词组词典: Option<PathBuf>,
     pub 语料: PathBuf,
     pub 解码器: Option<PathBuf>,
@@ -247,6 +248,8 @@ pub fn run(参: &参数) {
     // ---- 词典 ----
     let mut 字码: HashMap<char, String> = HashMap::new();
     let mut 码表: HashMap<String, Vec<条目>> = HashMap::new();
+    let mut 字简: HashMap<char, String> = HashMap::new();
+    let mut 简表: HashMap<String, Vec<条目>> = HashMap::new();
 
     for (文本, 码, 权重) in 读词典(&参.全码词典) {
         let mut it = 文本.chars();
@@ -260,11 +263,23 @@ pub fn run(参: &参数) {
             码表.entry(码).or_default().push(条目 { 文本, 权重 });
         }
     }
+    if let Some(简径) = &参.简码词典 {
+        for (文本, 码, 权重) in 读词典(简径) {
+            let mut it = 文本.chars();
+            if let (Some(c), None) = (it.next(), it.next()) {
+                字简.insert(c, 码.clone());
+            }
+            简表.entry(码).or_default().push(条目 { 文本, 权重 });
+        }
+    }
     if 字码.is_empty() {
         eprintln!("❌ 全码词典为空，退出");
         return;
     }
     for v in 码表.values_mut() {
+        v.sort_by(|a, b| b.权重.cmp(&a.权重));
+    }
+    for v in 简表.values_mut() {
         v.sort_by(|a, b| b.权重.cmp(&a.权重));
     }
 
@@ -279,52 +294,93 @@ pub fn run(参: &参数) {
         return;
     }
 
-    // ---- A 逐单元 ----
+    let 首 = |表: &HashMap<String, Vec<条目>>, 码: &str| -> String {
+        表.get(码)
+            .and_then(|v| v.first())
+            .map(|e| e.文本.clone())
+            .unwrap_or_default()
+    };
+
+    // ---- A 全码逐单元 / A' 简码优先 ----
     let mut 单元总数 = 0usize;
-    let mut 首候选对 = 0usize;
-    let mut 句全对 = 0usize;
-    let mut 桶单元: Vec<(usize, usize, usize)> = vec![(0, 0, 0); 参.最长 + 1];
-    let mut 错例: Vec<(String, String, String)> = Vec::new(); // 原字 / 码 / 首候选
+    let mut 全码对 = 0usize;
+    let mut 全码句对 = 0usize;
+    let mut 简对 = 0usize;
+    let mut 简句对 = 0usize;
+    let mut 简单元数 = 0usize;
+    let mut 全击键 = 0usize;
+    let mut 简击键 = 0usize;
+    let mut 桶: Vec<(usize, usize, usize)> = vec![(0, 0, 0); 参.最长 + 1];
+    let mut 错例: Vec<(String, String, String)> = Vec::new();
 
     // ---- B 连续解码 ----
     let mut 连对 = 0usize;
     let mut 连距离 = 0usize;
     let mut 连切分错 = 0usize;
-    let mut 击键 = 0usize;
 
     for 句 in &句们 {
-        let mut 本句全对 = true;
+        let mut 本句全效 = true;
+        let mut 本句简效 = true;
         let mut 码流 = String::new();
-        for c in 句.chars() {
-            let 码 = &字码[&c];
-            码流.push_str(码);
-            击键 += 码.chars().count();
-            单元总数 += 1;
 
-            let 首 = 码表
-                .get(码.as_str())
-                .and_then(|v| v.first())
-                .map(|e| e.文本.as_str())
-                .unwrap_or("");
-            let 对 = 首 == c.to_string().as_str();
-            if 对 {
-                首候选对 += 1;
+        for c in 句.chars() {
+            let 全 = &字码[&c];
+            let _ = 全;
+            单元总数 += 1;
+            全击键 += 全.chars().count();
+            码流.push_str(全);
+
+            let 全首选 = 首(&码表, 全);
+            if 全首选 == c.to_string() {
+                全码对 += 1;
             } else {
-                本句全对 = false;
+                本句全效 = false;
                 if 错例.len() < 8 {
-                    错例.push((c.to_string(), 码.clone(), 首.to_string()));
+                    错例.push((c.to_string(), 全.clone(), format!("{}（全码）", 全首选)));
+                }
+            }
+
+            // 有简码就走简码，这才是真实打法
+            match 字简.get(&c) {
+                Some(简) => {
+                    简单元数 += 1;
+                    简击键 += 简.chars().count();
+                    let 简首选 = 首(&简表, 简);
+                    if 简首选 == c.to_string() {
+                        简对 += 1;
+                    } else {
+                        本句简效 = false;
+                        if 错例.len() < 8 {
+                            错例.push((
+                                c.to_string(),
+                                简.clone(),
+                                format!("{}（简码）", 简首选),
+                            ));
+                        }
+                    }
+                }
+                None => {
+                    简击键 += 全.chars().count();
+                    if 全首选 == c.to_string() {
+                        简对 += 1;
+                    } else {
+                        本句简效 = false;
+                    }
                 }
             }
         }
-        if 本句全对 {
-            句全对 += 1;
+        if 本句全效 {
+            全码句对 += 1;
+        }
+        if 本句简效 {
+            简句对 += 1;
         }
 
         let n = 句.chars().count();
-        let r = &mut 桶单元[n.min(参.最长)];
+        let r = &mut 桶[n.min(参.最长)];
         r.0 += 1;
         r.1 += n;
-        if 本句全对 {
+        if 本句全效 {
             r.2 += 1;
         }
 
@@ -344,51 +400,61 @@ pub fn run(参: &参数) {
         }
     }
 
-    let 字准确 = 首候选对 as f64 / 单元总数 as f64 * 100.0;
-    let 句准确 = 句全对 as f64 / 句们.len() as f64 * 100.0;
-    let 连准确 = 连对 as f64 / 句们.len() as f64 * 100.0;
-
     if let Some(目录) = &参.导出 {
         std::fs::create_dir_all(目录).ok();
         let _ = std::fs::write(目录.join("原文.txt"), 句们.join("\n") + "\n");
         println!("排查用原文已写入 {}", 目录.display());
     }
 
+    let 率 = |分: usize, 总: usize| 分 as f64 / 总.max(1) as f64 * 100.0;
+
     let mut md = String::from("## 整句准确率\n\n");
     md.push_str(&format!(
-        "语料 {} 句 / {} 字　词典 {} 条　平均击键 {:.3}/字\n\n",
+        "语料 {} 句 / {} 字　词典 {} 条（其中简码 {} 字）\n\n",
         句们.len(),
         单元总数,
         码表.values().map(|v| v.len()).sum::<usize>(),
-        击键 as f64 / 单元总数 as f64
-    ));
-    md.push_str("**A 逐单元**（每字打满自己的码、空格取第一个候选，即真实操作）\n\n");
-    md.push_str("| 指标 | 值 |\n|---|---:|\n");
-    md.push_str(&format!(
-        "| 首候选准确率（字级） | **{:.2}%**（{} / {}） |\n",
-        字准确, 首候选对, 单元总数
-    ));
-    md.push_str(&format!(
-        "| 整句准确率（一句全对） | **{:.2}%**（{} / {}） |\n",
-        句准确, 句全对, 句们.len()
+        字简.len()
     ));
 
-    md.push_str("\n**B 连续解码**（整句码流首尾相连，让解码器按词频自己切）\n\n");
+    md.push_str("### A 逐单元（每字打满码、空格取第一个候选）\n\n");
+    md.push_str("| 口径 | 平均击键 | 首候选准确率 | 整句准确率 |\n|---|---:|---:|---:|\n");
+    md.push_str(&format!(
+        "| 全码 | {:.3}/字 | {:.2}% | {:.2}% |\n",
+        全击键 as f64 / 单元总数 as f64,
+        率(全码对, 单元总数),
+        率(全码句对, 句们.len())
+    ));
+    md.push_str(&format!(
+        "| **简码优先**（有简码用简码） | **{:.3}/字** | **{:.2}%** | **{:.2}%** |\n",
+        简击键 as f64 / 单元总数 as f64,
+        率(简对, 单元总数),
+        率(简句对, 句们.len())
+    ));
+    md.push_str(&format!(
+        "\n简码覆盖 {} / {} 字（{:.1}%）。\n",
+        简单元数,
+        单元总数,
+        率(简单元数, 单元总数)
+    ));
+
+    md.push_str("\n### B 连续解码（整句码流首尾相连，按词频自己切）\n\n");
     md.push_str("| 指标 | 值 |\n|---|---:|\n");
     md.push_str(&format!(
         "| 整句准确率 | **{:.2}%**（{} / {}） |\n",
-        连准确, 连对, 句们.len()
+        率(连对, 句们.len()),
+        连对,
+        句们.len()
     ));
     md.push_str(&format!(
-        "| 字准确率 | **{:.2}%**（编辑距离 {} / {} 字） |\n",
+        "| 字准确率 | **{:.2}%**（编辑距离 {}） |\n",
         (1.0 - 连距离 as f64 / 单元总数 as f64) * 100.0,
-        连距离,
-        单元总数
+        连距离
     ));
     md.push_str(&format!("| 切分错（长度不同） | {} 句 |\n", 连切分错));
 
-    md.push_str("\n### 按句长（A 口径）\n\n| 句长 | 句数 | 整句准确率 |\n|---:|---:|---:|\n");
-    for (n, (句数, _, 全)) in 桶单元.iter().enumerate() {
+    md.push_str("\n### 按句长（A 全码口径）\n\n| 句长 | 句数 | 整句准确率 |\n|---:|---:|---:|\n");
+    for (n, (句数, _, 全)) in 桶.iter().enumerate() {
         if *句数 == 0 || n == 0 {
             continue;
         }
@@ -396,14 +462,14 @@ pub fn run(参: &参数) {
             "| {} | {} | {:.2}% |\n",
             n,
             *句数,
-            *全 as f64 / *句数 as f64 * 100.0
+            率(*全, *句数)
         ));
     }
 
     if !错例.is_empty() {
         md.push_str("\n### 首候选错的字（前 8）\n\n| 应是 | 码 | 首候选 |\n|---|---|---|\n");
-        for (原, 码, 首) in &错例 {
-            md.push_str(&format!("| {} | `{}` | {} |\n", 原, 码, 首));
+        for (原, 码, 首选) in &错例 {
+            md.push_str(&format!("| {} | `{}` | {} |\n", 原, 码, 首选));
         }
     }
 
