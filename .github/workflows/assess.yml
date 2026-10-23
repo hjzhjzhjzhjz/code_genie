@@ -48,7 +48,7 @@ jobs:
         run: |
           set -o pipefail
           pnpm install --frozen-lockfile 2>&1 | tail -n 5
-          pnpm fetch 2>&1 | tail -n 5
+          pnpm run fetch 2>&1 | tail -n 5
 
       - name: 安装 Rust
         uses: dtolnay/rust-toolchain@stable
