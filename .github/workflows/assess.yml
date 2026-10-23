@@ -146,6 +146,20 @@ jobs:
             --profile 方案档案
           if [ -f 汇总.md ]; then cat 汇总.md >> "$GITHUB_STEP_SUMMARY"; else echo "::warning::没有生成汇总表（可能没找到码表）"; fi
 
+      - name: 拆分流水线与归并
+        if: github.event_name == 'workflow_dispatch' && inputs.run_id == ''
+        run: |
+          set -e
+          K=runs/s4-export/output-keymap.txt
+          C=moling/chaifen-all.txt
+          S=runs/s4-export/output-simple-codes.txt
+          ./target/release/code_genie pipeline --keymap "$K" --chaifen "$C" --simple "$S" \
+            --chars "的 一 是 想" --output 流水线.md
+          ./target/release/code_genie merge --keymap "$K" --chaifen "$C" --simple "$S" \
+            --rules "还=人" --rules "你 1=人 2" --out 归并对比 --summary 归并.md
+          cat 流水线.md >> "$GITHUB_STEP_SUMMARY"
+          cat 归并.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: 形码测评诊断
         run: |
           set -e
@@ -182,5 +196,8 @@ jobs:
             方案档案/
             汇总.md
             诊断.md
+            流水线.md
+            归并.md
+            归并对比/
           if-no-files-found: warn
           retention-days: 14
