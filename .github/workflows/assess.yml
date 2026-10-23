@@ -167,7 +167,7 @@ jobs:
           fi
           for f in 方案档案/*.json; do
             echo "── $f"
-            (cd yuhao-assess && pnpm tsx -r tsconfig-paths/register \
+            (cd yuhao-assess && pnpm tsx \
               scripts/fill-continuous.mts --profile "../$f")
           done
 
