@@ -186,6 +186,22 @@ jobs:
           echo "--- 行数 ---"
           wc -l < "$OUT_DIR/全码表.txt"
 
+          # 每个线程各出一份
+          for d in "$OUT_DIR"/thread-*; do
+            [ -d "$d" ] || continue
+            [ -f "$d/字根键位表.txt" ] || continue
+            THREAD_ARG=""
+            if [ -f "$d/简码表.txt" ]; then
+              THREAD_ARG="--simple $d/简码表.txt"
+            fi
+            ./target/release/code_genie export \
+              --keymap "$d/字根键位表.txt" \
+              --chaifen moling/chaifen-all.txt \
+              $THREAD_ARG \
+              --output "$d/全码表.txt"
+            echo "  $(basename "$d"): $(wc -l < "$d/全码表.txt") 行"
+          done
+
       - name: 生成字根图
         if: always()
         env:
