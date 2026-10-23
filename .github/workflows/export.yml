@@ -35,11 +35,11 @@ permissions:
 jobs:
   export:
     name: 编译并导出测评码表
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -91,7 +91,7 @@ jobs:
 
       - name: 上传码表
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: export-${{ inputs.out_name }}
           path: |
