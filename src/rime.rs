@@ -279,6 +279,62 @@ menu:
     );
     std::fs::write(根.join(format!("{}.schema.yaml", 标识)), 方案).ok();
 
+    // 测评用：同一批词典，但开整句，供 librime 连续解码。
+    // 只汇入全码 + 词组，不含简码——否则 1~3 码会把码流切歪，
+    // 测到的就不是「四码定长」下的真实表现。
+    let 测评名 = format!("{}_test", 标识);
+    let mut 测评主 = String::from("# Rime dictionary\n# encoding: utf-8\n\n---\n");
+    测评主.push_str(&format!("name: {}\n", 测评名));
+    测评主.push_str(&format!("version: \"{}\"\n", 版本));
+    测评主.push_str("import_tables:\n");
+    测评主.push_str(&format!("  - {}\n", 全名));
+    if 有词 {
+        测评主.push_str(&format!("  - {}\n", 词名));
+    }
+    测评主.push_str("sort: by_weight\nuse_preset_vocabulary: false\n...\n");
+    std::fs::write(根.join(format!("{}.dict.yaml", 测评名)), 测评主).ok();
+
+    let 测评方案 = format!(
+        r#"# Rime schema（仅用于整句测评）
+# encoding: utf-8
+
+schema:
+  schema_id: {测评名}
+  name: {名称}·测评
+  version: "{版本}"
+
+engine:
+  processors:
+    - ascii_composer
+    - speller
+    - express_editor
+  segmentors:
+    - ascii_segmentor
+    - abc_segmentor
+    - fallback_segmentor
+  translators:
+    - table_translator
+  filters:
+    - uniquifier
+
+speller:
+  alphabet: zyxwvutsrqponmlkjihgfedcba
+  delimiter: "`"
+  max_code_length: 4
+
+translator:
+  dictionary: {测评名}
+  enable_user_dict: false
+  enable_sentence: true
+  enable_completion: false
+  enable_encoder: false
+"#,
+        测评名 = 测评名,
+        名称 = 名称,
+        版本 = 版本
+    );
+    std::fs::write(根.join(format!("{}.schema.yaml", 测评名)), 测评方案).ok();
+
     // 安装说明（缩进靠字面量本身，不用行尾续行）
     let 说明 = format!(
         r#"魔灵（{id}）Rime 方案
