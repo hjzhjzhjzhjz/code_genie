@@ -12,6 +12,7 @@ use clap::{Parser, Subcommand};
 use rayon::prelude::*;
 
 mod annealing;
+mod assess;
 mod bucket_store;
 mod calibrate;
 mod checkpoint;
@@ -156,6 +157,33 @@ enum Commands {
         #[arg(short = 'o', long, default_value = "字根图.html")]
         output: String,
     },
+    /// 跑宇浩测评并输出对比表（内部调 yuhao-assess 的 CLI）
+    #[command(name = "assess")]
+    Assess {
+        /// 单张码表
+        #[arg(long)]
+        table: Option<String>,
+
+        /// 目录（递归找 全码表.txt）
+        #[arg(long)]
+        dir: Option<String>,
+
+        /// 目录里要匹配的文件名
+        #[arg(long = "file-name", default_value = "全码表.txt")]
+        file_name: String,
+
+        /// 方案配置（jsonc）
+        #[arg(long, default_value = "codegenie-s4.jsonc")]
+        scheme: String,
+
+        /// yuhao-assess 仓库目录
+        #[arg(long = "yuhao-dir", default_value = "../yuhao-assess")]
+        yuhao_dir: String,
+
+        /// 保留每份测评 JSON 到该目录
+        #[arg(long)]
+        keep: Option<String>,
+    },
 }
 
 // =========================================================================
@@ -210,6 +238,21 @@ fn main() {
             mapping,
             output,
         }) => root_chart::run(&keymap, mapping.as_deref(), &output),
+        Some(Commands::Assess {
+            table,
+            dir,
+            file_name,
+            scheme,
+            yuhao_dir,
+            keep,
+        }) => assess::run(
+            table.as_deref(),
+            dir.as_deref(),
+            &file_name,
+            &scheme,
+            &yuhao_dir,
+            keep.as_deref(),
+        ),
         Some(Commands::Optimize {
             output_dir,
             seed_dir,
