@@ -35,6 +35,11 @@ on:
         required: true
         default: "[1]"
         type: string
+      mapping:
+        description: 字根映射表（仓库内路径，留空则不套 PUA 显示字）
+        required: false
+        default: ""
+        type: string
       out_dir:
         description: 输出目录名（同时作为 artifact 名的一部分）
         required: true
@@ -180,6 +185,23 @@ jobs:
           head -n 4 "$OUT_DIR/output-table.txt"
           echo "--- 行数 ---"
           wc -l < "$OUT_DIR/output-table.txt"
+
+      - name: 生成字根图
+        if: always()
+        env:
+          KEYMAP: ${{ inputs.out_dir }}/output-keymap.txt
+          MAPPING: ${{ inputs.mapping }}
+        run: |
+          if [ ! -f "$KEYMAP" ]; then
+            echo "::warning::没有 keymap，跳过字根图"
+            exit 0
+          fi
+          if [ -z "$MAPPING" ]; then
+            ./target/release/code_genie chart --keymap "$KEYMAP" --output "$OUT_DIR/root-chart.html"
+          else
+            ./target/release/code_genie chart --keymap "$KEYMAP" --mapping "$MAPPING" --output "$OUT_DIR/root-chart.html"
+          fi
+          ls -l "$OUT_DIR/root-chart.html"
 
       - name: 写入 Job Summary
         if: always()
