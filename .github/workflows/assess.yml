@@ -109,7 +109,7 @@ jobs:
             --yuhao-dir yuhao-assess \
             --keep out-assess/结果 \
             --summary 汇总.md
-          cat 汇总.md >> "$GITHUB_STEP_SUMMARY"
+          if [ -f 汇总.md ]; then cat 汇总.md >> "$GITHUB_STEP_SUMMARY"; else echo "::warning::没有生成汇总表（可能没找到码表）"; fi
 
       # ---- 自动/对比模式：拉整轮所有分片产物一起测 ----
       - name: 下载优化产物
@@ -136,7 +136,7 @@ jobs:
             --yuhao-dir yuhao-assess \
             --keep artifacts/结果 \
             --summary 汇总.md
-          cat 汇总.md >> "$GITHUB_STEP_SUMMARY"
+          if [ -f 汇总.md ]; then cat 汇总.md >> "$GITHUB_STEP_SUMMARY"; else echo "::warning::没有生成汇总表（可能没找到码表）"; fi
 
       - name: 上传结果
         if: always()
