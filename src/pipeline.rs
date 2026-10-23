@@ -3,6 +3,7 @@
 // =========================================================================
 //
 // 流水线：把一个字从「拆分」走到「编码」的每一步摊开，便于查为什么是这个码。
+//         额外标出字根所属的同键组——那正是「归并」的可视化。
 // 归并  ：按「A=B」（整体并入）或「A 1=B 2」（码位并入）改键位，
 //         重新编码后对比阶重与选重。只动键位，不重新拆分。
 // =========================================================================
@@ -18,66 +19,120 @@ const 最大码长: usize = 4;
 
 fn 码位名(位: 码位) -> &'static str {
     match 位 {
-        码位::A => "A 首码",
-        码位::S => "S 次码",
-        码位::Y => "Y 末码",
+        码位::A => "首码",
+        码位::S => "次码",
+        码位::Y => "末码",
     }
+}
+
+/// 读 input-fixed.txt：每一行是共享同一组键位的字根，也就是「同键组」
+fn 读同键组(path: &str) -> HashMap<String, Vec<String>> {
+    let 文本 = std::fs::read_to_string(path).unwrap_or_default();
+    let mut 表: HashMap<String, Vec<String>> = HashMap::new();
+    for 行 in 文本.lines() {
+        let 行 = 行.trim();
+        if 行.is_empty() || 行.starts_with('#') {
+            continue;
+        }
+        let 列: Vec<&str> = 行.split('\t').collect();
+        if 列.is_empty() {
+            continue;
+        }
+        let 根们: Vec<String> = 列[0]
+            .split_whitespace()
+            .map(|s| s.split('.').next().unwrap_or(s).to_string())
+            .collect();
+        if 根们.len() <= 1 {
+            continue;
+        }
+        for r in &根们 {
+            表.insert(r.clone(), 根们.clone());
+        }
+    }
+    表
 }
 
 // -------------------------------------------------------------------------
 // 流水线
 // -------------------------------------------------------------------------
 
-/// 打印若干字的取码链路，返回 Markdown
 pub fn 流水线(
     keymap: &str,
     chaifen: &str,
+    fixed: Option<&str>,
     simple: Option<&str>,
     字们: &str,
+    top: usize,
     输出: Option<&str>,
 ) {
     let 键位 = 加载键位表(keymap);
     let 拆分 = 加载拆分表(chaifen);
     let 简码 = simple.map(加载简码表).unwrap_or_default();
+    let 同键组 = fixed.map(读同键组).unwrap_or_default();
 
-    let 要查: Vec<&str> = 字们.split_whitespace().collect();
-    let mut 索引: HashMap<&str, &Vec<String>> = HashMap::new();
-    for (字, 根, _) in &拆分 {
-        索引.insert(字.as_str(), 根);
+    let mut 索引: HashMap<&str, (&Vec<String>, u64)> = HashMap::new();
+    for (字, 根, 频) in &拆分 {
+        索引.insert(字.as_str(), (根, *频));
+    }
+
+    // 要看的字：显式指定优先，否则按频次取前 top 个
+    let mut 要查: Vec<&str> = 字们.split_whitespace().collect();
+    if 要查.is_empty() && top > 0 {
+        let mut 排序: Vec<(&str, u64)> = 拆分
+            .iter()
+            .map(|(字, _, 频)| (字.as_str(), *频))
+            .collect();
+        排序.sort_by(|a, b| b.1.cmp(&a.1));
+        要查 = 排序.into_iter().take(top).map(|(c, _)| c).collect();
     }
 
     let mut md = String::from("## 拆分流水线\n\n");
     md.push_str(&format!(
-        "字根 {} 个，拆分条目 {} 条，简码 {} 条，最大码长 {}。\n",
+        "字根 {} 个　拆分条目 {} 条　简码 {} 条　同键组 {} 个字根　最大码长 {}\n",
         键位.len(),
         拆分.len(),
         简码.len(),
+        同键组.len(),
         最大码长
     ));
 
     for 字 in 要查 {
         md.push_str(&format!("\n### {}\n\n", 字));
-        let Some(根) = 索引.get(字).copied() else {
+        let Some((根, 频)) = 索引.get(字).copied() else {
             md.push_str("拆分表里没有这个字。\n");
             continue;
         };
-        md.push_str(&format!("**拆分**　{}\n\n", 根.join(" · ")));
+        md.push_str(&format!(
+            "**拆分**　{}　（频次 {}）\n\n",
+            根.join(" · "),
+            频
+        ));
         if 根.is_empty() {
             continue;
         }
 
         let 序列 = 取码序列(根, &键位, 最大码长);
-        md.push_str("| 步 | 字根 | 码位 | 键位串 | 取第几键 | 得到 |\n");
-        md.push_str("|---:|---|---|---|---:|---|\n");
+        md.push_str("| 步 | 字根 | 同键组 | 码位 | 键位串 | 取第几键 | 得到 |\n");
+        md.push_str("|---:|---|---|---|---|---:|---|\n");
         let mut 码 = String::new();
         let mut 缺 = false;
         for (i, (根名, 位)) in 序列.iter().enumerate() {
+            let 组 = match 同键组.get(*根名) {
+                Some(全组) if 全组.len() > 1 => 全组
+                    .iter()
+                    .filter(|x| x.as_str() != *根名)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                _ => "—".to_string(),
+            };
             match 键位.get(*根名) {
                 None => {
                     md.push_str(&format!(
-                        "| {} | {} | {} | — | — | 缺字根 |\n",
+                        "| {} | {} | {} | {} | — | — | 缺字根 |\n",
                         i + 1,
                         根名,
+                        组,
                         码位名(*位)
                     ));
                     缺 = true;
@@ -93,9 +148,10 @@ pub fn 流水线(
                     码.push(字母);
                     let 串: String = 键.iter().collect();
                     md.push_str(&format!(
-                        "| {} | {} | {} | `{}` | {} | `{}` |\n",
+                        "| {} | {} | {} | {} | `{}` | {} | `{}` |\n",
                         i + 1,
                         根名,
+                        组,
                         码位名(*位),
                         串,
                         下标 + 1,
@@ -131,7 +187,6 @@ pub fn 流水线(
 // 归并
 // -------------------------------------------------------------------------
 
-/// 一条归并规则
 enum 规则 {
     整体 { 从: String, 到: String },
     码位 { 从: String, 从位: usize, 到: String, 到位: usize },
@@ -221,7 +276,6 @@ fn 应用规则(键位: &mut HashMap<String, Vec<char>>, 规则文: &str) -> Vec
     报错
 }
 
-/// 按多组归并规则各生成一个变体，比较结构指标
 pub fn 归并(
     keymap: &str,
     chaifen: &str,
@@ -252,7 +306,8 @@ pub fn 归并(
         let 规则说明 = if 名 == "基线" {
             "—".to_string()
         } else {
-            规则组[名.trim_start_matches("变体").parse::<usize>().unwrap_or(1) - 1].replace('\n', " ")
+            规则组[名.trim_start_matches("变体").parse::<usize>().unwrap_or(1) - 1]
+                .replace('\n', " ")
         };
 
         let (文本, 全条, 简条, 缺根) = 生成表(键位, &拆分, &简码);
@@ -268,7 +323,15 @@ pub fn 归并(
             Ok(s) => {
                 摘要.push_str(&format!(
                     "| {} | {} | {} | {} | {} | {:.0} | {:.2} | {:.2} | {:.2} |\n",
-                    名, 规则说明, s.全码, s.全码让全, s.简码, s.阶重[0], s.阶重[1], s.阶重[2], s.阶重[3]
+                    名,
+                    规则说明,
+                    s.全码,
+                    s.全码让全,
+                    s.简码,
+                    s.阶重[0],
+                    s.阶重[1],
+                    s.阶重[2],
+                    s.阶重[3]
                 ));
                 println!(
                     "  {:<8} 全码选重 {:>7}  让全后 {:>7}  简码选重 {:>7}  用键 {}  条 {} / {} / 缺根 {}",
