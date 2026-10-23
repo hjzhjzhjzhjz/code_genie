@@ -1,0 +1,83 @@
+name: CodeGenie 测评码表导出
+
+on:
+  workflow_dispatch:
+    inputs:
+      keymap:
+        description: 键位映射文件（仓库内路径）
+        required: true
+        default: runs/s4-export/output-keymap.txt
+        type: string
+      simple:
+        description: 简码表（仓库内路径，留空表示不导简码）
+        required: false
+        default: runs/s4-export/output-simple-codes.txt
+        type: string
+      chaifen:
+        description: 纯拆分表（仓库内路径）
+        required: true
+        default: moling/chaifen-all.txt
+        type: string
+      out_name:
+        description: 输出文件名
+        required: true
+        default: table-s4.txt
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    name: 编译并导出测评码表
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 cargo 依赖与 target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+
+      - name: 编译
+        run: |
+          set -o pipefail
+          cargo build --release 2>&1 | tee build.log
+
+      - name: 导出码表
+        env:
+          KEYMAP: ${{ inputs.keymap }}
+          SIMPLE: ${{ inputs.simple }}
+          CHAIFEN: ${{ inputs.chaifen }}
+          OUT_NAME: ${{ inputs.out_name }}
+        run: |
+          set -o pipefail
+          if [ -n "$SIMPLE" ]; then
+            ./target/release/code_genie export \
+              --keymap "$KEYMAP" --chaifen "$CHAIFEN" --simple "$SIMPLE" --output "$OUT_NAME"
+          else
+            ./target/release/code_genie export \
+              --keymap "$KEYMAP" --chaifen "$CHAIFEN" --output "$OUT_NAME"
+          fi
+          echo "--- 前 6 行 ---"
+          head -n 6 "$OUT_NAME"
+          echo "--- 行数 ---"
+          wc -l < "$OUT_NAME"
+
+      - name: 上传码表
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: export-${{ inputs.out_name }}
+          path: |
+            ${{ inputs.out_name }}
+            build.log
+          if-no-files-found: warn
+          retention-days: 14
