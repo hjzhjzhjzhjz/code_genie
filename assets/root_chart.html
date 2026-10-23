@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+  <title>星月字根表</title>
+  <style>
+    @font-face {
+      font-family: "Yuniversus";
+      src: url("./Yuniversus.woff") format("woff");
+      font-display: swap;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: "Yuniversus", "SimSun", "Microsoft YaHei", "Segoe UI", "Noto Sans CJK SC", "Segoe UI Emoji", sans-serif;
+      padding: 16px 12px;
+      background: #fefefe;
+    }
+
+    .root-table {
+      max-width: 100%;
+      width: 100%;
+      margin: 0 auto;
+      overflow-x: auto;
+    }
+
+    .key-row {
+      display: flex;
+      justify-content: flex-start;
+      align-items: stretch;
+      gap: 8px;
+      margin-bottom: 8px;
+      flex-wrap: nowrap;
+    }
+
+    .key {
+      display: flex;
+      flex-direction: column;
+      border: 1px solid #1e2a3e;
+      border-radius: 8px;
+      min-width: 120px;
+      flex: 1 1 0;
+      background: #ffffff;
+      transition: all 0.1s ease;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+    }
+
+    .key.empty-auto {
+      opacity: 0.65;
+      background: #f5f7fa;
+      border-color: #bdc4cf;
+    }
+
+    .key-label {
+      background: #eef2f7;
+      color: #a5222f;
+      font-size: 15pt;
+      font-weight: 700;
+      font-family: "Yuniversus", "Arial", sans-serif;
+      text-align: center;
+      padding: 6px 0 4px;
+      border-bottom: 1px solid #1e2a3e;
+      border-radius: 7px 7px 0 0;
+      letter-spacing: 1px;
+    }
+
+    .key-stats {
+      display: block;
+      font-size: 7.5pt;
+      font-weight: 400;
+      color: #667;
+      letter-spacing: 0;
+      line-height: 1.3;
+      font-family: "Yuniversus", "Consolas", monospace;
+    }
+
+    .key-body {
+      flex: 1;
+      padding: 8px 6px;
+      background: #fff;
+      border-radius: 0 0 7px 7px;
+    }
+
+    .key-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 6px;
+      margin-bottom: 6px;
+      padding: 3px 0;
+      border-bottom: 1px dotted #e9ecef;
+    }
+    .key-item:last-child {
+      border-bottom: none;
+    }
+
+    .key-code {
+      color: #0a4c8a;
+      font-family: "Yuniversus", "Consolas", "JetBrains Mono", monospace;
+      font-size: 10pt;
+      font-weight: 700;
+      white-space: nowrap;
+      flex-shrink: 0;
+      min-width: 42px;
+      background: #f0f4f9;
+      padding: 0 6px;
+      border-radius: 20px;
+      text-align: center;
+      letter-spacing: 0.3px;
+    }
+
+    .key-roots {
+      font-family: "Yuniversus", "Segoe UI Emoji", "Noto Sans CJK SC", "SimSun", "Microsoft YaHei", sans-serif;
+      font-size: 15pt;
+      line-height: 1.4;
+      text-align: right;
+      word-break: keep-all;
+      flex: 1;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      align-content: flex-start;
+      gap: 4px;
+    }
+
+    .root-char {
+      display: inline-block;
+      background: #fafcff;
+      border-radius: 6px;
+      padding: 0 3px;
+      white-space: nowrap;
+    }
+
+    .root-name {
+      font-size: 9pt;
+      color: #666;
+      vertical-align: super;
+      margin-left: 1px;
+    }
+
+    @media (max-width: 780px) {
+      .key-row {
+        flex-wrap: wrap;
+      }
+      .key {
+        min-width: 100px;
+      }
+      .key-roots {
+        font-size: 14pt;
+        gap: 3px;
+      }
+      .key-code {
+        font-size: 8.5pt;
+        min-width: 36px;
+      }
+      .key-label {
+        font-size: 13pt;
+        padding: 4px 0;
+      }
+      .key-body {
+        padding: 6px 4px;
+      }
+      .root-name {
+        font-size: 8pt;
+      }
+    }
+
+    /* 优化打印样式 —— 星月字根表专用 */
+    @media print {
+      @page {
+        size: A4 landscape;
+        margin: 6mm 5mm;
+      }
+
+      body {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+        background: white;
+        padding: 0;
+        margin: 0;
+      }
+
+      .root-table {
+        max-width: 100%;
+        margin: 0 auto;
+      }
+
+      .key {
+        border: 1px solid #111;
+        break-inside: avoid;
+        border-radius: 2px;
+        background: white;
+        box-shadow: none;
+        min-width: 62px;
+      }
+
+      /* 保证空按键也可见边界 */
+      .key.empty-auto {
+        opacity: 1;
+        background: #f8f9fa;
+        border-color: #666;
+      }
+
+      .key-label {
+        background: #e6e9ed !important;
+        color: #a5222f;
+        font-size: 10pt;
+        padding: 3px 0 2px;
+        border-bottom: 1px solid #111;
+        border-radius: 1px 1px 0 0;
+        font-weight: 800;
+      }
+
+      .key-stats {
+        font-size: 6pt;
+        color: #555;
+      }
+
+      .key-body {
+        padding: 4px 3px;
+        background: white;
+      }
+
+      .key-item {
+        margin-bottom: 3px;
+        padding: 1px 0;
+        border-bottom: 1px dotted #ccc;
+        gap: 4px;
+      }
+
+      .key-code {
+        font-size: 7pt;
+        min-width: 30px;
+        background: #eef2f5 !important;
+        color: #0a4c8a;
+        padding: 0 3px;
+        border-radius: 12px;
+        white-space: nowrap;
+      }
+
+      .key-roots {
+        font-size: 11pt;
+        gap: 3px;
+        line-height: 1.3;
+      }
+
+      .root-char {
+        background: none;
+        padding: 0 1px;
+      }
+
+      .root-name {
+        font-size: 6pt;
+      }
+
+      /* 让每一行更紧凑，避免分页断裂 */
+      .key-row {
+        gap: 3px;
+        margin-bottom: 3px;
+      }
+
+      /* 保证字母键三行完整打印且不断开内部卡片 */
+      .key {
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+<div class="root-table">
+  <div class="key-row" id="row1"></div>
+  <div class="key-row" id="row2"></div>
+  <div class="key-row" id="row3"></div>
+</div>
+
+<script>
+  // 星月字根表 · 完整映射数据（包含所有特殊字符）
+  const rawRoots = [
+__JS_DATA__
+  ];
+
+  // 统计信息（由后端传递）
+  const CODE_COUNT = __CODE_COUNT__;
+  const ROOT_COUNT = __ROOT_COUNT__;
+
+  // 根据按键(如"A") 合并相同编码的字根
+  function mergeRootsByCode(buttonKey) {
+    const items = rawRoots.filter(item => item[0] === buttonKey);
+    if (items.length === 0) return [];
+
+    const map = new Map();
+    const order = [];
+
+    for (const [_, code, rootChar, rootName] of items) {
+      if (!map.has(code)) {
+        map.set(code, []);
+        order.push(code);
+      }
+      map.get(code).push([rootChar, rootName || '']);
+    }
+
+    const merged = [];
+    for (const code of order) {
+      const roots = map.get(code);
+      if (roots && roots.length) {
+        const rootsHtml = roots.map(([ch, nm]) => {
+          if (nm) {
+            return `<span class="root-char">${ch}<span class="root-name">${nm}</span></span>`;
+          }
+          return `<span class="root-char">${ch}</span>`;
+        }).join('');
+        merged.push({ code, rootsHtml });
+      }
+    }
+    return merged;
+  }
+
+  // 计算每个按键的统计信息
+  function computeKeyStats(buttonKey) {
+    const items = rawRoots.filter(item => item[0] === buttonKey);
+    const uniqueCodes = new Set(items.map(item => item[1])).size;
+    return { rootCount: items.length, codeCount: uniqueCodes };
+  }
+
+  // 创建一个按键卡片元素
+  function createKeyElement(buttonKey) {
+    const merged = mergeRootsByCode(buttonKey);
+    const hasData = merged.length > 0;
+
+    const keyDiv = document.createElement('div');
+    keyDiv.className = 'key';
+    if (!hasData) {
+      keyDiv.classList.add('empty-auto');
+    }
+
+    const stats = computeKeyStats(buttonKey);
+    const labelDiv = document.createElement('div');
+    labelDiv.className = 'key-label';
+    if (buttonKey === 'Z') {
+      labelDiv.textContent = buttonKey;
+    } else {
+      labelDiv.innerHTML = `${buttonKey}<span class="key-stats">${stats.codeCount}码 ${stats.rootCount}根</span>`;
+    }
+
+    const bodyDiv = document.createElement('div');
+    bodyDiv.className = 'key-body';
+
+    if (!hasData && buttonKey === 'Z') {
+      bodyDiv.innerHTML = `
+        <div class="key-item">
+          <span class="key-code" style="font-size:9pt;min-width:auto;background:transparent;padding:0">编码</span>
+          <div class="key-roots" style="font-size:14pt;gap:0">${CODE_COUNT}<span style="font-size:8pt;color:#888;vertical-align:super">种</span></div>
+        </div>
+      `;
+    } else if (!hasData) {
+      bodyDiv.innerHTML = '<div style="font-size:10pt; color:#aaa; text-align:center;">—</div>';
+    } else {
+      let innerHtml = '';
+      for (const entry of merged) {
+        innerHtml += `
+          <div class="key-item">
+            <span class="key-code">${entry.code}</span>
+            <div class="key-roots">${entry.rootsHtml}</div>
+          </div>
+        `;
+      }
+      bodyDiv.innerHTML = innerHtml;
+    }
+
+    keyDiv.appendChild(labelDiv);
+    keyDiv.appendChild(bodyDiv);
+    return keyDiv;
+  }
+
+  // 标准26键布局 (三行)
+  const keyboardLayout = [
+    { rowId: "row1", keys: ["Q","W","E","R","T","Y","U","I","O","P"] },
+    { rowId: "row2", keys: ["A","S","D","F","G","H","J","K","L"] },
+    { rowId: "row3", keys: ["Z","X","C","V","B","N","M"] }
+  ];
+
+  function renderFullTable() {
+    for (const row of keyboardLayout) {
+      const rowContainer = document.getElementById(row.rowId);
+      if (!rowContainer) continue;
+      rowContainer.innerHTML = '';
+      for (const keyName of row.keys) {
+        const keyElement = createKeyElement(keyName);
+        rowContainer.appendChild(keyElement);
+      }
+    }
+  }
+
+  renderFullTable();
+</script>
+</body>
+</html>
