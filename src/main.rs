@@ -13,6 +13,7 @@ use rayon::prelude::*;
 
 mod annealing;
 mod assess;
+mod handfeel;
 mod bucket_store;
 mod calibrate;
 mod checkpoint;
