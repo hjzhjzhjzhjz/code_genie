@@ -802,6 +802,17 @@ fn 三位(x: f64) -> String {
     }
 }
 
+/// 万分比：选重占比用这个口径显示，负零统一成正零
+fn 万分比(x: f64) -> String {
+    if x.is_nan() {
+        "/".to_string()
+    } else if x.abs() < 1e-12 {
+        "0.00".to_string()
+    } else {
+        format!("{:.2}", x * 10000.0)
+    }
+}
+
 fn 整数(x: f64) -> String {
     if x.is_nan() {
         "/".to_string()
@@ -884,7 +895,7 @@ fn 写单字表(s: &mut String, r: &方案结果) {
             百分比(v[1]),
             百分比(v[2]),
             百分比(v[3]),
-            if v[4].is_nan() { "/".to_string() } else { format!("{:.2}", v[4] * 10000.0) },
+            万分比(v[4]),
             百分比(v[5]),
             "/",
             "/",
