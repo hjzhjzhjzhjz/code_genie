@@ -17,6 +17,7 @@ mod diagnose;
 mod handfeel;
 mod pipeline;
 mod rime;
+mod sentence;
 mod bucket_store;
 mod calibrate;
 mod checkpoint;
@@ -234,6 +235,41 @@ enum Commands {
         author: String,
     },
 
+    /// 整句准确率：语料按全码串成按键流交给 librime 解码，与原文比对
+    #[command(name = "sentence")]
+    Sentence {
+        /// 全码表（字<TAB>码）
+        #[arg(long)]
+        table: String,
+        /// 语料文件，一行一句；也接受整段，按非汉字切开
+        #[arg(long)]
+        corpus: String,
+        /// 解码器可执行文件（tools/rime_eval.cc 编译产物）
+        #[arg(long)]
+        decoder: String,
+        /// librime 共享数据目录（放 schema / dict / essay）
+        #[arg(long)]
+        shared: String,
+        /// librime 用户数据目录
+        #[arg(long, default_value = "rime-user")]
+        user: String,
+        /// 方案 id
+        #[arg(long, default_value = "xingyun_test")]
+        schema: String,
+        /// 最多测多少句，0 = 全部
+        #[arg(long, default_value = "0")]
+        limit: usize,
+        /// 句长上限
+        #[arg(long, default_value = "20")]
+        max_len: usize,
+        /// 导出中间文件（按键流 / 原文 / 解码）的目录
+        #[arg(long)]
+        dump: Option<String>,
+        /// 结果 Markdown
+        #[arg(long)]
+        out: Option<String>,
+    },
+
     /// 摊开一个字的取码链路：拆分 → 码位 → 键位 → 编码
     #[command(name = "pipeline")]
     Pipeline {
@@ -386,6 +422,30 @@ fn main() {
             &name,
             &author,
         ),
+
+        Some(Commands::Sentence {
+            table,
+            corpus,
+            decoder,
+            shared,
+            user,
+            schema,
+            limit,
+            max_len,
+            dump,
+            out,
+        }) => sentence::run(&sentence::参数 {
+            码表: table.into(),
+            语料: corpus.into(),
+            解码器: decoder.into(),
+            共享目录: shared.into(),
+            用户目录: user.into(),
+            方案: schema,
+            上限: limit,
+            最长: max_len,
+            导出: dump.map(Into::into),
+            结果: out.map(Into::into),
+        }),
 
         Some(Commands::Pipeline {
             keymap,
