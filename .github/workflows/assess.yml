@@ -82,7 +82,7 @@ jobs:
       - name: 编译
         run: |
           set -o pipefail
-          cargo build --release 2>&1 | tail -n 5
+          cargo build --release 2>&1 | tail -n 60
 
       # ---- 手动模式：只测给定的一份码表 ----
       - name: 导出码表
