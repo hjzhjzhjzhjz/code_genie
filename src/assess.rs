@@ -846,6 +846,12 @@ fn 生成方案档案(
         }
     }
 
+    // 把码表来源写进档案，补连续文本当量的脚本靠它取码
+    if let Some(obj) = 档.as_object_mut() {
+        let 源 = std::fs::canonicalize(码表).unwrap_or_else(|_| 码表.to_path_buf());
+        obj.insert("_碼表".to_string(), json!(源.to_string_lossy()));
+    }
+
     let 文本 =
         serde_json::to_string_pretty(&档).map_err(|e| format!("序列化方案档案失败: {}", e))?;
     std::fs::create_dir_all(目录).ok();
