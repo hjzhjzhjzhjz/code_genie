@@ -122,6 +122,7 @@ enum Commands {
     },
 
     /// 导出测评用码表（字<TAB>码，简码在前、全码在后）
+    #[command(name = "export")]
     ExportTable {
         /// 键位映射文件（output-keymap.txt）
         #[arg(short = 'k', long)]
