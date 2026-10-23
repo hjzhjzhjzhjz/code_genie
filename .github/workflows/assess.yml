@@ -169,7 +169,7 @@ jobs:
           C=moling/chaifen-all.txt
           S=runs/s4-export/output-simple-codes.txt
           ./target/release/code_genie pipeline --keymap "$K" --chaifen "$C" --simple "$S" \
-            --chars "$CHARS" --output 流水线.md
+            --fixed moling/input-fixed.txt --chars "$CHARS" --top 5 --output 流水线.md
           args=()
           while IFS= read -r line; do
             [ -z "$line" ] && continue
