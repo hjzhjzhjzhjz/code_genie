@@ -185,7 +185,7 @@ pub fn save_combined_code_output(ctx: &OptContext, assignment: &[u8], dir: &str)
         out.push_str(&format!("{}\t{}\n", ch, code_str));
     }
 
-    crate::fsutil::write_with_backup(format!("{}/output-combined.txt", dir), out).unwrap();
+    crate::fsutil::write_with_backup(format!("{}/合并码表.txt", dir), out).unwrap();
 }
 
 /// 保存简码输出
@@ -287,7 +287,7 @@ pub fn save_simple_code_output(ctx: &OptContext, assignment: &[u8], dir: &str) {
         }
     }
 
-    crate::fsutil::write_with_backup(format!("{}/output-simple-codes.txt", dir), out).unwrap();
+    crate::fsutil::write_with_backup(format!("{}/简码表.txt", dir), out).unwrap();
 }
 
 /// 保存线程结果
@@ -351,7 +351,7 @@ pub fn save_thread_results(
         assignment,
         root_usage,
     );
-    crate::fsutil::write_with_backup(format!("{}/output-keymap.txt", thread_dir), &root_out).unwrap();
+    crate::fsutil::write_with_backup(format!("{}/字根键位表.txt", thread_dir), &root_out).unwrap();
 
     // 保存编码结果
     let mut root_to_key: HashMap<String, u8> = HashMap::new();
@@ -376,7 +376,7 @@ pub fn save_thread_results(
         let code_str: String = code_parts.into_iter().collect();
         code_out.push_str(&format!("{}\t{}\t{}\n", ch, code_str, freq));
     }
-    crate::fsutil::write_with_backup(format!("{}/output-encode.txt", thread_dir), code_out).unwrap();
+    crate::fsutil::write_with_backup(format!("{}/单字编码表.txt", thread_dir), code_out).unwrap();
 
     save_key_distribution_to_dir(ctx, assignment, &thread_dir);
     save_equiv_distribution_to_dir(ctx, assignment, &thread_dir);
@@ -434,7 +434,7 @@ pub fn save_key_distribution_to_dir(ctx: &OptContext, assignment: &[u8], dir: &s
         }
     }
 
-    crate::fsutil::write_with_backup(format!("{}/output-distribution.txt", dir), out).unwrap();
+    crate::fsutil::write_with_backup(format!("{}/用指分布.txt", dir), out).unwrap();
 }
 
 /// 保存当量分布到目录
@@ -475,7 +475,7 @@ pub fn save_equiv_distribution_to_dir(ctx: &OptContext, assignment: &[u8], dir: 
         out.push_str(&format!("{}\t{:.4}\t{}\n", ch, eq, freq));
     }
 
-    crate::fsutil::write_with_backup(format!("{}/output-equiv-dist.txt", dir), out).unwrap();
+    crate::fsutil::write_with_backup(format!("{}/当量分布.txt", dir), out).unwrap();
 }
 
 /// 保存结果到输出目录
@@ -534,7 +534,7 @@ pub fn save_results(
         assignment,
         root_usage,
     );
-    crate::fsutil::write_with_backup(format!("{}/output-keymap.txt", output_dir), &root_out).unwrap();
+    crate::fsutil::write_with_backup(format!("{}/字根键位表.txt", output_dir), &root_out).unwrap();
 
     // 保存编码结果
     let mut root_to_key: HashMap<String, u8> = HashMap::new();
@@ -559,7 +559,7 @@ pub fn save_results(
         let code_str: String = code_parts.into_iter().collect();
         code_out.push_str(&format!("{}\t{}\t{}\n", ch, code_str, freq));
     }
-    crate::fsutil::write_with_backup(format!("{}/output-encode.txt", output_dir), code_out).unwrap();
+    crate::fsutil::write_with_backup(format!("{}/单字编码表.txt", output_dir), code_out).unwrap();
 
     save_key_distribution_to_dir(ctx, assignment, output_dir);
     save_equiv_distribution_to_dir(ctx, assignment, output_dir);
@@ -567,7 +567,7 @@ pub fn save_results(
     save_combined_code_output(ctx, assignment, output_dir);
 
     println!(
-        "结果已保存至 {}/output-keymap.txt, output-encode.txt, output-simple-codes.txt, output-combined.txt 等",
+        "结果已保存至 {}/字根键位表.txt, 单字编码表.txt, 简码表.txt, 合并码表.txt 等",
         output_dir
     );
 }
@@ -648,7 +648,7 @@ pub fn save_summary(
         }
     }
 
-    crate::fsutil::write_with_backup(format!("{}/summary.txt", output_dir), summary).unwrap();
+    crate::fsutil::write_with_backup(format!("{}/汇总.txt", output_dir), summary).unwrap();
 }
 
 // =========================================================================
@@ -714,7 +714,7 @@ mod space_commit_output_tests {
         )
     }
 
-    /// 收集 output-simple-codes.txt 中的数据行简码列（跳过注释/空行）。
+    /// 收集 简码表.txt 中的数据行简码列（跳过注释/空行）。
     fn read_simple_codes(path: &str) -> Vec<String> {
         let content = fs::read_to_string(path).expect("读取简码输出文件失败");
         let mut codes = Vec::new();
@@ -755,7 +755,7 @@ mod space_commit_output_tests {
 
             save_simple_code_output(&ctx, &asg, &dir_str);
 
-            let codes = read_simple_codes(&format!("{}/output-simple-codes.txt", dir_str));
+            let codes = read_simple_codes(&format!("{}/简码表.txt", dir_str));
             prop_assert!(!codes.is_empty(), "应至少有一个字出简");
 
             for code in &codes {
