@@ -42,9 +42,8 @@ function 取參(名: string, 缺省?: string): string | undefined {
 }
 
 const 檔案路徑 = 取參('--profile')
-const 碼表路徑 = 取參('--table')
-if (!檔案路徑 || !碼表路徑) {
-  console.error('用法：--profile <方案档案.json> --table <码表.txt> [--samples N] [--window N]')
+if (!檔案路徑) {
+  console.error('用法：--profile <方案档案.json> [--table <码表.txt>] [--samples N] [--window N]')
   process.exit(1)
 }
 const 窗口長度 = Number(取參('--window', '100'))
@@ -53,6 +52,13 @@ const 樣本數 = Number(取參('--samples', '20000'))
 const 读Json = (路径: string) => JSON.parse(fs.readFileSync(路径, 'utf8').replace(/^\uFEFF/, ''))
 
 const 配置 = 读Json(檔案路徑)
+// 码表路径：显式 --table 优先，否则用 code_genie 写进档案的 _碼表
+const 碼表路徑 = 取參('--table') ?? (配置._碼表 as string | undefined)
+delete 配置._碼表
+if (!碼表路徑) {
+  console.error('缺 --table，且方案档案里没有 _碼表')
+  process.exit(1)
+}
 const 分隔符 = (配置.碼表元數據?.分隔符 ?? '製表符') as '空格' | '製表符' | '逗號' | '分號'
 const 第一列類型 = (配置.碼表元數據?.第一列類型 ?? '字符') as '字符' | '編碼'
 const 最大碼長 = Number(配置.方案參數?.最大碼長 ?? 4)
