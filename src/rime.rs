@@ -259,8 +259,8 @@ translator:
   dictionary: {标识}
   prism: {标识}
   enable_user_dict: false
-  enable_sentence: true
-  enable_completion: true
+  enable_sentence: false
+  enable_completion: false
   spelling_hints: 5
 
 key_binder:
@@ -278,6 +278,40 @@ menu:
         作者 = 作者
     );
     std::fs::write(根.join(format!("{}.schema.yaml", 标识)), 方案).ok();
+
+    // 安装说明
+    let 说明 = format!(
+        "{}（{}）Rime 方案\n\
+         ================================\n\n\
+         文件\n\
+           {}.schema.yaml        方案定义\n\
+           {}.dict.yaml          主词典（汇聚下面三张）\n\
+           {}.full.dict.yaml     全码单字 {} 条\n\
+           {}.short.dict.yaml    简码单字 {} 条\n\
+           {}.words.dict.yaml    词组 {} 条\n\n\
+         安装（小狼毫 / 鼠须管 / fcitx-rime）\n\
+           1. 把本目录全部文件拷进用户资料夹的 rime/ 下\n\
+           2. 重新部署（小狼毫：右键托盘 → 重新部署）\n\
+           3. 方案选单里选「{}」\n\n\
+         用法\n\
+           全码 4 键，一／二／三级简码取全码前缀，打简码后按空格上屏。\n\
+           4 键打满后空格仍取首选，与五笔一致。\n\n\
+         备注\n\
+           enable_sentence 与 enable_completion 均为 false：\n\
+           不开整句联想、不做前缀补全，避免一按首键就刷出上千候选。\n",
+        名称,
+        标识,
+        标识,
+        标识,
+        标识,
+        全数.max(全条),
+        标识,
+        简数.max(简条),
+        标识,
+        词条数,
+        名称
+    );
+    std::fs::write(根.join("安装说明.txt"), 说明).ok();
 
     println!("=== Rime 方案生成 ===");
     println!("  目录: {}", 目录);
