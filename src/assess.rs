@@ -430,6 +430,15 @@ pub fn run(
         std::fs::create_dir_all(目录).ok();
     }
 
+    // 宇浩自己用的 CJK 区段，选重统计要和它一致
+    let 区块 = handfeel::读区块(
+        &工作目录
+            .join("public")
+            .join("settings")
+            .join("cjkBlocks.json"),
+    )
+    .unwrap_or_else(|| handfeel::默认区块.to_vec());
+
     // 词表用于算连击
     let 词表 = handfeel::找词表(&工作目录);
     match &词表 {
@@ -451,7 +460,7 @@ pub fn run(
                     .and_then(|r| handfeel::从热力(r, "簡碼"))
                     .filter(|f| f.中排() > 0.0);
                 let 连 = 词表.as_ref().and_then(|w| handfeel::算连击(路径, w).ok());
-                let 选 = handfeel::算选重(路径).ok();
+                let 选 = handfeel::算选重(路径, &区块).ok();
                 if let Some(m) = 解析(名, &值, 指位, 连, 选) {
                     指标表.push(m);
                 }
@@ -529,7 +538,7 @@ fn 生成汇总(表: &[指标]) -> Result<String, String> {
             数量(m.选重.as_ref().map(|x| x.简码))
         ));
     }
-    s.push_str("\n> 选重数按全表统计：选重个数 = 重码字数 − 重码组数。全码取每字最长码，简码取每字最短码（没有简码的字保留全码）。通用规范／常用国字两列只覆盖各自字集，选重数是全表范围。\n");
+    s.push_str("\n> 选重数按宇浩的 CJK 区段统计（等同网页版「到CJK擴J」那行）：选重个数 = 重码字数 − 重码组数。全码取每字最长码，简码取每字最短码（没有简码的字保留全码）。\n");
 
     // ---- 表二：指位与连击 ----
     if 表.iter().any(|m| m.指位.is_some() || m.连击.is_some()) {
