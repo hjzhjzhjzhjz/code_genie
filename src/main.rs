@@ -268,6 +268,9 @@ enum Commands {
         /// 结果 Markdown
         #[arg(long)]
         out: Option<String>,
+        /// 让解码器输出候选诊断
+        #[arg(long)]
+        verbose: bool,
     },
 
     /// 摊开一个字的取码链路：拆分 → 码位 → 键位 → 编码
@@ -434,6 +437,7 @@ fn main() {
             max_len,
             dump,
             out,
+            verbose,
         }) => sentence::run(&sentence::参数 {
             码表: table.into(),
             语料: corpus.into(),
@@ -445,6 +449,7 @@ fn main() {
             最长: max_len,
             导出: dump.map(Into::into),
             结果: out.map(Into::into),
+            详细: verbose,
         }),
 
         Some(Commands::Pipeline {
