@@ -22,6 +22,7 @@ mod export_table;
 mod fsutil;
 mod loader;
 mod output;
+mod root_chart;
 mod schedule;
 mod simple;
 mod types;
@@ -140,6 +141,21 @@ enum Commands {
         #[arg(short = 'o', long, default_value = "output-table.txt")]
         output: String,
     },
+    /// 生成字根图（HTML）
+    #[command(name = "chart")]
+    Chart {
+        /// 键位映射文件（output-keymap.txt）
+        #[arg(short = 'k', long)]
+        keymap: String,
+
+        /// 字根映射表（可选，花括号名 → PUA 显示字）
+        #[arg(short = 'm', long)]
+        mapping: Option<String>,
+
+        /// 输出文件
+        #[arg(short = 'o', long, default_value = "root-chart.html")]
+        output: String,
+    },
 }
 
 // =========================================================================
@@ -189,6 +205,11 @@ fn main() {
             simple,
             output,
         }) => export_table::run(&keymap, &chaifen, simple.as_deref(), &output),
+        Some(Commands::Chart {
+            keymap,
+            mapping,
+            output,
+        }) => root_chart::run(&keymap, mapping.as_deref(), &output),
         Some(Commands::Optimize {
             output_dir,
             seed_dir,
