@@ -359,6 +359,13 @@ pub struct 选重统计 {
     pub 简码: u64,
     pub 全码组: u64,
     pub 简码组: u64,
+    /// 出简让全：出简字不占全码位时，全码空间剩下的选重个数
+    pub 全码让全: u64,
+    pub 全码让全组: u64,
+    /// 0–3 阶重。零阶精确 Σ(n−1)，一阶以上 Σ n²/2 ÷ 键数^阶
+    pub 阶重: [f64; 4],
+    /// 方案实际用到的键数
+    pub 用键数: u32,
 }
 
 /// 算一份码表在全表范围内的选重个数
@@ -384,11 +391,28 @@ pub fn 算选重(码表: &Path, 区块: &[(u32, u32)]) -> Result<选重统计, S
 
     let mut 全桶: HashMap<String, u64> = HashMap::new();
     let mut 简桶: HashMap<String, u64> = HashMap::new();
+    // 出简让全：出简字放弃全码位，全码桶里只剩没有简码的字
+    let mut 让全桶: HashMap<String, u64> = HashMap::new();
+    let mut 键集: HashSet<char> = HashSet::new();
+    let mut 最长长度 = 0usize;
+
     for (_, mut 列) in 分组 {
         列.sort_by_key(|s| s.len());
         let 最长 = 列.last().unwrap().clone();
         let 最短 = 列.first().unwrap().clone();
-        *全桶.entry(最长).or_insert(0) += 1;
+        let 有简 = 列.len() > 1;
+
+        for c in 最长.chars() {
+            if c != '_' {
+                键集.insert(c);
+            }
+        }
+        最长长度 = 最长长度.max(最长.chars().count());
+
+        *全桶.entry(最长.clone()).or_insert(0) += 1;
+        if !有简 {
+            *让全桶.entry(最长).or_insert(0) += 1;
+        }
         *简桶.entry(最短).or_insert(0) += 1;
     }
 
@@ -406,11 +430,51 @@ pub fn 算选重(码表: &Path, 区块: &[(u32, u32)]) -> Result<选重统计, S
 
     let (全组, 全字) = 汇总(&全桶);
     let (简组, 简字) = 汇总(&简桶);
+    let (让全组, 让全字) = 汇总(&让全桶);
+
+    // 阶重：按全码前 (最长长度 − 阶) 位分桶，短码用 ε 补位
+    let 键数 = 键集.len().max(1) as f64;
+    let mut 阶重 = [0.0f64; 4];
+    for 阶 in 0..4usize {
+        if 阶 >= 最长长度 {
+            break;
+        }
+        let 保留 = 最长长度 - 阶;
+        let mut 桶: HashMap<String, u64> = HashMap::new();
+        for (码, 数) in &全桶 {
+            let 前缀: String = 码
+                .chars()
+                .chain(std::iter::repeat('ε'))
+                .take(保留)
+                .collect();
+            *桶.entry(前缀).or_insert(0) += *数;
+        }
+        if 阶 == 0 {
+            阶重[0] = 桶
+                .values()
+                .filter(|n| **n > 1)
+                .map(|n| (*n - 1) as f64)
+                .sum();
+        } else {
+            let 空间 = 键数.powi(阶 as i32);
+            阶重[阶] = 桶
+                .values()
+                .map(|n| {
+                    let f = *n as f64;
+                    f * f / 2.0 / 空间
+                })
+                .sum();
+        }
+    }
 
     Ok(选重统计 {
         全码: 全字 - 全组,
         简码: 简字 - 简组,
         全码组: 全组,
         简码组: 简组,
+        全码让全: 让全字 - 让全组,
+        全码让全组: 让全组,
+        阶重,
+        用键数: 键集.len() as u32,
     })
 }
