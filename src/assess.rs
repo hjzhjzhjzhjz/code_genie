@@ -196,6 +196,7 @@ pub fn run(
     方案: &str,
     yuhao目录: &str,
     保留: Option<&str>,
+    汇总: Option<&str>,
 ) {
     let 工作目录 =
         std::fs::canonicalize(yuhao目录).unwrap_or_else(|_| PathBuf::from(yuhao目录));
@@ -273,4 +274,44 @@ pub fn run(
     });
     println!();
     打印(&指标表);
+
+    if let Some(路径) = 汇总 {
+        match 生成汇总(&指标表) {
+            Ok(文本) => match std::fs::write(路径, 文本) {
+                Ok(_) => println!("\n汇总已写入 {}", 路径),
+                Err(e) => eprintln!("⚠️ 写不了汇总: {}", e),
+            },
+            Err(e) => eprintln!("⚠️ {}", e),
+        }
+    }
+}
+
+/// 生成 Markdown 对比表（供 Job Summary 用）
+fn 生成汇总(表: &[指标]) -> Result<String, String> {
+    let mut s = String::new();
+    s.push_str("## 宇浩测评对比\n\n");
+    s.push_str("按加权码长 N=500 升序，越小越快。重码列写作「字数/组数」。\n\n");
+    s.push_str("| 方案 | 速度当量(全码) | 速度当量(简码) | 动态选重(全码) | 码长 N=500 | 通用规范重码 | 常用国字重码 |\n");
+    s.push_str("|---|---:|---:|---:|---:|---:|---:|\n");
+    for m in 表 {
+        s.push_str(&format!(
+            "| {} | {:.4} | {:.4} | {:.6} | **{:.4}** | {}/{} | {}/{} |\n",
+            m.名,
+            m.速度全码,
+            m.速度简码,
+            m.选重全码,
+            m.码长500,
+            m.通用全码.0,
+            m.通用全码.1,
+            m.常用全码.0,
+            m.常用全码.1
+        ));
+    }
+    if let Some(最优) = 表.first() {
+        s.push_str(&format!(
+            "\n最优：**{}**（码长 {:.4}，速度当量 {:.4}）\n",
+            最优.名, 最优.码长500, 最优.速度全码
+        ));
+    }
+    Ok(s)
 }
