@@ -92,14 +92,14 @@ fn pnpm() -> String {
 }
 
 /// 对一张码表跑测评，返回 (结果 JSON, 输出文件路径)
-fn 测评一张(码表: &Path, 方案: &Path, 工作目录: &Path) -> Result<(Value, PathBuf), String> {
+fn 测评一张(
+    码表: &Path,
+    名: &str,
+    方案: &Path,
+    工作目录: &Path,
+) -> Result<(Value, PathBuf), String> {
     // CLI 在 yuhao 目录里跑，必须给绝对路径
     let 码表 = &std::fs::canonicalize(码表).unwrap_or_else(|_| 码表.to_path_buf());
-    let 名 = 码表
-        .parent()
-        .and_then(|p| p.file_name())
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "码表".to_string());
 
     let 子目录 = 工作目录.join("assess-tmp");
     std::fs::create_dir_all(&子目录).map_err(|e| format!("建不了临时目录: {}", e))?;
@@ -200,12 +200,28 @@ pub fn run(
         std::fs::canonicalize(yuhao目录).unwrap_or_else(|_| PathBuf::from(yuhao目录));
     let 方案路径 = std::fs::canonicalize(方案).unwrap_or_else(|_| PathBuf::from(方案));
 
-    let mut 清单: Vec<PathBuf> = Vec::new();
+    let mut 清单: Vec<(PathBuf, String)> = Vec::new();
     if let Some(t) = 表 {
-        清单.push(std::fs::canonicalize(t).unwrap_or_else(|_| PathBuf::from(t)));
+        let 路径 = std::fs::canonicalize(t).unwrap_or_else(|_| PathBuf::from(t));
+        let 名 = 路径
+            .parent()
+            .and_then(|p| p.file_name())
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "码表".to_string());
+        清单.push((路径, 名));
     }
     if let Some(d) = 目录 {
-        清单.extend(收集(Path::new(d), 文件名));
+        let 根 = PathBuf::from(d);
+        for 路径 in 收集(&根, 文件名) {
+            let 名 = 路径
+                .strip_prefix(&根)
+                .ok()
+                .and_then(|p| p.parent())
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "码表".to_string());
+            清单.push((路径, 名));
+        }
     }
     if 清单.is_empty() {
         eprintln!("✗ 没有找到码表：请给 --table 或 --dir");
@@ -220,15 +236,10 @@ pub fn run(
     let mut 指标表: Vec<指标> = Vec::new();
     let mut 输出文件: Vec<PathBuf> = Vec::new();
 
-    for 路径 in &清单 {
-        match 测评一张(路径, &方案路径, &工作目录) {
+    for (路径, 名) in &清单 {
+        match 测评一张(路径, 名, &方案路径, &工作目录) {
             Ok((值, 文件)) => {
-                let 名 = 路径
-                    .parent()
-                    .and_then(|p| p.file_name())
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| 路径.display().to_string());
-                if let Some(m) = 解析(&名, &值) {
+                if let Some(m) = 解析(名, &值) {
                     指标表.push(m);
                 }
                 输出文件.push(文件);
