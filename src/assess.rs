@@ -103,7 +103,8 @@ fn 测评一张(
 
     let 子目录 = 工作目录.join("assess-tmp");
     std::fs::create_dir_all(&子目录).map_err(|e| format!("建不了临时目录: {}", e))?;
-    let 相对 = format!("assess-tmp/{}.json", 名);
+    let 安全名 = 名.replace(['/', '\\'], "_");
+    let 相对 = format!("assess-tmp/{}.json", 安全名);
     let 绝对 = 工作目录.join(&相对);
     let _ = std::fs::remove_file(&绝对);
 
