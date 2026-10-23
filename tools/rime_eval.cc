@@ -8,7 +8,8 @@
 // 与 librime 自带的 rime_api_console 相比：
 //   1. 共享/用户目录由 --shared / --user 显式给出，不猜 ~/.config；
 //   2. 输出只有 commit 文本，不夹 menu / status，方便逐行对齐；
-//   3. 空格没提交时兜底选第 1 候选，并清空残留组合，避免串味。
+//   3. 空格没提交时兜底选第 1 候选，并清空残留组合，避免串味；
+//   4. --verbose 会把方案状态和候选情况打到 stderr，便于排查。
 //
 // 编译：g++ -O2 tools/rime_eval.cc -o rime_eval $(pkg-config --cflags --libs rime)
 // =========================================================================
@@ -21,11 +22,26 @@
 #include <iostream>
 
 static std::string schema_id = "xingyun_test";
+static int verbose = 0;
+
+static void 打印状态(RimeSessionId session, RimeApi* rime) {
+  RIME_STRUCT(RimeStatus, status);
+  if (rime->get_status(session, &status)) {
+    std::fprintf(stderr,
+                 "[状态] schema=%s/%s disabled=%d ascii=%d composing=%d\n",
+                 status.schema_id ? status.schema_id : "(空)",
+                 status.schema_name ? status.schema_name : "(空)",
+                 (int)status.is_disabled, (int)status.is_ascii_mode,
+                 (int)status.is_composing);
+    rime->free_status(&status);
+  } else {
+    std::fprintf(stderr, "[状态] 取不到\n");
+  }
+}
 
 int main(int argc, char** argv) {
   const char* shared = nullptr;
   const char* user = nullptr;
-  int verbose = 0;
   for (int i = 1; i < argc; ++i) {
     if (!std::strcmp(argv[i], "--shared") && i + 1 < argc) {
       shared = argv[++i];
@@ -57,12 +73,17 @@ int main(int argc, char** argv) {
   traits.distribution_name = "Rime";
   traits.distribution_code_name = "rime-eval";
   traits.distribution_version = "1.0";
-  traits.min_log_level = verbose ? 2 : 3;
+  traits.min_log_level = verbose ? 1 : 3;
 
   rime->setup(&traits);
   rime->initialize(nullptr);
   if (rime->start_maintenance(True)) {
     rime->join_maintenance_thread();
+    if (verbose) {
+      std::fprintf(stderr, "[部署] 跑完了\n");
+    }
+  } else if (verbose) {
+    std::fprintf(stderr, "[部署] 没触发（已有部署产物？）\n");
   }
 
   RimeSessionId session = rime->create_session();
@@ -76,6 +97,9 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "选不了方案 %s\n", schema_id.c_str());
       return 1;
     }
+  }
+  if (verbose) {
+    打印状态(session, rime);
   }
 
   std::fprintf(stderr, "ready schema=%s shared=%s user=%s\n", schema_id.c_str(),
@@ -94,19 +118,19 @@ int main(int argc, char** argv) {
     RIME_STRUCT(RimeCommit, commit);
     bool 有提交 = false;
 
-    if (rime->simulate_key_sequence(session, line.c_str()) &&
-        rime->get_commit(session, &commit)) {
+    Bool 按键成功 = rime->simulate_key_sequence(session, line.c_str());
+    if (按键成功 && rime->get_commit(session, &commit)) {
       有提交 = true;
     }
 
     if (!有提交) {
-      // 空格没提交：看一眼候选，能选就选第 1 个
       RIME_STRUCT(RimeContext, ctx);
       if (rime->get_context(session, &ctx)) {
         if (已诊断 < 3) {
           std::fprintf(stderr,
-                       "[诊断] 组合长度=%d 候选=%d 首候选=%s 预显=%s\n",
-                       (int)ctx.composition.length, ctx.menu.num_candidates,
+                       "[诊断] 按键=%d 组合长度=%d 候选=%d 首候选=%s 预显=%s\n",
+                       (int)按键成功, (int)ctx.composition.length,
+                       ctx.menu.num_candidates,
                        ctx.menu.num_candidates > 0 ? ctx.menu.candidates[0].text
                                                    : "(无)",
                        ctx.composition.preedit ? ctx.composition.preedit : "");
