@@ -150,7 +150,7 @@ jobs:
             --decoder ./rime_eval \
             --shared "$PWD/rime-data" \
             --user "$PWD/rime-user" \
-            --schema xingyun_test \
+            --schema xingyun_test --verbose \
             --limit "$LIMIT" --max-len "$MAXLEN" \
             --dump 整句中间 \
             --out 整句.md 2>&1 | tee sentence.log
