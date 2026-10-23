@@ -67,9 +67,11 @@ jobs:
 
       - name: 准备测评数据
         run: |
-          mkdir -p yuhao-assess/public/data
+          mkdir -p yuhao-assess/public/data yuhao-assess/public/texts
           cp yuhao-data/*.json yuhao-assess/public/data/
+          cp yuhao-text/literature.txt yuhao-assess/public/texts/literature.txt
           ls -1 yuhao-assess/public/data
+          wc -c < yuhao-assess/public/texts/literature.txt
 
       - name: 安装 Rust
         uses: dtolnay/rust-toolchain@stable
@@ -153,6 +155,21 @@ jobs:
             --data ceping-data \
             --summary 诊断.md
           if [ -f 诊断.md ]; then cat 诊断.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: 补连续文本当量
+        run: |
+          set -e
+          shopt -s nullglob
+          cp 工具/fill-continuous.mts yuhao-assess/scripts/
+          if [ ! -d 方案档案 ]; then
+            echo "::warning::没有方案档案，跳过"
+            exit 0
+          fi
+          for f in 方案档案/*.json; do
+            echo "── $f"
+            (cd yuhao-assess && pnpm tsx -r tsconfig-paths/register \
+              scripts/fill-continuous.mts --profile "../$f")
+          done
 
       - name: 上传结果
         if: always()
