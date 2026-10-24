@@ -472,19 +472,27 @@ perl -CSDA -F'\t' -Mautodie -Mutf8 -lanE 'use Unicode::Normalize;
 
   # 潇明声码约束
   if ($ENV{SCHEMA} eq "xiaoming") {
-    %stroke_mapping = qw( 1 d 2 k 3 f 4 j 5 i 6 e );
+    ### 2026-10-11: 潇明不再使用人为定义好的笔画映射，以利于退火优化时得到更好的当量
+    #%stroke_mapping = qw( 1 d 2 k 3 f 4 j 5 i 6 e );
     if (length($F[1]) > 1) {
         push @{ $xiaoming_consonants{ substr($F[1], 0, 1) } }, $F[0];
     } else {
-        print "$F[0].S\t", $stroke_mapping{ $strokes{ $F[0] } };
+        #print "$F[0].S\t", $stroke_mapping{ $strokes{ $F[0] } };
+        push @{ $xiaoming_strokes{ $strokes{ $F[0] } } }, "$F[0].S";
     }
-    print "$F[0].Y\t", $stroke_mapping{ $strokes{ $F[0] } };
+    #print "$F[0].Y\t", $stroke_mapping{ $strokes{ $F[0] } };
+    push @{ $xiaoming_strokes{ $strokes{ $F[0] } } }, "$F[0].Y";
     next;
 
     END {
         for (sort keys %xiaoming_consonants) {
             print "# $_";
             print join(" ", map { "$_.S" } @{ $xiaoming_consonants{$_} }), "\t", join(" ", split /\s*/, "dfjkei");
+        }
+
+        for (sort keys %xiaoming_strokes) {
+            print "# $_";
+            print join(" ", map { "$_" } @{ $xiaoming_strokes{$_} }), "\t", join(" ", split /\s*/, "dfjkei");
         }
     }
   }
@@ -496,7 +504,9 @@ perl -CSDA -F'\t' -Mautodie -Mutf8 -lanE 'use Unicode::Normalize;
     if ($ENV{SCHEMA} eq "yaoling") {
         push @{ $yaoling_consonants{$a} }, $F[0];    # 妖灵的声母重新映射到声码，并且对应固定的韵码
     } else {
-        if ($ENV{OPTIMIZE_KEYS} =~ /$a/) {
+        if ($F[0] eq '口' && $ENV{OPTIMIZE_KEYS} =~ /K/) {      # 单独映射高频根「口」的声母 k
+            push @{ $consonants{$F[0]} }, $F[0];
+        } elsif ($ENV{OPTIMIZE_KEYS} =~ /$a/) {
             push @{ $consonants{$a} }, $F[0];
         } else {
             # 补充处理自行提供的 roots.txt
@@ -693,3 +703,7 @@ if sed -ne '/^\s*\[weights.simple_code\]/,/^\s*\[/p' "$CONFIG_TOML" | grep -qi '
     echo '(13) 替换 input-fixed.txt 和 input-division.txt 中的 .A, .S, .Y  为 .0, .1, .2 以让码灵能计算简码 ...'
     perl -CSDA -i -lpE 's/(\S)\.A/\1.0/g;  s/(\S)\.S/\1.1/g;  s/(\S)\.Y/\1.2/g' input-fixed.txt input-division.txt
 fi
+
+echo
+echo '数据准备工作成功完成！'
+

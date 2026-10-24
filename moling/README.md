@@ -33,6 +33,7 @@
     * 包含 0 时，使用退火算法决定零声母的按键，默认使用 w，可以使用环境变量 `OPTIMIZE_KEY_0` 设置；
     * 包含 y 时，使用退火算法决定声母 y 的按键，默认使用 k，可以使用环境变量 `OPTIMIZE_KEY_y` 设置；
     * 包含 z 时，使用退火算法决定声母 z 的按键，默认使用 v，可以使用环境变量 `OPTIMIZE_KEY_z` 设置；
+    * 包含 K 时，使用退火算法决定高频根「口」的 声母 k 的按键，默认不映射，可以使用环境变量 `OPTIMIZE_KEY_K` 设置；
     * 包含 1 时，使用退火算法决定笔画「横」的按键，默认使用 o；
     * 包含 2 时，使用退火算法决定笔画「竖」的按键，默认使用 u；
     * 包含 3 时，使用退火算法决定笔画「撇」的按键，默认使用 e；
@@ -74,18 +75,22 @@ SCHEMA=yuling ./optimize.sh
 ```
 
 注意：开启按键映射后，`roots.txt` 中的字根声码不是最终版，关闭 `USE_VOWEL` 使用字根首笔时，
-`roots.txt` 中的字根韵码不是最终版，最终的字根编码以码灵输出的 `output-TIMESTAMP/output-keymap.txt` 为准。
+`roots.txt` 中的字根韵码不是最终版，最终的字根编码以码灵输出的 `$SCHEMA-output/output-TIMESTAMP/output-keymap.txt` 为准。
 
 
 ## 检查结果
 
-1. 使用 https://ceping.shurufa.app 查看 `output-<TIMESTAMP>/output-combined.txt` 码表的指标，注意在「首页」里设置「編碼終止指示符] 为 "aeuio_" (不要引号)；
-2. 运行 `./compare-optimization-results.sh` 批量检查 `output-<TIMESTAMP>/thread-<NN>/output-combined.txt`，注意脚本末尾的过滤条件比较严，完整结果见生成的 `all-results.txt`；
-3. 运行 `./stat-moling-roots.pl --mabiao output-<TIMESTAMP>/output-combined.txt`；
-4. 运行 `./generate-root-chart.sh output-<TIMESTAMP>` 生成字根表和字根图，也可以指定到 `output-<TIMESTAMP>/thread-<NN>` 目录；
+1. 使用 https://ceping.shurufa.app 查看 `$SCHEMA-output/output-<TIMESTAMP>/output-combined.txt` 码表的指标，注意在「首页」里设置「編碼終止指示符] 为 "aeuio_" (不要引号)；
+2. 运行 `./compare-optimization-results.sh` 批量检查 `$SCHEMA-output/output-<TIMESTAMP>/thread-<NN>/output-combined.txt`，注意脚本末尾的过滤条件比较严，完整结果见生成的 `all-results.txt`；
+3. 运行 `./stat-moling-roots.pl --mabiao $SCHEMA-output/output-<TIMESTAMP>/output-combined.txt`；
+4. 运行 `./generate-root-chart.sh $SCHEMA-output/output-<TIMESTAMP>` 生成字根表和字根图，也可以指定到 `$SCHEMA-output/output-<TIMESTAMP>/thread-<NN>` 目录；
 
 
 ## 优化指北
+
+注意：本目录实际已经演变成多方案共存，可以参考 `HOWTO-OPTIMIZATION.md` 和各方案自己
+的 `$SCHEMA-OPTIMIZATION.md` 里的算码流程，这两份 Markdown 文档定位是给 LLM
+模型自主循环算码优化用的。
 
 1. 可以使用 `./batch-test-weights.sh` 来探测合理的权重参数范围：
 
@@ -144,9 +149,11 @@ diff --color -U0 <(./analyze-duplicates-by-cluster.pl -m 0 --cluster "") <(./ana
     * `convert-yuling-rime-schema-to-moling.sh`
                                   转换灵明 RIME 方案为魔灵 RIME 方案，支持环境变量 `SCHEMA`
     * `compare-optimization-results.sh`
-                                  比较 `output-<TIMESTAMP>/thread-<NN>` 的优化结果，依赖[命令行版本的宇浩测评](https://github.com/Dieken/yuhao-assess/tree/cli)
+                                  比较 `$SCHEMA-output/output-<TIMESTAMP>/thread-<NN>` 的优化结果，依赖[宇浩测评](https://github.com/forfudan/yuhao-assess)。默认使用 `../../yuhao-assess`，可用环境变量 `YUHAO_ASSESS` 指定
     * `generate-xiaoming-words-dict.pl`
                                   生成潇明的词组码表
+    * `evaluate-xiaoming-mabiao-to-tsv.sh`
+                                  潇明批量生成码表批量测评的脚本
 
 * 第三方文件
     * `beiyu-char-freq.txt`       北语字频, https://faculty.blcu.edu.cn/xinghb/zh_CN/article/167473/content/1437.htm

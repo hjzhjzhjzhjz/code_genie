@@ -10,14 +10,14 @@ fixed = "input-fixed.txt"        # 固定字根文件
 dynamic = "input-roots.txt"      # 动态字根文件
 splits = "input-division.txt"    # 拆分表文件
 pair_equiv = "pair_equivalence.txt"  # 字根对当量文件
-key_dist = "key_distribution.txt"    # 用指分布文件
+key_dist = "key_distribution-moqing.txt"    # 用指分布文件
 
 # -------------------------------------------------------------------------
 # 🌡️ 模拟退火参数
 # -------------------------------------------------------------------------
 [annealing]
-threads = 4              # 并行线程数
-total_steps = 2000000    # 总迭代步数
+threads = 8              # 并行线程数（第 1 轮摸底）
+total_steps = 40000000   # 第四轮：保持热力前沿，增加到允许上限修复最后速度指标
 temp_start = 0.005       # 初始温度
 temp_end = 0.00005       # 结束温度
 comfort_temp = 0.0005    # 舒适温度区间
@@ -50,39 +50,41 @@ conflict_weight_by_freq = false  # 冲突排序：false=按汉字数量(优化�
 allowed = "qwertyuiopasdfghjklxcvbnm"
 # 键位显示顺序（用于输出报告）
 display_order = "qwertyuiopasdfghjklzxcvbnm"
+# 全码末键属于这些键时不追加虚拟空格转移当量
+termination_keys = "eauo_"
 
 # -------------------------------------------------------------------------
 # ⚖️ 权重配置
 # -------------------------------------------------------------------------
 [weights.full_code]
 # 全码部分权重（总和应为 1.0）
-collision_count = 0.13    # 重码数权重
-collision_rate = 0.47     # 重码率权重
-equivalence = 0.36        # 当量权重
-equiv_cv = 0.01           # 当量变异系数权重
-distribution = 0.03       # 分布偏差权重
+collision_count = 0.02    # 四轮复盘：恢复重码保护
+collision_rate = 0.01     # 保留重码率梯度
+equivalence = 0.94        # 四轮复盘：撤回 round-4 的过强当量权重
+equiv_cv = 0.02           # 保留当量变异系数梯度
+distribution = 0.01       # 保留分布梯度
 
 [weights.simple_code]
 # 简码优化开关与权重
 enabled = true           # 是否启用简码优化
-full_code_weight = 0.6   # 全码目标总权重
-simple_code_weight = 0.4 # 简码目标总权重
+full_code_weight = 0.5   # 自动优化 round-6：在通过全码后补回简码权重
+simple_code_weight = 0.5
 
 # 简码内部子权重（总和应为 1.0）
-collision_count = 0.1    # 重码数权重
-collision_rate = 0.3     # 重码率权重
-freq = 0.2               # 频率覆盖权重
-equiv = 0.2              # 当量权重
-dist = 0.2               # 分布偏差权重
+collision_count = 0.03   # 重码数权重
+collision_rate = 0.10    # 保留重码率安全约束
+freq = 0.05              # 频率覆盖权重
+equiv = 0.78             # 第 49 轮：小幅提高简码当量权重
+dist = 0.04              # 第 49 轮：从分布权重转出
 
 # 简码评估性能优化：激活、权重渐进、候选字与对账配置
 simple_start_progress = 0.4      # 简码计算激活进度阈值（进度 = 当前步/总步数；建议落在舒适区前沿，默认 0.4）
 simple_ramp_progress = 0.1       # 有效权重从 0 渐进到目标权重的进度长度（默认 0.1）
 simple_activation_reheat = 1.2   # 激活当刻温度升温倍率（独立于 reheat_factor；合理范围 [1.0, temp_start/激活基温]，默认 1.2）
 simple_coverage_ratio = 1.0      # 候选字累计字频覆盖率阈值（默认 1.0）
-simple_active_coverage = 0.90    # 退火期 active 候选覆盖率（须 ≤ simple_coverage_ratio）；其余(passive)候选仅在最终上报与输出时纳入，以降低每步简码计算量（默认 0.90）
+simple_active_coverage = 0.90    # 退火期 active 候选覆盖率
 reconcile_interval_ratio = 0.05  # 周期对账间隔比例，M = floor(total_steps × ratio)，M ≥ 1（默认 0.05）
-simple_assign_mode = "efficiency" # 桶内出简排序模式："frequency" 或 "efficiency"（默认 "efficiency"）
+simple_assign_mode = "frequency" # 第 9 轮：按频率分配简码，直接对照 efficiency
 simple_protect_top_n = 0         # 简码占用保护：禁止简码等于受保护汉字的全码；0=保护全部汉字，N>0=仅保护全字频前 N 名（默认 0）
 
 # -------------------------------------------------------------------------
@@ -108,7 +110,7 @@ level = 1
 #   0 = 该级退火不分配简码（但归属该级的固定简码仍生效并照常输出）。
 code_num = 1
 rules = ["Aa"]
-commit_keys = "eaio"     # 上屏键序列（默认 ""）。字母=主键盘键、_=空格；"" 表示自动上屏。
+commit_keys = "eauo"     # 上屏键序列（默认 ""）。字母=主键盘键、_=空格；"" 表示自动上屏。
                          # 例 "dk_"：上屏键可为 d/k/空格，按左右手交替偏好 + 轮转分配；
                          # _ 只能放在序列开头(偏爱空格)或末尾(偏爱主键)。
                          # "" 等价旧 space_commit=false；"_" 等价旧 space_commit=true。
@@ -118,7 +120,7 @@ commit_alt_hand_only = false  # 仅出异手上屏简码（手感优化，需求
 level = 2
 code_num = 0
 rules = ["AaBa"]
-commit_keys = "eaio"
+commit_keys = "eauo"
 commit_alt_hand_only = false  # 仅出异手上屏简码（手感优化，需求 37）；_ 始终出简。缺省 false
 
 [[simple_levels]]
@@ -139,11 +141,10 @@ commit_alt_hand_only = false  # 仅出异手上屏简码（手感优化，需求
 # 下例仅用于表达配置格式（默认全部注释）。
 # -------------------------------------------------------------------------
 [fixed_simple_codes]
-"不" = "a"
-"是" = "i"
+"不" = "u"
+"是" = "a"
 "我" = "o"
 "的" = "e"
-"一" = "fi"
 
 # -------------------------------------------------------------------------
 # 📐 量纲缩放配置（可选，缺失则自动校准）
@@ -168,29 +169,29 @@ commit_alt_hand_only = false  # 仅出异手上屏简码（手感优化，需求
 # enabled = true 时启用目标偏差导向优化
 # -------------------------------------------------------------------------
 [targets.full_code]
-enabled = false              # 是否启用全码目标偏差模式
-collision_count = 0.0        # 目标重码数（0 = 不设目标，退化为纯 low_weight 惩罚）
-collision_rate = 0.0         # 目标重码率
-equivalence = 0.0            # 目标当量
-equiv_cv = 0.0               # 目标当量变异系数
-distribution = 0.0           # 目标分布偏差
-low_weight = 0.01            # 低权重系数（已达目标时的持续优化动力）
-collision_count_max = 0.0    # 硬约束：重码数超过此值直接拒绝（0 = 不启用）
-collision_rate_max = 0.0     # 硬约束：重码率超过此值直接拒绝（0 = 不启用）
-equivalence_max = 0.0        # 硬约束：当量超过此值直接拒绝（0 = 不启用）
-equiv_cv_max = 0.0           # 硬约束：当量变异系数超过此值直接拒绝（0 = 不启用）
-distribution_max = 0.0       # 硬约束：分布偏差超过此值直接拒绝（0 = 不启用）
+enabled = true               # 启用全码目标偏差模式；目标值均使用 Code Genie 内部指标量纲
+collision_count = 4800.0    # 第二轮内部前沿约 4817–4827，留小余量保护重码数
+collision_rate = 0.020      # 第16轮：继续收紧全码内部重码率，优先北语全码动态率
+equivalence = 1.255         # 自动优化 round-2：为正式全码速度 1.26 留出内部余量
+ equiv_cv = 0.125            # 第二轮内部前沿约 0.125
+ distribution = 50.0         # 第二轮内部前沿约 46–53
+low_weight = 0.01            # 超过目标用偏差平方惩罚，达标后保留微弱优化动力
+collision_count_max = 0.0    # 硬约束关闭；先用目标偏差模式观察方向
+collision_rate_max = 0.0     # 硬约束关闭；先用目标偏差模式观察方向
+equivalence_max = 0.0        # 硬约束关闭；先用目标偏差模式观察方向
+equiv_cv_max = 0.0           # 硬约束关闭；先用目标偏差模式观察方向
+distribution_max = 0.0       # 硬约束关闭；先用目标偏差模式观察方向
 
 [targets.simple_code]
-enabled = false              # 是否启用简码目标偏差模式
-collision_count = 0.0        # 目标简码重码数
-collision_rate = 0.0         # 目标简码重码率
-freq = 0.0                   # 目标频率覆盖率（如 0.85 = 85%）
-equiv = 0.0                  # 目标简码当量
-dist = 0.0                   # 目标简码分布偏差
-low_weight = 0.01            # 低权重系数
-collision_count_max = 0.0    # 硬约束：简码重码数超过此值直接拒绝（0 = 不启用）
-collision_rate_max = 0.0     # 硬约束：简码重码率超过此值直接拒绝（0 = 不启用）
-freq_max = 0.0               # 硬约束：覆盖率低于此值直接拒绝（0 = 不启用）
-equiv_max = 0.0              # 硬约束：简码当量超过此值直接拒绝（0 = 不启用）
-dist_max = 0.0               # 硬约束：简码分布偏差超过此值直接拒绝（0 = 不启用）
+enabled = true               # 启用简码目标偏差模式；目标值均使用 Code Genie 内部指标量纲
+collision_count = 4750.0    # 第二轮内部前沿约 4753–4764，留小余量保护简码重码数
+collision_rate = 0.009       # 第18轮：继续收紧简码内部重码率，逼近正式简码动态率目标
+freq = 0.42                  # 简码覆盖率下限目标，按 0.42 = 42% 填写
+equiv = 1.247               # 第13轮：收回第12轮过严的简码当量目标
+dist = 305.0                # 第二轮内部前沿约 303–329
+low_weight = 0.01            # 超过目标用偏差平方惩罚，达标后保留微弱优化动力
+collision_count_max = 0.0    # 硬约束关闭；先用目标偏差模式观察方向
+collision_rate_max = 0.0     # 硬约束关闭；先用目标偏差模式观察方向
+freq_max = 0.0               # 硬约束关闭；先用目标偏差模式观察方向
+equiv_max = 0.0              # 硬约束关闭；先用目标偏差模式观察方向
+dist_max = 0.0               # 硬约束关闭；先用目标偏差模式观察方向

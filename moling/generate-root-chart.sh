@@ -15,7 +15,7 @@ shopt -s failglob
 }
 
 [ $# = 0 ] && {
-  echo "Usage: $0 output-TIMESTAMP" >&2
+  echo "Usage: $0 $SCHEMA-output/output-TIMESTAMP" >&2
   exit 1
 }
 
@@ -178,7 +178,7 @@ export CHAIFEN_ALL_TXT="$SOURCE/chaifen-all.txt"
 perl -CSDA -F'\t' -lanE '$F[1]=~s/\s+//g; print "$F[0]\t$F[1]"' "$CHAIFEN_ALL_TXT" > "$1/chaifen.tsv"
 
 echo "Writing $1/mabiao.tsv ..."
-perl -CSDA -Mautodie -Mutf8 -F'\t' -lanE '
+perl -CSDA -Mautodie -Mutf8 -F'\t' -lanE 'use List::Util qw/min/;
   $roots{$F[0]} = lc($F[1]);
 
   END {
@@ -195,15 +195,12 @@ perl -CSDA -Mautodie -Mutf8 -F'\t' -lanE '
 
           $short_chars{"在"} = 1;
       } elsif ($ENV{ENCODE_RULE} eq "moqing") {
-          print "不\ta";
-          print "是\ti";
+          print "不\tu";
+          print "是\ta";
           print "我\to";
           print "的\te";
-          print "一\tfi";
 
           delete $short_chars{"了"};
-          $short_chars{"一"} = 1;
-          $short_codes{"fi"} = 1;
       } else {
           print "不\tu";
           print "是\ti";
@@ -300,7 +297,7 @@ perl -CSDA -Mautodie -Mutf8 -F'\t' -lanE '
       $dup_freq /= $total_freq;
       printf STDERR "全码长: %.2f 动重: %.2f‱\n", $full_code_len,  10000 * $dup_freq;
 
-      for $i (2 .. 3) {
+      for $i (2 .. min(3, $ENV{MAX_CODE_LEN} - 1)) {
           while (($k, $v) = each %chars) {
               $v->{score} = ($v->{len} - $i) * $v->{freq} / $total_freq / $full_code_len;                   # 节约码长相对全码长的比例
               if ($v->{len} > length($v->{code})) {     # 非首选
@@ -339,11 +336,11 @@ perl -CSDA -Mautodie -Mutf8 -F'\t' -lanE '
                         $s = substr($v->{code}, 0, $i - 1) . "e";
                         $s = substr($v->{code}, 0, $i - 1) . "a" if exists $short_codes{$s};
                         if ($ENV{ENABLE_MOQING_ALL_SHORTCODE}) {
-                            $s = substr($v->{code}, 0, $i - 1) . "i" if exists $short_codes{$s};
+                            $s = substr($v->{code}, 0, $i - 1) . "u" if exists $short_codes{$s};
                             $s = substr($v->{code}, 0, $i - 1) . "o" if exists $short_codes{$s};
                         }
                     } else {
-                        $s = substr($v->{code}, 0, $i - 1) . "i";
+                        $s = substr($v->{code}, 0, $i - 1) . "u";
                         $s = substr($v->{code}, 0, $i - 1) . "o" if exists $short_codes{$s};
                         if ($ENV{ENABLE_MOQING_ALL_SHORTCODE}) {
                             $s = substr($v->{code}, 0, $i - 1) . "e" if exists $short_codes{$s};
@@ -383,11 +380,14 @@ perl -CSDA -Mautodie -Mutf8 -F'\t' -lanE '
   }
 ' "$1/roots.tsv" > "$1/mabiao.tsv"
 
+# skip html generate because it's slow
+[ -z "${NO_HTML:-}" ] || exit 0
+
 echo "Writing $1/$SCHEMA.js ..."
 "$TYPER_ROOT/scripts/turn-roots-chaifen-mabiao-into-js.pl" "$1/roots.tsv" "$1/chaifen.tsv" "$1/mabiao.tsv" > "$1/$SCHEMA.js"
 
-echo "Downloading https://shurufa.app/fonts/Yuniversus.woff to $1/Yuniversus.woff ..."
-curl -L -z "$1/Yuniversus.woff" -o "$1/Yuniversus.woff" 'https://shurufa.app/fonts/Yuniversus.woff'
+echo "Downloading https://shurufa.app/fonts/Yuniversus.woff to Yuniversus.woff ..."
+curl -L -z "Yuniversus.woff" -o "Yuniversus.woff" 'https://shurufa.app/fonts/Yuniversus.woff'
 
 VER=$(date +%Y.%m.%d)
 echo "Writing $1/$SCHEMA-$VER.html ..."
@@ -400,5 +400,5 @@ export FULL_FREQ_TXT="$SOURCE/full-freq-$SCHEMA.txt"
     echo "    !!! use '$FULL_FREQ_TXT' for '$1', may be inconsistent!" >&2;
 }
 "$TYPER_ROOT/scripts/generate-roots-chart.pl" -e "$1/$SCHEMA.js" -t "${SCHEMA_NAME}輸入法字根表 $VER" -c "$FULL_FREQ_TXT" \
-  -f "$1/Yuniversus.woff" -r "$1/roots-mapping.tsv" \
+  -f "Yuniversus.woff" -r "$1/roots-mapping.tsv" \
   "$1/roots.tsv" "$1/chaifen.tsv" <(head -n 8000 "$FULL_FREQ_TXT" | awk '{print $1}') > "$1/$SCHEMA-$VER.html"
