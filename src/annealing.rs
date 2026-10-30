@@ -1587,8 +1587,8 @@ pub fn simulated_annealing_resumable(
             best_eval.current_simple_weight,
             best_simple_score,
         );
-        best_metrics = best_eval.get_metrics(ctx);
-        best_simple_metrics = best_eval.get_simple_metrics(ctx);
+        // 注：此处不再计算 metrics——最终上报统一在精炼之后按 output 范围重算一次，
+        // 中间结果会被覆盖，提前算纯属浪费。
     }
 
     // 最终精炼
@@ -1607,8 +1607,6 @@ pub fn simulated_annealing_resumable(
         best_assignment = final_assignment;
         best_score = final_score;
         let mut eval = Evaluator::new(ctx, &best_assignment);
-        best_metrics = eval.get_metrics(ctx);
-        best_simple_metrics = eval.get_simple_metrics(ctx);
 
         if thread_id == 0 {
             // 三分量（需求 28.2）：与精炼内部评估器同口径（weight_full·full + w_target·simple）。
@@ -1626,8 +1624,6 @@ pub fn simulated_annealing_resumable(
             best_assignment = cd_assignment;
             best_score = cd_score;
             let mut eval = Evaluator::new(ctx, &best_assignment);
-            best_metrics = eval.get_metrics(ctx);
-            best_simple_metrics = eval.get_simple_metrics(ctx);
 
             if thread_id == 0 {
                 // 三分量（需求 28.2）。

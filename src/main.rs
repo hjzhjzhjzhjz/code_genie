@@ -12,23 +12,15 @@ use clap::{Parser, Subcommand};
 use rayon::prelude::*;
 
 mod annealing;
-mod assess;
-mod diagnose;
-mod handfeel;
-mod pipeline;
-mod rime;
-mod sentence;
 mod bucket_store;
 mod calibrate;
 mod checkpoint;
 mod config;
 mod context;
 mod evaluator;
-mod export_table;
 mod fsutil;
 mod loader;
 mod output;
-mod root_chart;
 mod schedule;
 mod simple;
 mod types;
@@ -69,7 +61,7 @@ enum Commands {
         #[arg(short = 'd', long = "output-dir")]
         output_dir: Option<String>,
 
-        /// 从既有 output 目录播种：读取 {DIR}/thread-NN/字根键位表.txt 作为各线程初始解
+        /// 从既有 output 目录播种：读取 {DIR}/thread-NN/output-keymap.txt 作为各线程初始解
         /// （按 thread-NN 编号轮询映射）。与 --seed-keymap 互斥。
         #[arg(long = "seed-dir")]
         seed_dir: Option<String>,
@@ -90,7 +82,7 @@ enum Commands {
         keymap: String,
 
         /// 编码输出文件
-        #[arg(short = 'o', long, default_value = "单字编码表.txt")]
+        #[arg(short = 'o', long, default_value = "output-encode.txt")]
         output: String,
     },
 
@@ -126,237 +118,6 @@ enum Commands {
         /// 之前运行的 output 目录（含 inputs/ 与 checkpoint/）
         #[arg(short = 'd', long)]
         dir: String,
-    },
-
-    /// 导出测评用码表（字<TAB>码，简码在前、全码在后）
-    #[command(name = "export")]
-    ExportTable {
-        /// 键位映射文件（字根键位表.txt）
-        #[arg(short = 'k', long)]
-        keymap: String,
-
-        /// 纯拆分表（chaifen.txt：字<TAB>根 根 …<TAB>频次）
-        #[arg(short = 'c', long)]
-        chaifen: String,
-
-        /// 简码表（简码表.txt，可选）
-        #[arg(short = 's', long)]
-        simple: Option<String>,
-
-        /// 输出文件
-        #[arg(short = 'o', long, default_value = "全码表.txt")]
-        output: String,
-    },
-    /// 生成字根图（HTML）
-    #[command(name = "chart")]
-    Chart {
-        /// 键位映射文件（字根键位表.txt）
-        #[arg(short = 'k', long)]
-        keymap: String,
-
-        /// 字根映射表（可选，花括号名 → PUA 显示字）
-        #[arg(short = 'm', long)]
-        mapping: Option<String>,
-
-        /// 输出文件
-        #[arg(short = 'o', long, default_value = "字根图.html")]
-        output: String,
-    },
-    /// 跑宇浩测评并输出对比表（内部调 yuhao-assess 的 CLI）
-    #[command(name = "assess")]
-    Assess {
-        /// 单张码表
-        #[arg(long)]
-        table: Option<String>,
-
-        /// 目录（递归找 全码表.txt）
-        #[arg(long)]
-        dir: Option<String>,
-
-        /// 目录里要匹配的文件名
-        #[arg(long = "file-name", default_value = "全码表.txt")]
-        file_name: String,
-
-        /// 方案配置（jsonc）
-        #[arg(long, default_value = "codegenie-s4.jsonc")]
-        scheme: String,
-
-        /// yuhao-assess 仓库目录
-        #[arg(long = "yuhao-dir", default_value = "../yuhao-assess")]
-        yuhao_dir: String,
-
-        /// 保留每份测评 JSON 到该目录
-        #[arg(long)]
-        keep: Option<String>,
-
-        /// 汇总表写到该文件（Markdown）
-        #[arg(long)]
-        summary: Option<String>,
-
-        /// 把每份结果另存成可导入宇浩测评网页版的「方案档案」，写到该目录
-        #[arg(long = "profile")]
-        profile: Option<String>,
-
-        /// 方案档案里的作者
-        #[arg(long, default_value = "CodeGenie")]
-        author: String,
-
-        /// 方案档案里的版本号（留空用当天日期）
-        #[arg(long, default_value = "")]
-        version: String,
-    },
-
-    /// 生成可加载的 Rime 方案包（schema + dict）
-    #[command(name = "rime")]
-    Rime {
-        /// 字根键位表
-        #[arg(long)]
-        keymap: String,
-        /// 纯拆分表
-        #[arg(long)]
-        chaifen: String,
-        /// 简码表（可选）
-        #[arg(long)]
-        simple: Option<String>,
-        /// 词组频表（可选，给了就生成词组词典）
-        #[arg(long)]
-        words: Option<String>,
-        /// 输出目录
-        #[arg(long, default_value = "rime")]
-        out: String,
-        /// 方案标识，同时是文件名前缀
-        #[arg(long, default_value = "moling")]
-        id: String,
-        /// 方案显示名
-        #[arg(long, default_value = "魔灵")]
-        name: String,
-        /// 作者
-        #[arg(long, default_value = "CodeGenie")]
-        author: String,
-    },
-
-    /// 整句准确率：逐单元首候选 + 连续码流解码，两个口径一起给
-    #[command(name = "sentence")]
-    Sentence {
-        /// 全码词典（Rime dict.yaml，字 / 码 / 权重）
-        #[arg(long)]
-        full_dict: String,
-        /// 简码词典（可选，有就多算一个「简码优先」口径）
-        #[arg(long)]
-        short_dict: Option<String>,
-        /// 词组词典（可选）
-        #[arg(long)]
-        words_dict: Option<String>,
-        /// 语料文件，一行一句；也接受整段，按非汉字切开
-        #[arg(long)]
-        corpus: String,
-        /// 改用外部解码器（librime），给了就不走内置 Viterbi
-        #[arg(long)]
-        decoder: Option<String>,
-        /// librime 共享数据目录（仅外部解码器用）
-        #[arg(long, default_value = ".")]
-        shared: String,
-        /// librime 用户数据目录（仅外部解码器用）
-        #[arg(long, default_value = "rime-user")]
-        user: String,
-        /// librime 方案 id（仅外部解码器用）
-        #[arg(long, default_value = "xingyun_test")]
-        schema: String,
-        /// 最多测多少句，0 = 全部
-        #[arg(long, default_value = "0")]
-        limit: usize,
-        /// 句长上限
-        #[arg(long, default_value = "20")]
-        max_len: usize,
-        /// 导出中间文件的目录
-        #[arg(long)]
-        dump: Option<String>,
-        /// 结果 Markdown
-        #[arg(long)]
-        out: Option<String>,
-        /// 让外部解码器输出诊断
-        #[arg(long)]
-        verbose: bool,
-    },
-
-    /// 摊开一个字的取码链路：拆分 → 码位 → 键位 → 编码
-    #[command(name = "pipeline")]
-    Pipeline {
-        /// 字根键位表
-        #[arg(long)]
-        keymap: String,
-
-        /// 纯拆分表
-        #[arg(long)]
-        chaifen: String,
-
-        /// 简码表（可选）
-        #[arg(long)]
-        simple: Option<String>,
-
-        /// 同键组表 input-fixed.txt（可选），用来标出归并关系
-        #[arg(long)]
-        fixed: Option<String>,
-
-        /// 要查看的字，空格分隔
-        #[arg(long, default_value = "")]
-        chars: String,
-
-        /// 不给 --chars 时，按频次取前 N 个字
-        #[arg(long, default_value = "0")]
-        top: usize,
-
-        /// 写到该文件（Markdown）
-        #[arg(long)]
-        output: Option<String>,
-    },
-
-    /// 按归并规则改键位，重新编码后对比结构指标
-    #[command(name = "merge")]
-    Merge {
-        /// 字根键位表
-        #[arg(long)]
-        keymap: String,
-
-        /// 纯拆分表
-        #[arg(long)]
-        chaifen: String,
-
-        /// 简码表（可选）
-        #[arg(long)]
-        simple: Option<String>,
-
-        /// 归并规则，可重复。写法：`还=人` 或 `你 1=人 2`，多条用分号分隔
-        #[arg(long = "rules")]
-        rules: Vec<String>,
-
-        /// 变体码表输出目录
-        #[arg(long, default_value = "归并对比")]
-        out: String,
-
-        /// 对比表写到该文件（Markdown）
-        #[arg(long)]
-        summary: Option<String>,
-    },
-
-    /// 按形码测评口径做诊断：手感七项、字频分段、词组测评、二码离散图
-    #[command(name = "diagnose")]
-    Diagnose {
-        /// 码表目录（递归找 全码表.txt）
-        #[arg(long)]
-        dir: String,
-
-        /// 测评数据目录（当量表／字频表／词表）
-        #[arg(long, default_value = "ceping-data")]
-        data: String,
-
-        /// 目录里要匹配的文件名
-        #[arg(long = "file-name", default_value = "全码表.txt")]
-        file_name: String,
-
-        /// 报告写到该文件（Markdown）
-        #[arg(long)]
-        summary: Option<String>,
     },
 }
 
@@ -401,131 +162,6 @@ fn main() {
             );
         }
         Some(Commands::Resume { dir }) => run_resume(&dir),
-        Some(Commands::ExportTable {
-            keymap,
-            chaifen,
-            simple,
-            output,
-        }) => export_table::run(&keymap, &chaifen, simple.as_deref(), &output),
-        Some(Commands::Chart {
-            keymap,
-            mapping,
-            output,
-        }) => root_chart::run(&keymap, mapping.as_deref(), &output),
-        Some(Commands::Rime {
-            keymap,
-            chaifen,
-            simple,
-            words,
-            out,
-            id,
-            name,
-            author,
-        }) => rime::run(
-            &keymap,
-            &chaifen,
-            simple.as_deref(),
-            words.as_deref(),
-            &out,
-            &id,
-            &name,
-            &author,
-        ),
-
-        Some(Commands::Sentence {
-            full_dict,
-            short_dict,
-            words_dict,
-            corpus,
-            decoder,
-            shared,
-            user,
-            schema,
-            limit,
-            max_len,
-            dump,
-            out,
-            verbose,
-        }) => sentence::run(&sentence::参数 {
-            全码词典: full_dict.into(),
-            简码词典: short_dict.map(Into::into),
-            词组词典: words_dict.map(Into::into),
-            语料: corpus.into(),
-            解码器: decoder.map(Into::into),
-            共享目录: shared.into(),
-            用户目录: user.into(),
-            方案: schema,
-            上限: limit,
-            最长: max_len,
-            导出: dump.map(Into::into),
-            结果: out.map(Into::into),
-            详细: verbose,
-        }),
-
-        Some(Commands::Pipeline {
-            keymap,
-            chaifen,
-            simple,
-            fixed,
-            chars,
-            top,
-            output,
-        }) => pipeline::流水线(
-            &keymap,
-            &chaifen,
-            fixed.as_deref(),
-            simple.as_deref(),
-            &chars,
-            top,
-            output.as_deref(),
-        ),
-
-        Some(Commands::Merge {
-            keymap,
-            chaifen,
-            simple,
-            rules,
-            out,
-            summary,
-        }) => pipeline::归并(
-            &keymap,
-            &chaifen,
-            simple.as_deref(),
-            &rules,
-            &out,
-            summary.as_deref(),
-        ),
-
-        Some(Commands::Diagnose {
-            dir,
-            data,
-            file_name,
-            summary,
-        }) => diagnose::run(&dir, &data, &file_name, summary.as_deref()),
-
-        Some(Commands::Assess {
-            table,
-            dir,
-            file_name,
-            scheme,
-            yuhao_dir,
-            keep,
-            summary,
-            profile,
-            author,
-            version,
-        }) => assess::run(
-            table.as_deref(),
-            dir.as_deref(),
-            &file_name,
-            &scheme,
-            &yuhao_dir,
-            keep.as_deref(),
-            summary.as_deref(),
-            profile.as_deref(),
-            &author,
-            &version,
-        ),
         Some(Commands::Optimize {
             output_dir,
             seed_dir,
@@ -662,7 +298,7 @@ fn run_evaluate(
     // 构建 OptContext
     let scale_config = types::ScaleConfig::default();
     let weights = cfg.get_weight_config();
-    let ctx = OptContext::new_with_fixed_and_termination(
+    let mut ctx = OptContext::new_with_fixed(
         &splits,
         &fixed_roots,
         &groups,
@@ -673,8 +309,8 @@ fn run_evaluate(
         weights,
         TargetsConfig::default(),
         &cfg.get_fixed_simple_codes(),
-        &cfg.keys.termination_keys,
     );
+    ctx.display_order = cfg.keys.display_order.clone();
 
     println!("  编码基数: {}", ctx.code_base);
     println!("  编码空间: {}", ctx.code_space);
@@ -883,9 +519,8 @@ fn build_evaluate_report(
     // 计算每个汉字的当量
     let mut char_equivs: Vec<(char, f64, u64)> = Vec::new();
     for (i, (ch, _, _)) in ctx.raw_splits.iter().enumerate() {
-        if let Some(equiv) = ctx.calc_equiv_from_parts(i, assignment) {
-            char_equivs.push((*ch, equiv, ctx.char_infos[i].frequency));
-        }
+        let equiv = ctx.calc_equiv_from_parts(i, assignment);
+        char_equivs.push((*ch, equiv, ctx.char_infos[i].frequency));
     }
     char_equivs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
@@ -1070,7 +705,7 @@ fn seed_index(thread_id: usize, k: usize) -> usize {
 /// - 两者均为 `None`：返回空 `Vec`（不播种，保持基线行为）。
 /// - 同时指定：返回 `Err`（互斥）。
 /// - `--seed-keymap <FILE>`：校验文件存在 → 返回 `vec![FILE]`（K = 1）。
-/// - `--seed-dir <DIR>`：枚举 `{DIR}/thread-{NN}/字根键位表.txt`（NN 为两位数字），
+/// - `--seed-dir <DIR>`：枚举 `{DIR}/thread-{NN}/output-keymap.txt`（NN 为两位数字），
 ///   按 NN 升序收集；为空则 `Err`。仅触碰 thread-NN 子目录，不读 `inputs/`、`checkpoint/`。
 fn resolve_seed_paths(
     seed_dir: Option<&str>,
@@ -1111,14 +746,14 @@ fn resolve_seed_paths(
                     }
                     _ => continue,
                 };
-                let keymap = entry.path().join("字根键位表.txt");
+                let keymap = entry.path().join("output-keymap.txt");
                 if keymap.is_file() {
                     found.push((nn, keymap.to_string_lossy().to_string()));
                 }
             }
             if found.is_empty() {
                 return Err(format!(
-                    "--seed-dir {} 下未找到任何 thread-NN/字根键位表.txt",
+                    "--seed-dir {} 下未找到任何 thread-NN/output-keymap.txt",
                     dir
                 ));
             }
@@ -1301,7 +936,7 @@ fn run_optimize(
         } else {
         println!("\n📐 正在进行初始尺度校准...");
         let temp_scale = types::ScaleConfig::default();
-        let temp_ctx = OptContext::new_with_fixed_and_termination(
+        let temp_ctx = OptContext::new_with_fixed(
             &splits,
             &fixed_roots,
             &dynamic_groups,
@@ -1312,7 +947,6 @@ fn run_optimize(
             weights,
             TargetsConfig::default(),
             &cfg.get_fixed_simple_codes(),
-        &cfg.keys.termination_keys,
         );
 
         let initial_assignment = annealing::smart_init(&temp_ctx, cfg);
@@ -1467,7 +1101,7 @@ fn run_optimize(
         None => {
             let equiv_table_2 = loader::load_pair_equivalence(&cfg.files.pair_equiv);
             let key_dist_config_2 = loader::load_key_distribution(&cfg.files.key_dist);
-            OptContext::new_with_fixed_and_termination(
+            OptContext::new_with_fixed(
                 &splits,
                 &fixed_roots,
                 &dynamic_groups,
@@ -1478,7 +1112,6 @@ fn run_optimize(
                 weights,
                 targets_config,
                 &cfg.get_fixed_simple_codes(),
-                &cfg.keys.termination_keys,
             )
         }
     };
@@ -1677,9 +1310,9 @@ fn finalize_and_save(
     save_summary(cfg, &all_results, best_thread, output_dir, elapsed);
 
     println!("\n所有结果已保存至 {}/", output_dir);
-    println!("  - 汇总.txt              汇总排名");
+    println!("  - summary.txt              汇总排名");
     println!("  - output-*.txt             全局最优结果");
-    println!("  - 简码表.txt  简码分配");
+    println!("  - output-simple-codes.txt  简码分配");
     println!("  - thread-XX/               各线程结果");
     if interrupted {
         println!("\n⏸️  已暂停。继续续算：");
@@ -1772,7 +1405,7 @@ fn run_resume(dir: &str) {
         SimpleCodeConfig { levels: vec![] }
     };
     let weights = cfg.get_weight_config();
-    let ctx = OptContext::new_with_fixed_and_termination(
+    let mut ctx = OptContext::new_with_fixed(
         &splits,
         &fixed_roots,
         &dynamic_groups,
@@ -1783,8 +1416,8 @@ fn run_resume(dir: &str) {
         weights,
         cfg.get_targets_config(),
         &cfg.get_fixed_simple_codes(),
-        &cfg.keys.termination_keys,
     );
+    ctx.display_order = cfg.keys.display_order.clone();
     evaluator::log_bucket_backends(&ctx);
 
     // 4) 加载各线程检查点（数量须与 meta.num_threads 一致，需求 11.4）。
@@ -1975,24 +1608,24 @@ mod seed_path_tests {
     #[test]
     fn seed_dir_collects_thread_dirs_sorted() {
         let base = tmp_base("sd");
-        // 故意乱序创建 thread-02, thread-00, thread-10，且各含 字根键位表.txt
+        // 故意乱序创建 thread-02, thread-00, thread-10，且各含 output-keymap.txt
         for nn in ["02", "00", "10"] {
             let d = base.join(format!("thread-{}", nn));
             std::fs::create_dir_all(&d).unwrap();
-            std::fs::write(d.join("字根键位表.txt"), "口\tWko\t1\n").unwrap();
+            std::fs::write(d.join("output-keymap.txt"), "口\tWko\t1\n").unwrap();
         }
         // 干扰项：inputs/ 与 checkpoint/ 不应被收集（需求 1.5）
         std::fs::create_dir_all(base.join("inputs")).unwrap();
         std::fs::create_dir_all(base.join("checkpoint")).unwrap();
-        // 干扰项：thread-03 无 字根键位表.txt → 不收集
+        // 干扰项：thread-03 无 output-keymap.txt → 不收集
         std::fs::create_dir_all(base.join("thread-03")).unwrap();
 
         let paths = resolve_seed_paths(Some(&base.to_string_lossy()), None).unwrap();
         assert_eq!(paths.len(), 3, "应只收集 3 个含 keymap 的 thread 目录");
         // 按 NN 升序：00, 02, 10
-        assert!(paths[0].ends_with("thread-00/字根键位表.txt"));
-        assert!(paths[1].ends_with("thread-02/字根键位表.txt"));
-        assert!(paths[2].ends_with("thread-10/字根键位表.txt"));
+        assert!(paths[0].ends_with("thread-00/output-keymap.txt"));
+        assert!(paths[1].ends_with("thread-02/output-keymap.txt"));
+        assert!(paths[2].ends_with("thread-10/output-keymap.txt"));
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -2000,7 +1633,7 @@ mod seed_path_tests {
     fn seed_dir_empty_errors() {
         let base = tmp_base("empty");
         std::fs::create_dir_all(&base).unwrap();
-        // 无任何 thread-NN/字根键位表.txt → Err（需求 1.4）
+        // 无任何 thread-NN/output-keymap.txt → Err（需求 1.4）
         assert!(resolve_seed_paths(Some(&base.to_string_lossy()), None).is_err());
         // 不存在的目录 → Err
         assert!(resolve_seed_paths(Some("/no/such/dir"), None).is_err());
