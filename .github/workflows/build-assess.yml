@@ -47,7 +47,7 @@ jobs:
       - name: 拉取测评数据（失败不中断）
         working-directory: yuhao-assess
         run: |
-          pnpm fetch 2>&1 | tail -20 || echo "::warning::数据拉取失败，继续构建（dist 里可能缺 data/）"
+          pnpm run fetch 2>&1 | tail -20 || echo "::warning::数据拉取失败，继续构建（dist 里可能缺 data/）"
           echo "--- public 目录 ---"
           ls -1 public/ 2>/dev/null || true
           du -sh public/data public/schemes public/texts 2>/dev/null || true
