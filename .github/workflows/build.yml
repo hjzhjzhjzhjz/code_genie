@@ -1,0 +1,101 @@
+name: CodeGenie 编译产物
+
+# 只做编译，不运行任何任务。产出 Linux 与 Windows 两个平台的二进制。
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 要编译的分支或 tag
+        required: true
+        default: moling
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: 编译 ${{ matrix.artifact }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - artifact: linux-x64
+            target: x86_64-unknown-linux-gnu
+            bin: code_genie
+          - artifact: windows-x64
+            target: x86_64-pc-windows-gnu
+            bin: code_genie.exe
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 1
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: 安装 mingw（Windows 交叉编译用）
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+
+      - name: 缓存 cargo 依赖与 target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+          key: ${{ matrix.target }}
+
+      - name: 编译（release + LTO）
+        run: |
+          set -o pipefail
+          cargo build --release --target ${{ matrix.target }} 2>&1 | tee build-${{ matrix.artifact }}.log
+
+      - name: 检查产物
+        run: |
+          BIN="target/${{ matrix.target }}/release/${{ matrix.bin }}"
+          if [ ! -f "$BIN" ]; then
+            echo "::error::没有找到产物 $BIN"
+            exit 1
+          fi
+          ls -lh "$BIN"
+          file "$BIN" || true
+          sha256sum "$BIN"
+
+      - name: 写入 Job Summary
+        if: always()
+        run: |
+          BIN="target/${{ matrix.target }}/release/${{ matrix.bin }}"
+          {
+            echo "### 编译结果：${{ matrix.artifact }}"
+            echo ""
+            echo "- 分支：\`${{ inputs.ref }}\`"
+            echo "- target：\`${{ matrix.target }}\`"
+            echo ""
+            if [ -f "$BIN" ]; then
+              echo '```'
+              ls -lh "$BIN"
+              sha256sum "$BIN"
+              echo '```'
+            else
+              echo "编译失败，未产出二进制。"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传产物
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: codegenie-${{ matrix.artifact }}-run${{ github.run_number }}
+          path: |
+            target/${{ matrix.target }}/release/${{ matrix.bin }}
+            build-${{ matrix.artifact }}.log
+          if-no-files-found: warn
+          retention-days: 14
