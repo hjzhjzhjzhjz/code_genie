@@ -1587,8 +1587,6 @@ pub fn simulated_annealing_resumable(
             best_eval.current_simple_weight,
             best_simple_score,
         );
-        // 注：此处不再计算 metrics——最终上报统一在精炼之后按 output 范围重算一次，
-        // 中间结果会被覆盖，提前算纯属浪费。
     }
 
     // 最终精炼
