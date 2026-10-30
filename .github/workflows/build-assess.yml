@@ -1,0 +1,109 @@
+name: 构建宇浩测评器
+
+# 单独构建 forfudan/yuhao-assess（宇浩测评器），产出可直接使用的网页版
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: yuhao-assess 的分支或 tag
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: 构建测评器网页版
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: 检出 yuhao-assess
+        uses: actions/checkout@v7
+        with:
+          repository: forfudan/yuhao-assess
+          ref: ${{ inputs.ref }}
+          path: yuhao-assess
+          fetch-depth: 1
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: yuhao-assess/pnpm-lock.yaml
+
+      - name: 安装依赖
+        working-directory: yuhao-assess
+        run: pnpm install --frozen-lockfile
+
+      - name: 拉取测评数据（失败不中断）
+        working-directory: yuhao-assess
+        run: |
+          pnpm fetch 2>&1 | tail -20 || echo "::warning::数据拉取失败，继续构建（dist 里可能缺 data/）"
+          echo "--- public 目录 ---"
+          ls -1 public/ 2>/dev/null || true
+          du -sh public/data public/schemes public/texts 2>/dev/null || true
+
+      - name: 类型检查
+        working-directory: yuhao-assess
+        run: pnpm exec tsc --noEmit
+
+      - name: 构建
+        working-directory: yuhao-assess
+        run: pnpm exec vite build
+
+      - name: 检查产物
+        working-directory: yuhao-assess
+        run: |
+          echo "=== dist 结构 ==="
+          ls -lh dist/ | head -15
+          echo "=== 总大小 ==="
+          du -sh dist
+          echo "=== 文件数 ==="
+          find dist -type f | wc -l
+
+      - name: 打包成 tar.gz
+        working-directory: yuhao-assess
+        run: |
+          tar czf yuhao-assess-web.tar.gz -C dist .
+          ls -lh yuhao-assess-web.tar.gz
+
+      - name: 写入 Job Summary
+        if: always()
+        working-directory: yuhao-assess
+        run: |
+          {
+            echo "### 宇浩测评器构建结果"
+            echo ""
+            echo "- 分支：\`${{ inputs.ref }}\`"
+            echo ""
+            if [ -d dist ]; then
+              echo '```'
+              du -sh dist
+              find dist -type f | wc -l | xargs echo "文件数:"
+              echo '```'
+              echo ""
+              echo "解压后在本目录执行 \`python3 -m http.server 8080\` 即可本地打开。"
+            else
+              echo "构建失败，没有 dist 目录。"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传网页版
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: yuhao-assess-web-run${{ github.run_number }}
+          path: |
+            yuhao-assess/yuhao-assess-web.tar.gz
+            yuhao-assess/dist/
+          if-no-files-found: warn
+          retention-days: 14
