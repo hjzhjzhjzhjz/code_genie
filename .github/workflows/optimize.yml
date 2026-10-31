@@ -193,7 +193,7 @@ jobs:
             [ -n "$meta" ] || { echo "::error::历史产物里没有 checkpoint/meta.json，无法续算"; exit 1; }
             src=$(dirname "$(dirname "$meta")")
             echo "续算目录：$src"
-            if [ "$(basename "$src")" != "$OUT_DIR" ]; then
+            if [ "$src" != "$OUT_DIR" ]; then
               rm -rf "$OUT_DIR"
               mv "$src" "$OUT_DIR"
             fi
