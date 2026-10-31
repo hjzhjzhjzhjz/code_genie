@@ -146,6 +146,15 @@ jobs:
             fi
           fi
 
+          # 老产物可能没有尺度文件；有就继承，跨运行口径一致
+          for f in 历史/*/尺度.json; do
+            if [ -f "$f" ]; then
+              cp "$f" 尺度-来源.json
+              echo "继承来源尺度: $f"
+              break
+            fi
+          done
+
       - name: 准备播种目录
         if: ${{ inputs.seed_run_id != '' }}
         run: |
@@ -259,14 +268,16 @@ jobs:
           T0=$SECONDS
           for k in $(seq 1 "$ROUNDS"); do
             ARGS=()
-            if [ "$k" -eq 1 ] && [ -n "$SEED_RUN" ]; then
-              ARGS+=(--seed-dir seed)
-            elif [ "$k" -gt 1 ]; then
+            if [ "$k" -eq 1 ]; then
+              if [ -n "$SEED_RUN" ]; then ARGS+=(--seed-dir seed); fi
+              if [ -f "尺度-来源.json" ]; then ARGS+=(--scale 尺度-来源.json); fi
+            else
               if ! ls "$OUT_DIR"/thread-*/字根键位表.txt >/dev/null 2>&1; then
                 echo "::error::第 $((k-1)) 轮没有产出线程键位表，停止重复"
                 break
               fi
               ARGS+=(--seed-dir "$OUT_DIR")
+              if [ -f "$OUT_DIR/尺度.json" ]; then ARGS+=(--scale "$OUT_DIR/尺度.json"); fi
             fi
 
             LEFT=$(( BUDGET - (SECONDS - T0) ))
@@ -384,6 +395,7 @@ jobs:
             rm -f "$d/单字编码表.txt" "$d/简码表.txt" "$d/合并码表.txt"
           done
           rm -rf 历史 seed
+          rm -f 尺度-来源.json
           echo "剩余文件："
           ls -1 "$OUT_DIR"
 
