@@ -5,6 +5,7 @@ name: CodeGenie 退火优化
 #
 # 续算只走播种（seed_run_id）：下载历史运行的 artifact，
 # 取其 thread-*/字根键位表.txt 轮流播种，新一轮退火从这些解继续演化。
+# repeat > 1 时一轮跑完接着播种下一轮，循环往复，直到轮数用完或时间预算耗尽。
 on:
   workflow_dispatch:
     inputs:
@@ -58,6 +59,11 @@ on:
         required: false
         default: ""
         type: string
+      repeat:
+        description: 重复轮数（每轮 total_steps 步；第 2 轮起自动播种上一轮的解，1-20）
+        required: false
+        default: "1"
+        type: string
 
 permissions:
   contents: read
@@ -84,6 +90,7 @@ jobs:
       FILES_DIR: ${{ inputs.files_dir }}
       SEED_RUN: ${{ inputs.seed_run_id }}
       SEED_SHARD: ${{ inputs.seed_shard }}
+      REPEAT: ${{ inputs.repeat }}
 
     steps:
       - name: 检出代码
@@ -236,21 +243,50 @@ jobs:
           set -o pipefail
           cargo build --release 2>&1 | tee build.log
 
-      - name: 运行退火
+      - name: 运行退火（repeat 轮，逐轮播种）
         env:
           RUST_BACKTRACE: "1"
         run: |
           set -o pipefail
-          # 用 SIGINT 限时：程序自带 Ctrl-C 处理，会写好 checkpoint 后正常退出，
-          # 避免 job 被硬超时杀掉、checkpoint 来不及落盘。
-          ARGS=()
-          if [ -n "$SEED_RUN" ]; then ARGS+=(--seed-dir seed); fi
-          if [ "${#ARGS[@]}" -gt 0 ]; then
-            echo "=== 播种续算：optimize ${ARGS[*]} ==="
-          fi
-          timeout --signal=INT --kill-after=60s 300m \
-            ./target/release/code_genie -c config.toml optimize -d "$OUT_DIR" "${ARGS[@]}" 2>&1 | tee run.log \
-            || echo "::warning::运行被 300 分钟时限中断（exit=$?），artifacts 中保留了最新 checkpoint，可用 seed_run_id 播种续算"
+          # 总时间预算：单 job 350 分钟上限，留足 artifact 上传与收尾
+          总预算=$(( 295 * 60 ))
+          if ! echo "$REPEAT" | grep -qE '^[0-9]+$'; then REPEAT=1; fi
+          轮数=$REPEAT
+          [ "$轮数" -lt 1 ] && 轮数=1
+          [ "$轮数" -gt 20 ] && 轮数=20
+          echo "=== 计划：${轮数} 轮 × total_steps=$TOTAL_STEPS，逐轮播种 ==="
+
+          开始=$SECONDS
+          for k in $(seq 1 "$轮数"); do
+            ARGS=()
+            if [ "$k" -eq 1 ] && [ -n "$SEED_RUN" ]; then
+              ARGS+=(--seed-dir seed)
+            elif [ "$k" -gt 1 ]; then
+              if ! ls "$OUT_DIR"/thread-*/字根键位表.txt >/dev/null 2>&1; then
+                echo "::error::第 $((k-1)) 轮没有产出线程键位表，停止重复"
+                break
+              fi
+              ARGS+=(--seed-dir "$OUT_DIR")
+            fi
+
+            剩余=$(( 总预算 - (SECONDS - 开始) ))
+            每轮=$(( 剩余 / (轮数 - k + 1) ))
+            if [ "$每轮" -le 120 ]; then
+              echo "::warning::时间预算不足，第 $k 轮起停止（已用 $((SECONDS - 开始))s / ${总预算}s）"
+              break
+            fi
+
+            echo ""
+            echo "▶️ 第 $k/$轮数 轮（本轮时限 ${每轮}s）${ARGS[*]:+播种: ${ARGS[*]}}"
+            timeout --signal=INT --kill-after=60s "${每轮}s" \
+              ./target/release/code_genie -c config.toml optimize -d "$OUT_DIR" "${ARGS[@]}" 2>&1 | tee -a run.log \
+              || echo "::warning::第 $k 轮被时限中断（exit=$?），本轮解已落盘，下一轮播种续算"
+
+            # 本轮线程解已被下一轮吃进；清掉程序自动改名的旧版本，artifact 只留每轮最终态
+            rm -f "$OUT_DIR"/*.txt.2* "$OUT_DIR"/thread-*/*.txt.2* 2>/dev/null || true
+          done
+          rm -f "$OUT_DIR"/*.txt.2* "$OUT_DIR"/thread-*/*.txt.2* 2>/dev/null || true
+          echo "=== 重复运行结束：共 $k 轮 ==="
 
       - name: 导出全码表
         if: always()
@@ -323,6 +359,7 @@ jobs:
             else
               echo "- 播种来源：无（全新随机）"
             fi
+            echo "- 重复轮数：\`${REPEAT:-1}\`（实际 $k 轮）"
             echo ""
             if [ -f "$OUT_DIR/汇总.txt" ]; then
               echo '```'
