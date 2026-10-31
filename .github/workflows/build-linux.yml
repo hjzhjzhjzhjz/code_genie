@@ -53,6 +53,16 @@ jobs:
           strip target/release/code_genie
           ls -lh target/release/code_genie
 
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9
+
+      - name: 安装 Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
       - name: 功能冒烟（全子命令 + 真实数据跑通导出）
         run: |
           set -e
@@ -202,8 +212,6 @@ jobs:
           ls -lh code_genie-linux-x86_64.zip
 
       - name: 宇浩测评端到端冒烟（临时副本装依赖，包内保持干净）
-        env:
-          GH_NODE: 22
         run: |
           set -e
           pnpm --version
