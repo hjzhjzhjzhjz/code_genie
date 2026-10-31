@@ -27,14 +27,14 @@ pub fn load_fixed(path: &str) -> (HashMap<String, u8>, Vec<RootGroup>) {
             if roots.is_empty() {
                 continue;
             }
+            // #6：与 load_keymap 保持一致——把整列当作编码串，逐字符取键（小写化、忽略空白）。
+            // 不再「按空白分词后只取每个 token 首字符」：那会把 `Wko` 误读成单键 `w`，
+            // 与 load_keymap 的 `[w,k,o]` 矛盾（历史「15 死组」诱因）。
             let keys: Vec<u8> = parts[1]
-                .split_whitespace()
-                .filter_map(|s| {
-                    s.chars()
-                        .next()
-                        .and_then(char_to_key_index)
-                        .map(|i| i as u8)
-                })
+                .trim()
+                .to_lowercase()
+                .chars()
+                .filter_map(|c| char_to_key_index(c).map(|i| i as u8))
                 .collect();
 
             if keys.len() == 1 {
@@ -178,10 +178,15 @@ pub fn load_splits(path: &str) -> Vec<(char, Vec<String>, u64)> {
 /// - 31x31 当量矩阵
 pub fn load_pair_equivalence(path: &str) -> [[f64; 31]; 31] {
     let mut table = [[0.0f64; 31]; 31];
+    // #5：缺失当量文件时不再「静默」置零——显式报错（当量项将恒为 0、评分失真）。
+    // 按「仅告警不阻断」策略继续运行，但输出醒目错误而非 println 警告。
     let content = match fs::read_to_string(path) {
         Ok(c) => c,
-        Err(_) => {
-            println!("警告: 无法读取当量文件 {}，使用默认值0", path);
+        Err(e) => {
+            eprintln!(
+                "❌ 错误: 无法读取当量文件 {}: {}（当量项将恒为 0，评分失真，请检查 files.pair_equiv）",
+                path, e
+            );
             return table;
         }
     };
@@ -269,6 +274,7 @@ pub fn load_keymap(keymap_path: &str, division_path: &str) -> HashMap<String, u8
         }
 
         // 获取该基础字根的后缀列表
+        let known_base = base_to_suffixes.contains_key(base_name);
         let suffixes = match base_to_suffixes.get(base_name) {
             Some(s) => s.clone(),
             None => {
@@ -285,6 +291,22 @@ pub fn load_keymap(keymap_path: &str, division_path: &str) -> HashMap<String, u8
                 vec![-1]
             }
         };
+
+        // #4：已知字根的编码键数与子字根后缀数不匹配时，过去静默截断/丢键（均无声）。
+        // 现在显式告警：键多则多余键被忽略，键少则多出的子字根拿不到键。
+        if known_base && keys.len() != suffixes.len() {
+            eprintln!(
+                "⚠️ keymap 字根 '{}' 编码键数 {} 与子字根后缀数 {} 不一致：{}",
+                base_name,
+                keys.len(),
+                suffixes.len(),
+                if keys.len() > suffixes.len() {
+                    "多余编码键将被忽略"
+                } else {
+                    "多出的子字根将无键"
+                }
+            );
+        }
 
         // 将键位按后缀顺序映射到子字根名
         for (i, &key) in keys.iter().enumerate() {
@@ -391,10 +413,15 @@ pub fn keymap_to_assignment(
 /// - 31 个键位的分布配置
 pub fn load_key_distribution(path: &str) -> [KeyDistConfig; 31] {
     let mut cfg = [KeyDistConfig::default(); 31];
+    // #5：缺失分布文件时不再「静默」用默认值——显式报错（分布项失真）。
+    // 按「仅告警不阻断」策略继续运行，但输出醒目错误而非 println 警告。
     let content = match fs::read_to_string(path) {
         Ok(c) => c,
-        Err(_) => {
-            println!("警告: 无法读取用指分布文件 {}，使用默认值", path);
+        Err(e) => {
+            eprintln!(
+                "❌ 错误: 无法读取用指分布文件 {}: {}（分布项将用默认值，评分失真，请检查 files.key_dist）",
+                path, e
+            );
             return cfg;
         }
     };

@@ -849,8 +849,26 @@ pub fn multi_start_init(ctx: &OptContext, cfg: &Config, thread_id: usize) -> Vec
     best
 }
 
+/// 校准专用的**确定性**初始分配（不依赖随机种子）。
+///
+/// #8：`calibrate_scales` 的参考值过去取自 `multi_start_init`（内部 `thread_rng`），
+/// 导致「改种子 → 改 scale → 不同 run 的总分不可直接比较」。这里改用确定性分配：
+/// 每个字根组取其 `allowed_keys` 中按组号轮转的键，得到稳定且分散的基准分配
+/// （动态根各自独立成组、轮转后天然均摊到各键，碰撞分布接近均衡），
+/// 从而 scale 只随数据/配置变化，不随随机种子漂移。
+pub fn deterministic_init(ctx: &OptContext, _cfg: &Config) -> Vec<u8> {
+    (0..ctx.num_groups)
+        .map(|gi| {
+            let allowed = &ctx.groups[gi].allowed_keys;
+            // allowed 恒非空（load_fixed/load_dynamic 保证）
+            allowed[gi % allowed.len()]
+        })
+        .collect()
+}
+
 pub fn smart_init(ctx: &OptContext, cfg: &Config) -> Vec<u8> {
-    multi_start_init(ctx, cfg, usize::MAX)
+    // #8：校准基准用确定性分配，使 scale 与 SA 随机种子无关、可复现。
+    deterministic_init(ctx, cfg)
 }
 
 // =========================================================================

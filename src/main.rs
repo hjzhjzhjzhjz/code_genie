@@ -371,8 +371,14 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
 
-    // 加载配置
-    let cfg = Config::load_from_path(&cli.config);
+    // 加载配置（#1：解析失败直接报错退出，不再静默回退默认配置）
+    let cfg = match Config::load_from_path(&cli.config) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("❌ {}", e);
+            std::process::exit(1);
+        }
+    };
 
     match cli.command {
         Some(Commands::Encode {
@@ -1145,8 +1151,11 @@ fn run_optimize(
     let start_time = Instant::now();
     println!("=== CodeGenie 码灵算法优化器 v10 ===");
 
-    // 验证配置
-    cfg.validate_weights();
+    // 验证配置（#11：权重和不为 1 直接报错退出，不再仅告警）
+    if let Err(e) = cfg.validate_weights() {
+        eprintln!("❌ {}", e);
+        std::process::exit(1);
+    }
 
     // 解析种子来源（互斥校验 + 路径收集，需求 1/2/3）：尽早失败，避免做完校准才报错。
     let seed_paths = match resolve_seed_paths(seed_dir.as_deref(), seed_keymap.as_deref()) {
@@ -1780,7 +1789,14 @@ fn run_resume(dir: &str) {
     // 2) 从备份的 inputs/ 读取配置与输入（只读，需求 7.2/7.3）。
     let inputs_dir = format!("{}/inputs", dir);
     let config_path = format!("{}/config.toml", inputs_dir);
-    let mut cfg = Config::load_from_path(&config_path);
+    // #1：resume 同样不能静默回退默认配置，解析失败直接报错退出。
+    let mut cfg = match Config::load_from_path(&config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("❌ {}", e);
+            std::process::exit(1);
+        }
+    };
     // 将 files.* 重定向到 inputs/ 下的备份副本（按 basename），确保用一致输入重建。
     let redirect = |p: &str| -> String {
         let base = std::path::Path::new(p)

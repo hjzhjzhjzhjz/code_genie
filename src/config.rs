@@ -292,30 +292,21 @@ pub struct ScaleConfigToml {
 
 impl Config {
     /// 从 config.toml 加载配置
-    pub fn load() -> Self {
+    pub fn load() -> Result<Self, String> {
         Self::load_from_path("config.toml")
     }
 
     /// 从指定路径加载配置
-    pub fn load_from_path(path: &str) -> Self {
-        match fs::read_to_string(path) {
-            Ok(content) => {
-                match toml::from_str(&content) {
-                    Ok(config) => {
-                        println!("✅ 已加载配置文件: {}", path);
-                        config
-                    }
-                    Err(e) => {
-                        eprintln!("⚠️ 配置文件解析失败: {}, 使用默认配置", e);
-                        Self::default()
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("⚠️ 无法读取配置文件 {}: {}, 使用默认配置", path, e);
-                Self::default()
-            }
-        }
+    ///
+    /// #1：解析/读取失败不再静默回退默认配置，而是返回 `Err`，由调用方 `exit(1)`。
+    /// 这样「配置写错却没生效」不会再被默认值掩盖。
+    pub fn load_from_path(path: &str) -> Result<Self, String> {
+        let content = fs::read_to_string(path)
+            .map_err(|e| format!("无法读取配置文件 {}: {}", path, e))?;
+        let config: Self = toml::from_str(&content)
+            .map_err(|e| format!("配置文件解析失败 {}: {}", path, e))?;
+        println!("✅ 已加载配置文件: {}", path);
+        Ok(config)
     }
 
     /// 获取简码配置（转换为内部格式）。
@@ -388,17 +379,19 @@ impl Config {
     }
 
     /// 验证权重配置是否合理
-    pub fn validate_weights(&self) {
+    ///
+    /// #11：权重和明显偏离 1.0 时不再仅告警，而是返回 `Err`，由调用方 `exit(1)`，
+    /// 避免配置笔误被「照常跑下去」掩盖。
+    pub fn validate_weights(&self) -> Result<(), String> {
+        let mut problems: Vec<String> = Vec::new();
+
         let total_full = self.weights.full_code.collision_count
             + self.weights.full_code.collision_rate
             + self.weights.full_code.equivalence
             + self.weights.full_code.equiv_cv
             + self.weights.full_code.distribution;
         if (total_full - 1.0).abs() > 0.001 {
-            eprintln!(
-                "⚠️ 警告：全码权重总和不为 1.0 (当前: {:.3})",
-                total_full
-            );
+            problems.push(format!("全码权重总和不为 1.0 (当前: {:.3})", total_full));
         }
 
         let total_simple = self.weights.simple_code.freq
@@ -407,19 +400,22 @@ impl Config {
             + self.weights.simple_code.collision_count
             + self.weights.simple_code.collision_rate;
         if self.weights.simple_code.enabled && (total_simple - 1.0).abs() > 0.001 {
-            eprintln!(
-                "⚠️ 警告：简码子权重总和不为 1.0 (当前: {:.3})",
-                total_simple
-            );
+            problems.push(format!("简码子权重总和不为 1.0 (当前: {:.3})", total_simple));
         }
 
         let total_main = self.weights.simple_code.full_code_weight
             + self.weights.simple_code.simple_code_weight;
         if self.weights.simple_code.enabled && (total_main - 1.0).abs() > 0.001 {
-            eprintln!(
-                "⚠️ 警告：全码/简码总权重不为 1.0 (当前: {:.3})",
-                total_main
-            );
+            problems.push(format!("全码/简码总权重不为 1.0 (当前: {:.3})", total_main));
+        }
+
+        if problems.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "权重配置不合法（请修正后重跑）:\n  - {}",
+                problems.join("\n  - ")
+            ))
         }
     }
 
