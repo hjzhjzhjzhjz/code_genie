@@ -117,8 +117,7 @@ jobs:
               dst.parent.mkdir(parents=True, exist_ok=True)
               shutil.copy2(f, dst)
 
-          for d in ["ceping-data", "yuhao-data", "yuhao-text"]:
-              shutil.copytree(d, pkg / d)
+          shutil.copytree("ceping-data", pkg / "ceping-data")
 
           # 宇浩测评：源码（不含 .git），并把测评数据放进它的 public/
           shutil.copytree("yuhao-assess", pkg / "yuhao-assess",
@@ -204,14 +203,13 @@ jobs:
               "  pipeline   拆分流水线展示",
               "  merge      字根归并对比",
               "  diagnose   码表诊断（ceping-data 在包内）",
-              "  sentence   整句准确率（yuhao-text 在包内）",
+              "  sentence   整句准确率（语料：yuhao-assess/public/texts/literature.txt）",
               "",
               "数据目录",
               "  moling/          拆分表、字根文件、当量、用指分布、拆分全表",
               "  ceping-data/     诊断用的当量/字频/词表",
-              "  yuhao-data/      宇浩测评口径数据（yuhao-assess/public 已预拷贝）",
-              "  yuhao-text/      整句测评语料",
-              "  yuhao-assess/    宇浩测评 CLI 源码（node_modules 首次 pnpm install 生成）",
+              "  yuhao-assess/    宇浩测评 CLI 源码与数据（public/ 已含测评数据与语料；",
+              "                   node_modules 首次 pnpm install 生成）",
           ]
           (pkg / "说明.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
           print("包内容（顶层）：")
