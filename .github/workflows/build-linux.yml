@@ -1,0 +1,159 @@
+name: 编译 Linux 完整版
+
+# 手动触发：编译 release 全功能二进制（单一 bin 含全部子命令），
+# 连同运行所需数据文件打包成 zip，供下载后在 Linux 上直接使用。
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 要编译的分支或 tag
+        required: true
+        default: moling
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: 编译并打包（linux x86_64）
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 1
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 cargo 依赖与 target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+
+      - name: 编译（release：LTO + codegen-units=1，单一二进制含全部功能）
+        run: |
+          set -o pipefail
+          if ! cargo build --release 2>&1 | tee build.log | tail -n 5; then
+            echo "=== 编译错误 ==="
+            grep -E -A 14 '^error' build.log || tail -n 80 build.log
+            exit 1
+          fi
+          strip target/release/code_genie
+          ls -lh target/release/code_genie
+
+      - name: 功能冒烟（全子命令 + 真实数据跑通导出）
+        run: |
+          set -e
+          CG=./target/release/code_genie
+          echo "--- 版本 ---"
+          $CG --version
+          echo "--- 子命令清单（应含全部功能）---"
+          $CG --help
+          echo "--- 导出冒烟（真实数据）---"
+          $CG export \
+            --keymap runs/s4-export/output-keymap.txt \
+            --chaifen moling/chaifen-all.txt \
+            --output /tmp/全码表.txt
+          wc -l < /tmp/全码表.txt
+
+      - name: 打包（二进制 + 数据 + 开箱即用配置 + 说明）
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, re, shutil, subprocess
+
+          commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                                  capture_output=True, text=True).stdout.strip()
+          bdate = subprocess.run(["date", "-u", "+%Y-%m-%d"],
+                                 capture_output=True, text=True).stdout.strip()
+          ver = subprocess.run(["./target/release/code_genie", "--version"],
+                               capture_output=True, text=True).stdout.strip()
+
+          pkg = pathlib.Path("code_genie-linux-x86_64")
+          shutil.rmtree(pkg, ignore_errors=True)
+          pkg.mkdir()
+
+          shutil.copy2("target/release/code_genie", pkg / "code_genie")
+          os.chmod(pkg / "code_genie", 0o755)
+
+          for f in ["moling/input-fixed.txt", "moling/input-roots.txt",
+                    "moling/input-division.txt", "moling/pair_equivalence.txt",
+                    "moling/key_distribution.txt", "moling/chaifen-all.txt"]:
+              dst = pkg / f
+              dst.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(f, dst)
+
+          for d in ["ceping-data", "yuhao-data", "yuhao-text"]:
+              shutil.copytree(d, pkg / d)
+
+          cfg = pathlib.Path("config.toml.example").read_text(encoding="utf-8")
+          for name in ["fixed", "dynamic", "splits", "pair_equiv", "key_dist"]:
+              cfg = re.sub(rf'(?m)^({name}\s*=\s*")([^"]*)(")',
+                           rf'\g<1>moling/\g<2>\g<3>', cfg)
+          (pkg / "config.toml").write_text(cfg, encoding="utf-8")
+
+          lines = [
+              "code_genie Linux 完整版",
+              "================================",
+              f"{ver}",
+              f"构建：{commit}（{bdate}，Ubuntu 24.04，release + LTO，单一二进制含全部功能）",
+              "",
+              "运行要求",
+              "  Linux x86_64；glibc 较新（≥ 2.39，Ubuntu 22.04/24.04、近两年的发行版均可）。",
+              "  如需在更老系统上跑，可再出 musl 静态版。",
+              "",
+              "快速开始",
+              "  chmod +x code_genie",
+              "  ./code_genie --help                     查看全部子命令",
+              "  ./code_genie -c config.toml optimize -d out",
+              "                                          退火优化（改 config.toml 的",
+              "                                          [annealing] threads / total_steps）",
+              "  中途按 Ctrl-C 会写 checkpoint，之后",
+              "  ./code_genie resume -d out              断点续算",
+              "  ./code_genie export -k out/字根键位表.txt -c moling/chaifen-all.txt -o 全码表.txt",
+              "                                          导出码表（有简码表加 -s）",
+              "  ./code_genie chart -k out/字根键位表.txt -o 字根图.html",
+              "                                          字根图",
+              "",
+              "子命令一览",
+              "  optimize   模拟退火优化（核心）",
+              "  resume     从 checkpoint 断点续算",
+              "  export     导出测评用码表（字 TAB 码）",
+              "  chart      字根键位图（HTML）",
+              "  assess     宇浩测评对比（需另备 yuhao-assess，包内未含）",
+              "  rime       生成 Rime 方案包（星云）",
+              "  pipeline   拆分流水线展示",
+              "  merge      字根归并对比",
+              "  diagnose   码表诊断（ceping-data 在包内）",
+              "  sentence   整句准确率（yuhao-text 在包内）",
+              "",
+              "数据目录",
+              "  moling/          拆分表、字根文件、当量、用指分布、拆分全表",
+              "  ceping-data/     诊断用的当量/字频/词表",
+              "  yuhao-data/      宇浩测评口径数据",
+              "  yuhao-text/      整句测评语料",
+          ]
+          (pkg / "说明.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print("包内容：")
+          for p in sorted(pkg.rglob("*")):
+              print(("目录 " if p.is_dir() else "文件 ") + str(p))
+          PY
+          zip -qr code_genie-linux-x86_64.zip code_genie-linux-x86_64
+          ls -lh code_genie-linux-x86_64.zip
+
+      - name: 包内二进制冒烟
+        run: |
+          cd code_genie-linux-x86_64
+          ./code_genie --version
+          ./code_genie --help | head -n 8
+
+      - name: 上传结果
+        uses: actions/upload-artifact@v7
+        with:
+          name: codegenie-linux-x86_64
+          path: code_genie-linux-x86_64.zip
+          if-no-files-found: error
+          retention-days: 30
