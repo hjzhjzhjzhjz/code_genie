@@ -1061,19 +1061,31 @@ fn resolve_scale_config(cfg: &Config, calibrated: ScaleConfig) -> (ScaleConfig, 
             let to_scale = |v: f64| if v > 0.0 { 1.0 / v } else { 1.0 };
 
             if all_set {
-                let sc = ScaleConfig {
-                    collision_count:        to_scale(toml.collision_count.unwrap()),
-                    collision_rate:         to_scale(toml.collision_rate.unwrap()),
-                    equivalence:            to_scale(toml.equivalence.unwrap()),
-                    equiv_cv:               to_scale(toml.equiv_cv.unwrap()),
-                    distribution:           to_scale(toml.distribution.unwrap()),
-                    simple_freq:            toml.simple_freq.map(to_scale).unwrap_or(calibrated.simple_freq),
-                    simple_equiv:           toml.simple_equiv.map(to_scale).unwrap_or(calibrated.simple_equiv),
-                    simple_dist:            toml.simple_dist.map(to_scale).unwrap_or(calibrated.simple_dist),
-                    simple_collision_count: toml.simple_collision_count.map(to_scale).unwrap_or(calibrated.simple_collision_count),
-                    simple_collision_rate:  toml.simple_collision_rate.map(to_scale).unwrap_or(calibrated.simple_collision_rate),
-                };
-                (sc, "手动配置")
+                // all_set 已保证 5 个字段均 Some；用 if let 解构，避免 unwrap panic。
+                if let (Some(cc), Some(cr), Some(eq), Some(cv), Some(di)) = (
+                    toml.collision_count,
+                    toml.collision_rate,
+                    toml.equivalence,
+                    toml.equiv_cv,
+                    toml.distribution,
+                ) {
+                    let sc = ScaleConfig {
+                        collision_count:        to_scale(cc),
+                        collision_rate:         to_scale(cr),
+                        equivalence:            to_scale(eq),
+                        equiv_cv:               to_scale(cv),
+                        distribution:           to_scale(di),
+                        simple_freq:            toml.simple_freq.map(to_scale).unwrap_or(calibrated.simple_freq),
+                        simple_equiv:           toml.simple_equiv.map(to_scale).unwrap_or(calibrated.simple_equiv),
+                        simple_dist:            toml.simple_dist.map(to_scale).unwrap_or(calibrated.simple_dist),
+                        simple_collision_count: toml.simple_collision_count.map(to_scale).unwrap_or(calibrated.simple_collision_count),
+                        simple_collision_rate:  toml.simple_collision_rate.map(to_scale).unwrap_or(calibrated.simple_collision_rate),
+                    };
+                    (sc, "手动配置")
+                } else {
+                    // 理论不可达（all_set 已校验五项均 Some）；兜底回退校准值，不 panic。
+                    (calibrated, "自动校准")
+                }
             } else {
                 // 部分覆盖：以 calibrated 为基础，用手动值（取倒数后）覆盖
                 let mut sc = calibrated;
@@ -1248,8 +1260,6 @@ fn run_optimize(
     let (fixed_roots, constrained) = must(loader::load_fixed(&cfg.files.fixed));
     let dynamic_groups = must(loader::load_dynamic(&cfg.files.dynamic, &constrained, &cfg.keys.allowed));
     let splits = must(loader::load_splits(&cfg.files.splits));
-    let equiv_table = or_warn_default(loader::load_pair_equivalence(&cfg.files.pair_equiv));
-    let key_dist_config = or_warn_default(loader::load_key_distribution(&cfg.files.key_dist));
 
     // 加载简码配置
     let simple_config = if cfg.weights.simple_code.enabled {
@@ -1349,6 +1359,9 @@ fn run_optimize(
             (sc, src, None)
         } else {
         println!("\n📐 正在进行初始尺度校准...");
+        // C8：当量/分布仅校准路径需要，就地加载（all_manual / 复用尺度路径不再重复读）。
+        let equiv_table = or_warn_default(loader::load_pair_equivalence(&cfg.files.pair_equiv));
+        let key_dist_config = or_warn_default(loader::load_key_distribution(&cfg.files.key_dist));
         let temp_scale = types::ScaleConfig::default();
         let temp_ctx = OptContext::new_with_fixed_and_termination(
             &splits,

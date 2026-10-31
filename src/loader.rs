@@ -2,10 +2,10 @@
 // 📂 文件加载模块
 // =========================================================================
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 
-use crate::types::{char_to_key_index, KeyDistConfig, RootGroup, KEY_SPACE};
+use crate::types::{char_to_key_index, KeyDistConfig, RootGroup, EQUIV_TABLE_SIZE, KEY_SPACE};
 
 /// 加载固定字根和受限字根组
 /// 
@@ -64,14 +64,14 @@ pub fn load_dynamic(path: &str, constrained: &[RootGroup], allowed_keys: &str) -
     let content = fs::read_to_string(path)
         .map_err(|e| format!("无法读取动态字根文件 {}: {}", path, e))?;
 
-    let mut existing: HashSet<String> = HashSet::new();
-    for g in constrained {
+    // C7：维护「字根 → 组索引」，替代每行扫描全部组（O(行×组) → O(行内根数)）。
+    let mut groups: Vec<RootGroup> = constrained.to_vec();
+    let mut root_to_group: HashMap<String, usize> = HashMap::new();
+    for (gi, g) in groups.iter().enumerate() {
         for r in &g.roots {
-            existing.insert(r.clone());
+            root_to_group.insert(r.clone(), gi);
         }
     }
-
-    let mut groups: Vec<RootGroup> = constrained.to_vec();
 
     for line in content.lines() {
         let line = line.trim();
@@ -86,7 +86,7 @@ pub fn load_dynamic(path: &str, constrained: &[RootGroup], allowed_keys: &str) -
         // 本行中尚未归属的「新」字根
         let new_roots: Vec<String> = line_roots
             .iter()
-            .filter(|r| !existing.contains(*r))
+            .filter(|r| !root_to_group.contains_key(*r))
             .cloned()
             .collect();
         if new_roots.is_empty() {
@@ -94,19 +94,22 @@ pub fn load_dynamic(path: &str, constrained: &[RootGroup], allowed_keys: &str) -
             continue;
         }
 
-        // #7：先统计本行字根已落在哪些既有组，避免「遇到第一个就暴力合并」。
-        let touched: Vec<usize> = groups
-            .iter()
-            .enumerate()
-            .filter(|(_, g)| line_roots.iter().any(|r| g.roots.contains(r)))
-            .map(|(gi, _)| gi)
-            .collect();
+        // #7：用索引收集本行涉及哪些既有组，避免「遇到第一个就暴力合并」。
+        let mut touched: Vec<usize> = Vec::new();
+        for r in &line_roots {
+            if let Some(&gi) = root_to_group.get(r) {
+                if !touched.contains(&gi) {
+                    touched.push(gi);
+                }
+            }
+        }
 
         match touched.len() {
             // 无归属：整行新字根自成一组
             0 => {
+                let gi = groups.len();
                 for r in &new_roots {
-                    existing.insert(r.clone());
+                    root_to_group.insert(r.clone(), gi);
                 }
                 groups.push(RootGroup {
                     roots: new_roots,
@@ -117,9 +120,9 @@ pub fn load_dynamic(path: &str, constrained: &[RootGroup], allowed_keys: &str) -
             1 => {
                 let gi = touched[0];
                 for r in &new_roots {
-                    if !groups[gi].roots.contains(r) && !existing.contains(r) {
+                    if !groups[gi].roots.contains(r) && !root_to_group.contains_key(r) {
                         groups[gi].roots.push(r.clone());
-                        existing.insert(r.clone());
+                        root_to_group.insert(r.clone(), gi);
                     }
                 }
             }
@@ -129,8 +132,9 @@ pub fn load_dynamic(path: &str, constrained: &[RootGroup], allowed_keys: &str) -
                     "⚠️ 动态字根行 {:?} 同时涉及多个已有组 {:?}，为避免错误合并，新字根已独立成组",
                     line_roots, touched
                 );
+                let gi = groups.len();
                 for r in &new_roots {
-                    existing.insert(r.clone());
+                    root_to_group.insert(r.clone(), gi);
                 }
                 groups.push(RootGroup {
                     roots: new_roots,
@@ -179,8 +183,8 @@ pub fn load_splits(path: &str) -> Result<Vec<(char, Vec<String>, u64)>, String> 
 /// 
 /// # 返回值
 /// - 31x31 当量矩阵
-pub fn load_pair_equivalence(path: &str) -> Result<[[f64; 31]; 31], String> {
-    let mut table = [[0.0f64; 31]; 31];
+pub fn load_pair_equivalence(path: &str) -> Result<[[f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE], String> {
+    let mut table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
     // #5：缺失当量文件返回 Err（当量项将恒为 0、评分失真）；由调用方决定告警/退出。
     let content = fs::read_to_string(path).map_err(|e| {
         format!(
@@ -201,7 +205,7 @@ pub fn load_pair_equivalence(path: &str) -> Result<[[f64; 31]; 31], String> {
                     (char_to_key_index(chars[0]), char_to_key_index(chars[1]))
                 {
                     if let Ok(equiv) = parts[1].trim().parse::<f64>() {
-                        if k1 < 31 && k2 < 31 {
+                        if k1 < EQUIV_TABLE_SIZE && k2 < EQUIV_TABLE_SIZE {
                             table[k1][k2] = equiv;
                         }
                     }
@@ -410,8 +414,8 @@ pub fn keymap_to_assignment(
 /// 
 /// # 返回值
 /// - 31 个键位的分布配置
-pub fn load_key_distribution(path: &str) -> Result<[KeyDistConfig; 31], String> {
-    let mut cfg = [KeyDistConfig::default(); 31];
+pub fn load_key_distribution(path: &str) -> Result<[KeyDistConfig; EQUIV_TABLE_SIZE], String> {
+    let mut cfg = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
     // #5：缺失分布文件返回 Err（分布项将用默认值、评分失真）；由调用方决定告警/退出。
     let content = fs::read_to_string(path).map_err(|e| {
         format!(
@@ -427,7 +431,7 @@ pub fn load_key_distribution(path: &str) -> Result<[KeyDistConfig; 31], String> 
         let parts: Vec<&str> = line.split('\t').collect();
         if parts.len() >= 4 {
             if let Some(ki) = parts[0].chars().next().and_then(char_to_key_index) {
-                if ki < 31 {
+                if ki < EQUIV_TABLE_SIZE {
                     cfg[ki] = KeyDistConfig {
                         target_rate: parts[1].trim().parse().unwrap_or(0.0),
                         low_penalty: parts[2].trim().parse().unwrap_or(0.0),

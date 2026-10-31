@@ -7,7 +7,7 @@ edition = "2021"
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3.4"
-rand = { version = "0.8", features = ["small_rng"] }
+rand = "0.8"
 rayon = "1.10"
 hashbrown = "0.14"
 rustc-hash = "1.1"
