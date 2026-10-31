@@ -195,7 +195,7 @@ jobs:
           ]
           (pkg / "说明.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
           print("包内容（顶层）：")
-          for p in sorted(pkg.iter()):
+          for p in sorted(pkg.iterdir()):
               print("  " + ("目录 " if p.is_dir() else "文件 ") + p.name)
           PY
           zip -qr code_genie-linux-x86_64.zip code_genie-linux-x86_64
