@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use chrono::Local;
 use clap::{Parser, Subcommand};
+use rand::Rng;
 use rayon::prelude::*;
 
 mod annealing;
@@ -81,6 +82,16 @@ enum Commands {
         /// 复用尺度文件（尺度.json）：跳过校准，保证多轮/跨运行口径一致
         #[arg(long = "scale")]
         scale: Option<String>,
+    },
+
+    /// 基准测试：压测目标函数评估、邻域算子（含 full_key_swap）、自动调温与 SA 吞吐
+    Bench {
+        /// 每个微基准的迭代次数
+        #[arg(long, default_value_t = 20000)]
+        iters: usize,
+        /// SA 吞吐基准的步数
+        #[arg(long, default_value_t = 200000)]
+        steps: usize,
     },
 
     /// 根据 keymap 为汉字编码
@@ -564,7 +575,182 @@ fn main() {
             seed_keymap,
             scale,
         }) => run_optimize(&cfg, &cli.config, output_dir, seed_dir, seed_keymap, scale),
+        Some(Commands::Bench { iters, steps }) => run_bench(&cfg, iters, steps),
         None => run_optimize(&cfg, &cli.config, None, None, None, None),
+    }
+}
+
+// =========================================================================
+// bench 子命令
+// =========================================================================
+
+/// 基准测试：压测目标函数评估、邻域算子（含新增 full_key_swap）、自动调温与 SA 吞吐。
+///
+/// 用法：`cargo run --release -- -c config.toml.example bench [--iters N] [--steps N]`
+fn run_bench(cfg: &Config, iters: usize, steps: usize) {
+    println!("=== CodeGenie 基准测试 ===");
+    println!("  迭代: {}    SA 步数: {}", iters, steps);
+
+    // 加载输入并构建上下文（perf 与 scale 数值无关，用默认 scale/targets）
+    let (fixed_roots, constrained) = must(loader::load_fixed(&cfg.files.fixed));
+    let dynamic_groups = must(loader::load_dynamic(&cfg.files.dynamic, &constrained, &cfg.keys.allowed));
+    let splits = must(loader::load_splits(&cfg.files.splits));
+    let equiv_table = or_warn_default(loader::load_pair_equivalence(&cfg.files.pair_equiv));
+    let key_dist_config = or_warn_default(loader::load_key_distribution(&cfg.files.key_dist));
+    let simple_config = if cfg.weights.simple_code.enabled {
+        cfg.get_simple_code_config()
+    } else {
+        SimpleCodeConfig { levels: vec![] }
+    };
+    let weights = cfg.get_weight_config();
+    let ctx = OptContext::new_with_fixed_and_termination(
+        &splits,
+        &fixed_roots,
+        &dynamic_groups,
+        equiv_table,
+        key_dist_config,
+        ScaleConfig::default(),
+        simple_config,
+        weights,
+        TargetsConfig::default(),
+        &cfg.get_fixed_simple_codes(),
+        &cfg.keys.termination_keys,
+    );
+    println!("  组数: {}, 编码空间: {}", ctx.num_groups, ctx.code_space);
+
+    let assign = annealing::deterministic_init(&ctx, cfg);
+    let n = assign.len();
+    if n == 0 {
+        eprintln!("❌ 组数为 0，无法基准测试");
+        return;
+    }
+    // 算子基准用的固定温度（近似混合接受/拒绝，测平均成本）
+    let bench_temp = 1e-3;
+
+    // 1) 目标函数评估（构建 + 打分）
+    {
+        let t = Instant::now();
+        let mut acc = 0.0f64;
+        for _ in 0..iters {
+            let mut ev = Evaluator::new_full_only(&ctx, &assign);
+            acc += ev.get_score(&ctx);
+        }
+        let dt = t.elapsed().as_secs_f64();
+        std::hint::black_box(acc);
+        println!("  [eval]          {:>10.2} μs/次  ({:>12.0} 次/秒)", dt * 1e6 / iters as f64, iters as f64 / dt);
+    }
+
+    // 2) try_move
+    {
+        let mut ev = Evaluator::new(&ctx, &assign);
+        let mut a = assign.clone();
+        let mut rng = rand::thread_rng();
+        let t = Instant::now();
+        let mut acc = 0usize;
+        for _ in 0..iters {
+            let gi = rng.gen_range(0..n);
+            let allowed = &ctx.groups[gi].allowed_keys;
+            let nk = allowed[rng.gen_range(0..allowed.len())];
+            if ev.try_move(&ctx, &mut a, gi, nk, bench_temp, &mut rng) {
+                acc += 1;
+            }
+        }
+        let dt = t.elapsed().as_secs_f64();
+        std::hint::black_box(acc);
+        println!("  [try_move]      {:>10.2} μs/次  ({:>12.0} 次/秒)", dt * 1e6 / iters as f64, iters as f64 / dt);
+    }
+
+    if n >= 2 {
+        // 3) try_swap
+        {
+            let mut ev = Evaluator::new(&ctx, &assign);
+            let mut a = assign.clone();
+            let mut rng = rand::thread_rng();
+            let t = Instant::now();
+            let mut acc = 0usize;
+            for _ in 0..iters {
+                let r1 = rng.gen_range(0..n);
+                let r2 = rng.gen_range(0..n - 1);
+                let r2 = if r2 >= r1 { r2 + 1 } else { r2 };
+                let k1 = a[r1];
+                let k2 = a[r2];
+                if k1 != k2
+                    && ctx.groups[r1].allowed_keys.contains(&k2)
+                    && ctx.groups[r2].allowed_keys.contains(&k1)
+                    && ev.try_swap(&ctx, &mut a, r1, r2, bench_temp, &mut rng)
+                {
+                    acc += 1;
+                }
+            }
+            let dt = t.elapsed().as_secs_f64();
+            std::hint::black_box(acc);
+            println!("  [try_swap]      {:>10.2} μs/次  ({:>12.0} 次/秒)", dt * 1e6 / iters as f64, iters as f64 / dt);
+        }
+
+        // 4) try_full_key_swap（新增大邻域算子）
+        {
+            let mut ev = Evaluator::new(&ctx, &assign);
+            let mut a = assign.clone();
+            let mut rng = rand::thread_rng();
+            let t = Instant::now();
+            let mut acc = 0usize;
+            for _ in 0..iters {
+                if annealing::try_full_key_swap(&ctx, &mut a, &mut ev, bench_temp, &mut rng) {
+                    acc += 1;
+                }
+            }
+            let dt = t.elapsed().as_secs_f64();
+            std::hint::black_box(acc);
+            println!("  [full_key_swap] {:>10.2} μs/次  ({:>12.0} 次/秒)", dt * 1e6 / iters as f64, iters as f64 / dt);
+        }
+    }
+
+    // 5) 自动调温（一次性探测）
+    let auto = {
+        let mut rng = rand::thread_rng();
+        let t = Instant::now();
+        let r = auto_temperature(&ctx, &assign, &mut rng);
+        let dt = t.elapsed().as_secs_f64();
+        match r {
+            Some((t0, t1)) => {
+                println!("  [auto_temp]     {:>10.2} ms/次  → t_start={:.3e}, t_end={:.3e}", dt * 1e3, t0, t1);
+                Some((t0, t1))
+            }
+            None => {
+                println!("  [auto_temp]     {:>10.2} ms/次  → 采样失败", dt * 1e3);
+                None
+            }
+        }
+    };
+
+    // 6) SA 吞吐（单线程跑 steps 步）
+    {
+        let mut c = cfg.clone();
+        if let Some((t0, t1)) = auto {
+            c.annealing.temp_start = t0;
+            c.annealing.temp_end = t1;
+        }
+        c.annealing.total_steps = steps.max(1);
+        let stop = Arc::new(AtomicBool::new(false));
+        let t = Instant::now();
+        let r = simulated_annealing_resumable(
+            &ctx,
+            &c,
+            0,
+            &stop,
+            None,
+            None,
+            usize::MAX,
+            Some(assign.as_slice()),
+        );
+        let dt = t.elapsed().as_secs_f64();
+        println!(
+            "  [SA]            {:>10.1} 步/秒  ({} 步 / {:.3}s, best={:.4})",
+            c.annealing.total_steps as f64 / dt,
+            c.annealing.total_steps,
+            dt,
+            r.score
+        );
     }
 }
 

@@ -560,7 +560,7 @@ fn try_triple_swap(
 /// 大邻域移动，用于单组 swap/move 跳不出局部最优时一步跨越很大范围。
 /// 合法性要求：k1 上的每个组都允许 k2、k2 上的每个组都允许 k1，否则放弃本次移动。
 /// 增量评估（key_weighted_usage + update_char + 简码增量），接受/回滚模式与 try_triple_swap 一致。
-fn try_full_key_swap(
+pub(crate) fn try_full_key_swap(
     ctx: &OptContext,
     assignment: &mut [u8],
     evaluator: &mut Evaluator,
