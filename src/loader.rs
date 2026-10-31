@@ -11,8 +11,9 @@ use crate::types::{char_to_key_index, KeyDistConfig, RootGroup, KEY_SPACE};
 /// 
 /// # 返回值
 /// - (固定字根映射, 受限字根组)
-pub fn load_fixed(path: &str) -> (HashMap<String, u8>, Vec<RootGroup>) {
-    let content = fs::read_to_string(path).expect("无法读取固定字根文件");
+pub fn load_fixed(path: &str) -> Result<(HashMap<String, u8>, Vec<RootGroup>), String> {
+    let content = fs::read_to_string(path)
+        .map_err(|e| format!("无法读取固定字根文件 {}: {}", path, e))?;
     let mut truly_fixed: HashMap<String, u8> = HashMap::new();
     let mut constrained: Vec<RootGroup> = Vec::new();
 
@@ -49,18 +50,19 @@ pub fn load_fixed(path: &str) -> (HashMap<String, u8>, Vec<RootGroup>) {
             }
         }
     }
-    (truly_fixed, constrained)
+    Ok((truly_fixed, constrained))
 }
 
 /// 加载动态字根组
-pub fn load_dynamic(path: &str, constrained: &[RootGroup], allowed_keys: &str) -> Vec<RootGroup> {
+pub fn load_dynamic(path: &str, constrained: &[RootGroup], allowed_keys: &str) -> Result<Vec<RootGroup>, String> {
     let global_allowed: Vec<u8> = allowed_keys
         .chars()
         .filter_map(char_to_key_index)
         .map(|i| i as u8)
         .collect();
 
-    let content = fs::read_to_string(path).expect("无法读取动态字根文件");
+    let content = fs::read_to_string(path)
+        .map_err(|e| format!("无法读取动态字根文件 {}: {}", path, e))?;
 
     let mut existing: HashSet<String> = HashSet::new();
     for g in constrained {
@@ -138,15 +140,16 @@ pub fn load_dynamic(path: &str, constrained: &[RootGroup], allowed_keys: &str) -
         }
     }
 
-    groups
+    Ok(groups)
 }
 
 /// 加载拆分表
 /// 
 /// # 返回值
 /// - Vec<(字符, 根名列表, 频率)>
-pub fn load_splits(path: &str) -> Vec<(char, Vec<String>, u64)> {
-    let content = fs::read_to_string(path).expect("无法读取拆分表");
+pub fn load_splits(path: &str) -> Result<Vec<(char, Vec<String>, u64)>, String> {
+    let content = fs::read_to_string(path)
+        .map_err(|e| format!("无法读取拆分表 {}: {}", path, e))?;
     let mut res = Vec::new();
     for line in content.lines() {
         let line = line.trim();
@@ -169,27 +172,22 @@ pub fn load_splits(path: &str) -> Vec<(char, Vec<String>, u64)> {
             res.push((ch, roots, freq));
         }
     }
-    res
+    Ok(res)
 }
 
 /// 加载字根对当量表
 /// 
 /// # 返回值
 /// - 31x31 当量矩阵
-pub fn load_pair_equivalence(path: &str) -> [[f64; 31]; 31] {
+pub fn load_pair_equivalence(path: &str) -> Result<[[f64; 31]; 31], String> {
     let mut table = [[0.0f64; 31]; 31];
-    // #5：缺失当量文件时不再「静默」置零——显式报错（当量项将恒为 0、评分失真）。
-    // 按「仅告警不阻断」策略继续运行，但输出醒目错误而非 println 警告。
-    let content = match fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!(
-                "❌ 错误: 无法读取当量文件 {}: {}（当量项将恒为 0，评分失真，请检查 files.pair_equiv）",
-                path, e
-            );
-            return table;
-        }
-    };
+    // #5：缺失当量文件返回 Err（当量项将恒为 0、评分失真）；由调用方决定告警/退出。
+    let content = fs::read_to_string(path).map_err(|e| {
+        format!(
+            "无法读取当量文件 {}: {}（当量项将恒为 0，评分失真，请检查 files.pair_equiv）",
+            path, e
+        )
+    })?;
     for line in content.lines() {
         let line = line.trim();
         if line.is_empty() {
@@ -211,7 +209,7 @@ pub fn load_pair_equivalence(path: &str) -> [[f64; 31]; 31] {
             }
         }
     }
-    table
+    Ok(table)
 }
 
 /// 从 keymap 文件加载字根到键位的映射
@@ -226,11 +224,11 @@ pub fn load_pair_equivalence(path: &str) -> [[f64; 31]; 31] {
 ///
 /// # 返回值
 /// - HashMap<String, u8>: 子字根名 -> 键位索引
-pub fn load_keymap(keymap_path: &str, division_path: &str) -> HashMap<String, u8> {
+pub fn load_keymap(keymap_path: &str, division_path: &str) -> Result<HashMap<String, u8>, String> {
     use crate::types::{extract_base_name, extract_suffix_num};
 
     // 第一步：从 division 文件中提取每个基础字根的子字根后缀列表
-    let splits = load_splits(division_path);
+    let splits = load_splits(division_path)?;
     let mut base_to_suffixes: HashMap<String, Vec<i32>> = HashMap::new();
 
     for (_, roots, _) in &splits {
@@ -250,7 +248,8 @@ pub fn load_keymap(keymap_path: &str, division_path: &str) -> HashMap<String, u8
     }
 
     // 第二步：解析 keymap 文件
-    let content = fs::read_to_string(keymap_path).expect("无法读取 keymap 文件");
+    let content = fs::read_to_string(keymap_path)
+        .map_err(|e| format!("无法读取 keymap 文件 {}: {}", keymap_path, e))?;
     let mut root_to_key: HashMap<String, u8> = HashMap::new();
 
     for line in content.lines() {
@@ -322,7 +321,7 @@ pub fn load_keymap(keymap_path: &str, division_path: &str) -> HashMap<String, u8
         }
     }
 
-    root_to_key
+    Ok(root_to_key)
 }
 
 /// 将 keymap（子字根名 → 键位）据当前 `ctx` 折叠为退火初始分配（assignment），并做约束校验。
@@ -411,20 +410,15 @@ pub fn keymap_to_assignment(
 /// 
 /// # 返回值
 /// - 31 个键位的分布配置
-pub fn load_key_distribution(path: &str) -> [KeyDistConfig; 31] {
+pub fn load_key_distribution(path: &str) -> Result<[KeyDistConfig; 31], String> {
     let mut cfg = [KeyDistConfig::default(); 31];
-    // #5：缺失分布文件时不再「静默」用默认值——显式报错（分布项失真）。
-    // 按「仅告警不阻断」策略继续运行，但输出醒目错误而非 println 警告。
-    let content = match fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!(
-                "❌ 错误: 无法读取用指分布文件 {}: {}（分布项将用默认值，评分失真，请检查 files.key_dist）",
-                path, e
-            );
-            return cfg;
-        }
-    };
+    // #5：缺失分布文件返回 Err（分布项将用默认值、评分失真）；由调用方决定告警/退出。
+    let content = fs::read_to_string(path).map_err(|e| {
+        format!(
+            "无法读取用指分布文件 {}: {}（分布项将用默认值，评分失真，请检查 files.key_dist）",
+            path, e
+        )
+    })?;
     for line in content.lines() {
         let line = line.trim();
         if line.is_empty() {
@@ -443,7 +437,7 @@ pub fn load_key_distribution(path: &str) -> [KeyDistConfig; 31] {
             }
         }
     }
-    cfg
+    Ok(cfg)
 }
 
 // =========================================================================

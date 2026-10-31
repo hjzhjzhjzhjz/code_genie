@@ -291,11 +291,6 @@ pub struct ScaleConfigToml {
 // =========================================================================
 
 impl Config {
-    /// 从 config.toml 加载配置
-    pub fn load() -> Result<Self, String> {
-        Self::load_from_path("config.toml")
-    }
-
     /// 从指定路径加载配置
     ///
     /// #1：解析/读取失败不再静默回退默认配置，而是返回 `Err`，由调用方 `exit(1)`。

@@ -875,8 +875,8 @@ pub fn smart_init(ctx: &OptContext, cfg: &Config) -> Vec<u8> {
 // 🔥 模拟退火主循环
 // =========================================================================
 
-/// 向后兼容入口（测试/无 checkpoint 场景）：不写 checkpoint、不可中断、不 resume。
-#[allow(dead_code)]
+/// 测试专用入口：不写 checkpoint、不可中断、不 resume（仅 `#[cfg(test)]` 编译；生产走 resumable）。
+#[cfg(test)]
 pub fn simulated_annealing(
     ctx: &OptContext,
     cfg: &Config,

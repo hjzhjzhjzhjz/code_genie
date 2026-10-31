@@ -368,6 +368,28 @@ enum Commands {
 // 主入口
 // =========================================================================
 
+/// 必需输入：加载失败直接报错退出（替代 loader 内部的 panic）。
+fn must<T>(r: Result<T, String>) -> T {
+    match r {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("❌ {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+/// 可选输入（#5 当量/分布）：加载失败告警并用默认值，不阻断。
+fn or_warn_default<T: Default>(r: Result<T, String>) -> T {
+    match r {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("❌ {}（按「不阻断」策略继续）", e);
+            T::default()
+        }
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
 
@@ -557,8 +579,8 @@ fn run_encode(division_path: &str, keymap_path: &str, output_path: &str) {
     println!("  输出文件: {}", output_path);
 
     // 加载数据
-    let root_to_key = loader::load_keymap(keymap_path, division_path);
-    let splits = loader::load_splits(division_path);
+    let root_to_key = must(loader::load_keymap(keymap_path, division_path));
+    let splits = must(loader::load_splits(division_path));
 
     println!("  已加载 {} 个字根映射", root_to_key.len());
     println!("  已加载 {} 个汉字拆分", splits.len());
@@ -648,10 +670,10 @@ fn run_evaluate(
     println!("  输出文件: {}", output_path);
 
     // 加载数据
-    let root_to_key = loader::load_keymap(keymap_path, division_path);
-    let splits = loader::load_splits(division_path);
-    let equiv_table = loader::load_pair_equivalence(equiv_path);
-    let key_dist_config = loader::load_key_distribution(keydist_path);
+    let root_to_key = must(loader::load_keymap(keymap_path, division_path));
+    let splits = must(loader::load_splits(division_path));
+    let equiv_table = or_warn_default(loader::load_pair_equivalence(equiv_path));
+    let key_dist_config = or_warn_default(loader::load_key_distribution(keydist_path));
 
     println!("  已加载 {} 个字根映射", root_to_key.len());
     println!("  已加载 {} 个汉字拆分", splits.len());
@@ -1223,11 +1245,11 @@ fn run_optimize(
     backup_inputs(cfg, cli_config_path, &output_dir);
 
     // ==================== 加载数据 ====================
-    let (fixed_roots, constrained) = loader::load_fixed(&cfg.files.fixed);
-    let dynamic_groups = loader::load_dynamic(&cfg.files.dynamic, &constrained, &cfg.keys.allowed);
-    let splits = loader::load_splits(&cfg.files.splits);
-    let equiv_table = loader::load_pair_equivalence(&cfg.files.pair_equiv);
-    let key_dist_config = loader::load_key_distribution(&cfg.files.key_dist);
+    let (fixed_roots, constrained) = must(loader::load_fixed(&cfg.files.fixed));
+    let dynamic_groups = must(loader::load_dynamic(&cfg.files.dynamic, &constrained, &cfg.keys.allowed));
+    let splits = must(loader::load_splits(&cfg.files.splits));
+    let equiv_table = or_warn_default(loader::load_pair_equivalence(&cfg.files.pair_equiv));
+    let key_dist_config = or_warn_default(loader::load_key_distribution(&cfg.files.key_dist));
 
     // 加载简码配置
     let simple_config = if cfg.weights.simple_code.enabled {
@@ -1497,8 +1519,8 @@ fn run_optimize(
         }
         // all_manual：跳过了校准、无可复用上下文，正式 ctx 单独构建一次。
         None => {
-            let equiv_table_2 = loader::load_pair_equivalence(&cfg.files.pair_equiv);
-            let key_dist_config_2 = loader::load_key_distribution(&cfg.files.key_dist);
+            let equiv_table_2 = or_warn_default(loader::load_pair_equivalence(&cfg.files.pair_equiv));
+            let key_dist_config_2 = or_warn_default(loader::load_key_distribution(&cfg.files.key_dist));
             OptContext::new_with_fixed_and_termination(
                 &splits,
                 &fixed_roots,
@@ -1578,7 +1600,7 @@ fn run_optimize(
         let mut rng = rand::thread_rng();
         let mut v = Vec::with_capacity(seed_paths.len());
         for p in &seed_paths {
-            let map = loader::load_keymap(p, &cfg.files.splits);
+            let map = must(loader::load_keymap(p, &cfg.files.splits));
             match loader::keymap_to_assignment(&ctx, &map, &mut rng) {
                 Ok((asg, filled)) => {
                     // 种子未覆盖任何组（filled 等于全部组数）：视为无有效编码行或与当前方案
@@ -1813,11 +1835,11 @@ fn run_resume(dir: &str) {
     let cfg = cfg;
 
     // 3) 重建优化上下文（复用 meta.scale_config，跳过 calibrate，需求 6.3）。
-    let (fixed_roots, constrained) = loader::load_fixed(&cfg.files.fixed);
-    let dynamic_groups = loader::load_dynamic(&cfg.files.dynamic, &constrained, &cfg.keys.allowed);
-    let splits = loader::load_splits(&cfg.files.splits);
-    let equiv_table = loader::load_pair_equivalence(&cfg.files.pair_equiv);
-    let key_dist_config = loader::load_key_distribution(&cfg.files.key_dist);
+    let (fixed_roots, constrained) = must(loader::load_fixed(&cfg.files.fixed));
+    let dynamic_groups = must(loader::load_dynamic(&cfg.files.dynamic, &constrained, &cfg.keys.allowed));
+    let splits = must(loader::load_splits(&cfg.files.splits));
+    let equiv_table = or_warn_default(loader::load_pair_equivalence(&cfg.files.pair_equiv));
+    let key_dist_config = or_warn_default(loader::load_key_distribution(&cfg.files.key_dist));
     if !validate::check_validation(&splits, &fixed_roots, &dynamic_groups) {
         std::process::exit(1);
     }
