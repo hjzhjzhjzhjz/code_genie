@@ -249,15 +249,15 @@ jobs:
         run: |
           set -o pipefail
           # 总时间预算：单 job 350 分钟上限，留足 artifact 上传与收尾
-          总预算=$(( 295 * 60 ))
+          BUDGET=$(( 295 * 60 ))
           if ! echo "$REPEAT" | grep -qE '^[0-9]+$'; then REPEAT=1; fi
-          轮数=$REPEAT
-          [ "$轮数" -lt 1 ] && 轮数=1
-          [ "$轮数" -gt 20 ] && 轮数=20
-          echo "=== 计划：${轮数} 轮 × total_steps=$TOTAL_STEPS，逐轮播种 ==="
+          ROUNDS=$REPEAT
+          [ "$ROUNDS" -lt 1 ] && ROUNDS=1
+          [ "$ROUNDS" -gt 20 ] && ROUNDS=20
+          echo "=== 计划：${ROUNDS} 轮 × total_steps=$TOTAL_STEPS，逐轮播种 ==="
 
-          开始=$SECONDS
-          for k in $(seq 1 "$轮数"); do
+          T0=$SECONDS
+          for k in $(seq 1 "$ROUNDS"); do
             ARGS=()
             if [ "$k" -eq 1 ] && [ -n "$SEED_RUN" ]; then
               ARGS+=(--seed-dir seed)
@@ -269,16 +269,20 @@ jobs:
               ARGS+=(--seed-dir "$OUT_DIR")
             fi
 
-            剩余=$(( 总预算 - (SECONDS - 开始) ))
-            每轮=$(( 剩余 / (轮数 - k + 1) ))
-            if [ "$每轮" -le 120 ]; then
-              echo "::warning::时间预算不足，第 $k 轮起停止（已用 $((SECONDS - 开始))s / ${总预算}s）"
+            LEFT=$(( BUDGET - (SECONDS - T0) ))
+            SLICE=$(( LEFT / (ROUNDS - k + 1) ))
+            if [ "$SLICE" -le 120 ]; then
+              echo "::warning::时间预算不足，第 $k 轮起停止（已用 $((SECONDS - T0))s / ${BUDGET}s）"
               break
             fi
 
             echo ""
-            echo "▶️ 第 $k/$轮数 轮（本轮时限 ${每轮}s）${ARGS[*]:+播种: ${ARGS[*]}}"
-            timeout --signal=INT --kill-after=60s "${每轮}s" \
+            if [ "${#ARGS[@]}" -gt 0 ]; then
+              echo "▶️ 第 $k/$ROUNDS 轮（本轮时限 ${SLICE}s）播种: ${ARGS[*]}"
+            else
+              echo "▶️ 第 $k/$ROUNDS 轮（本轮时限 ${SLICE}s）全新随机"
+            fi
+            timeout --signal=INT --kill-after=60s "${SLICE}s" \
               ./target/release/code_genie -c config.toml optimize -d "$OUT_DIR" "${ARGS[@]}" 2>&1 | tee -a run.log \
               || echo "::warning::第 $k 轮被时限中断（exit=$?），本轮解已落盘，下一轮播种续算"
 
@@ -286,6 +290,7 @@ jobs:
             rm -f "$OUT_DIR"/*.txt.2* "$OUT_DIR"/thread-*/*.txt.2* 2>/dev/null || true
           done
           rm -f "$OUT_DIR"/*.txt.2* "$OUT_DIR"/thread-*/*.txt.2* 2>/dev/null || true
+          echo "ACTUAL_ROUNDS=$k" >> "$GITHUB_ENV"
           echo "=== 重复运行结束：共 $k 轮 ==="
 
       - name: 导出全码表
@@ -359,7 +364,7 @@ jobs:
             else
               echo "- 播种来源：无（全新随机）"
             fi
-            echo "- 重复轮数：\`${REPEAT:-1}\`（实际 $k 轮）"
+            echo "- 重复轮数：\`${REPEAT:-1}\`（实际 ${ACTUAL_ROUNDS:-1} 轮）"
             echo ""
             if [ -f "$OUT_DIR/汇总.txt" ]; then
               echo '```'
