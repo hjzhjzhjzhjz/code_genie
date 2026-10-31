@@ -63,6 +63,18 @@ jobs:
         with:
           node-version: 22
 
+      - name: 生成 config.toml（新版无配置直接退出，冒烟与包内共用）
+        run: |
+          python3 - <<'PY'
+          import pathlib, re
+          cfg = pathlib.Path("config.toml.example").read_text(encoding="utf-8")
+          for name in ["fixed", "dynamic", "splits", "pair_equiv", "key_dist"]:
+              cfg = re.sub(rf'(?m)^({name}\s*=\s*")([^"]*)(")',
+                           rf'\g<1>moling/\g<2>\g<3>', cfg)
+          pathlib.Path("config.toml").write_text(cfg, encoding="utf-8")
+          print("config.toml 已生成（[files] 指向 moling/）")
+          PY
+
       - name: 功能冒烟（全子命令 + 真实数据跑通导出）
         run: |
           set -e
@@ -72,7 +84,7 @@ jobs:
           echo "--- 子命令清单（应含全部功能）---"
           $CG --help
           echo "--- 导出冒烟（真实数据）---"
-          $CG export \
+          $CG -c config.toml export \
             --keymap runs/s4-export/output-keymap.txt \
             --chaifen moling/chaifen-all.txt \
             --output /tmp/全码表.txt
@@ -118,11 +130,7 @@ jobs:
           shutil.copy2("yuhao-text/literature.txt",
                        pkg / "yuhao-assess" / "public" / "texts" / "literature.txt")
 
-          cfg = pathlib.Path("config.toml.example").read_text(encoding="utf-8")
-          for name in ["fixed", "dynamic", "splits", "pair_equiv", "key_dist"]:
-              cfg = re.sub(rf'(?m)^({name}\s*=\s*")([^"]*)(")',
-                           rf'\g<1>moling/\g<2>\g<3>', cfg)
-          (pkg / "config.toml").write_text(cfg, encoding="utf-8")
+          shutil.copy2("config.toml", pkg / "config.toml")
 
           准备 = """#!/usr/bin/env bash
           # 宇浩测评环境准备：需要 Node.js 22+ 与 pnpm 9（npm i -g pnpm@9）
@@ -186,6 +194,8 @@ jobs:
               "",
               "子命令一览",
               "  optimize   模拟退火优化（核心）",
+              "  encode     根据 keymap 为汉字编码",
+              "  evaluate   全方位评估编码方案",
               "  resume     从 checkpoint 断点续算",
               "  export     导出测评用码表（字 TAB 码）",
               "  chart      字根键位图（HTML）",
@@ -219,7 +229,7 @@ jobs:
           (cd /tmp/yh && pnpm install --frozen-lockfile 2>&1 | tail -n 3)
           mkdir -p /tmp/assess-dir
           cp /tmp/全码表.txt /tmp/assess-dir/
-          ./target/release/code_genie assess \
+          ./target/release/code_genie -c config.toml assess \
             --dir /tmp/assess-dir \
             --scheme codegenie-s4.jsonc \
             --yuhao-dir /tmp/yh \
