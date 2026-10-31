@@ -3,7 +3,10 @@
 // =========================================================================
 
 use crate::config::TargetsConfig;
+use crate::context::OptContext;
+use crate::evaluator::Evaluator;
 use crate::types::{Metrics, ScaleConfig, SimpleMetrics, WeightConfig};
+use rand::Rng;
 
 /// 根据初始状态自动校准缩放因子
 ///
@@ -101,4 +104,58 @@ pub fn calibrate_scales(
             / pick(st.collision_rate, st.enabled, initial_simple.collision_rate),
         ..base
     }
+}
+
+/// 自动标定退火温度（参考 libchai 的「调参」思想，但用闭式估计，免试跑搜索）。
+///
+/// 做法：在初态上采样若干「随机单组移动」，估计平均 |Δscore|，再用 Metropolis 关系
+/// `exp(-Δ/T)=p` 反解温度：
+/// - `t_start = Δ̄ / ln(1/0.98)` ≈ 49.5·Δ̄（初温接受率≈0.98，充分探索）；
+/// - `t_end   = Δ̄ / ln(1/0.02)` ≈ 0.256·Δ̄（末温接受率≈0.02，趋于贪心）。
+///
+/// 这样温度随权重/scale 自动标定，不再写死。采样失败（无合法移动/Δ̄≈0）返回 `None`，
+/// 由调用方回退到配置温度。
+pub fn auto_temperature(
+    ctx: &OptContext,
+    init: &[u8],
+    rng: &mut impl Rng,
+) -> Option<(f64, f64)> {
+    let n = init.len();
+    if n == 0 {
+        return None;
+    }
+    let mut base_ev = Evaluator::new_full_only(ctx, init);
+    let base = base_ev.get_score(ctx);
+
+    const SAMPLES: usize = 100;
+    let mut sum = 0.0f64;
+    let mut cnt = 0usize;
+    for _ in 0..SAMPLES {
+        let gi = rng.gen_range(0..n);
+        let allowed = &ctx.groups[gi].allowed_keys;
+        if allowed.len() < 2 {
+            continue;
+        }
+        let old = init[gi];
+        let new = allowed[rng.gen_range(0..allowed.len())];
+        if new == old {
+            continue;
+        }
+        let mut trial = init.to_vec();
+        trial[gi] = new;
+        let mut ev = Evaluator::new_full_only(ctx, &trial);
+        let s = ev.get_score(ctx);
+        sum += (s - base).abs();
+        cnt += 1;
+    }
+    if cnt == 0 {
+        return None;
+    }
+    let avg = sum / cnt as f64;
+    if !(avg > 0.0) {
+        return None;
+    }
+    let t_start = avg / (1.0f64 / 0.98).ln();
+    let t_end = avg / (1.0f64 / 0.02).ln();
+    Some((t_start, t_end.max(1e-12)))
 }

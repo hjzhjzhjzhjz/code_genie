@@ -158,6 +158,13 @@ pub struct AnnealingConfig {
     /// 实际间隔步数 = max(1, floor(total_steps × ratio))（默认 0.05，约每 5% 写一次，与汇报频率一致）
     #[serde(default = "default_checkpoint_interval_ratio")]
     pub checkpoint_interval_ratio: f64,
+
+    /// 自动标定温度：按初态采样 |Δscore| 闭式给出 t_start/t_end（覆盖配置温度）。缺省 true。
+    #[serde(default = "default_auto_temperature")]
+    pub auto_temperature: bool,
+    /// 整键互换（full_key_swap）算子执行概率（0.0~1.0），0 关闭。缺省 0.01。
+    #[serde(default = "default_full_key_swap_probability")]
+    pub full_key_swap_probability: f64,
 }
 
 fn default_conflict_probability() -> f64 { 0.0 }
@@ -165,6 +172,8 @@ fn default_conflict_refresh_interval() -> usize { 1000 }
 fn default_conflict_sample_window() -> usize { 20 }
 fn default_conflict_weight_by_freq() -> bool { false }
 fn default_checkpoint_interval_ratio() -> f64 { 0.05 }
+fn default_auto_temperature() -> bool { true }
+fn default_full_key_swap_probability() -> f64 { 0.01 }
 
 /// 全码目标配置（对应 [targets.full_code] 段）
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -716,6 +725,8 @@ impl Default for Config {
                 conflict_sample_window: 20,
                 conflict_weight_by_freq: false,
                 checkpoint_interval_ratio: default_checkpoint_interval_ratio(),
+                auto_temperature: default_auto_temperature(),
+                full_key_swap_probability: default_full_key_swap_probability(),
             },
             simple_levels: vec![
                 SimpleLevelConfig {

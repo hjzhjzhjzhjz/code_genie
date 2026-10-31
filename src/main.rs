@@ -36,7 +36,7 @@ mod validate;
 
 use crate::annealing::{simulated_annealing_resumable, SaResult};
 use crate::checkpoint::ThreadCheckpoint;
-use crate::calibrate::calibrate_scales;
+use crate::calibrate::{auto_temperature, calibrate_scales};
 use crate::config::{Config, TargetsConfig};
 use crate::context::OptContext;
 use crate::evaluator::Evaluator;
@@ -1556,6 +1556,28 @@ fn run_optimize(
     // 桶存储后端选择日志（需求 12）：单线程、配置确认阶段输出一次。
     evaluator::log_bucket_backends(&ctx);
 
+    // === 自动调温（参考 libchai 调参）：按初态采样标定 t_start/t_end，覆盖配置温度 ===
+    // 使温度随权重/scale 自动标定，而非写死；采样失败回退配置温度。
+    let sa_cfg = {
+        let mut c = cfg.clone();
+        if cfg.annealing.auto_temperature {
+            let init = annealing::deterministic_init(&ctx, cfg);
+            let mut rng = rand::thread_rng();
+            match auto_temperature(&ctx, &init, &mut rng) {
+                Some((t0, t1)) => {
+                    println!(
+                        "🌡️ 自动调温: t_start={:.6e}, t_end={:.6e}（配置 {:.6e}/{:.6e}）",
+                        t0, t1, cfg.annealing.temp_start, cfg.annealing.temp_end
+                    );
+                    c.annealing.temp_start = t0;
+                    c.annealing.temp_end = t1;
+                }
+                None => eprintln!("⚠️ 自动调温采样失败，沿用配置温度"),
+            }
+        }
+        c
+    };
+
     // 固化尺度：repeat 下一轮用 --scale 复用，保证多轮口径一致（跨运行播种同理）。
     {
         let 尺度路径 = format!("{}/尺度.json", output_dir);
@@ -1582,8 +1604,8 @@ fn run_optimize(
             targets_config: cfg.get_targets_config(),
             total_steps: cfg.annealing.total_steps,
             num_threads: cfg.annealing.threads,
-            temp_start: cfg.annealing.temp_start,
-            temp_end: cfg.annealing.temp_end,
+            temp_start: sa_cfg.annealing.temp_start,
+            temp_end: sa_cfg.annealing.temp_end,
             comfort_temp: cfg.annealing.comfort_temp,
         };
         if let Err(e) = checkpoint::save_meta(&meta, &ckpt_dir) {
@@ -1658,7 +1680,7 @@ fn run_optimize(
             };
             simulated_annealing_resumable(
                 &ctx,
-                cfg,
+                &sa_cfg,
                 i,
                 &stop_flag,
                 None,
@@ -1911,6 +1933,11 @@ fn run_resume(dir: &str) {
     }
     println!("💡 提示: 按 Ctrl-C 可暂停并保存检查点");
 
+    // 复用首轮（可能自动标定的）温度：以 checkpoint meta 为权威，避免续算温度口径漂移。
+    let mut sa_cfg = cfg.clone();
+    sa_cfg.annealing.temp_start = meta.temp_start;
+    sa_cfg.annealing.temp_end = meta.temp_end;
+
     let interval = annealing::checkpoint_interval(
         cfg.annealing.total_steps,
         cfg.annealing.checkpoint_interval_ratio,
@@ -1920,7 +1947,7 @@ fn run_resume(dir: &str) {
         .map(|i| {
             simulated_annealing_resumable(
                 &ctx,
-                &cfg,
+                &sa_cfg,
                 i,
                 &stop_flag,
                 Some(&tcs[i]),

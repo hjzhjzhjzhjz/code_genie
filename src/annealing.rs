@@ -555,6 +555,107 @@ fn try_triple_swap(
     }
 }
 
+/// 整键互换（full_key_swap）：把键 k1 上的所有组与键 k2 上的所有组整体对调。
+///
+/// 大邻域移动，用于单组 swap/move 跳不出局部最优时一步跨越很大范围。
+/// 合法性要求：k1 上的每个组都允许 k2、k2 上的每个组都允许 k1，否则放弃本次移动。
+/// 增量评估（key_weighted_usage + update_char + 简码增量），接受/回滚模式与 try_triple_swap 一致。
+fn try_full_key_swap(
+    ctx: &OptContext,
+    assignment: &mut [u8],
+    evaluator: &mut Evaluator,
+    temp: f64,
+    rng: &mut ThreadRng,
+) -> bool {
+    let n = assignment.len();
+    if n < 2 {
+        return false;
+    }
+    // 选两个当前被占用、且键位不同的键
+    let g1 = rng.gen_range(0..n);
+    let k1 = assignment[g1];
+    let g2 = rng.gen_range(0..n);
+    let k2 = assignment[g2];
+    if k1 == k2 {
+        return false;
+    }
+
+    let groups_a = find_groups_on_key(ctx, assignment, k1);
+    let groups_b = find_groups_on_key(ctx, assignment, k2);
+    if groups_a.is_empty() || groups_b.is_empty() {
+        return false;
+    }
+    // 合法性：整键对调后每组仍在其 allowed_keys 内
+    if !groups_a.iter().all(|&gi| ctx.groups[gi].allowed_keys.contains(&k2))
+        || !groups_b.iter().all(|&gi| ctx.groups[gi].allowed_keys.contains(&k1))
+    {
+        return false;
+    }
+
+    let affected: Vec<usize> = groups_a.iter().chain(groups_b.iter()).copied().collect();
+
+    let old_score = evaluator.get_score(ctx);
+    let needs_simple = affected.iter().any(|&gi| evaluator.has_simple_impact(ctx, gi));
+
+    // 更新 key_weighted_usage
+    for &gi in &affected {
+        let old_k = assignment[gi];
+        let new_k = if old_k == k1 { k2 } else { k1 };
+        let gfs = ctx.group_freq_sum[gi];
+        evaluator.key_weighted_usage[old_k as usize] -= gfs;
+        evaluator.key_weighted_usage[new_k as usize] += gfs;
+    }
+    // 执行对调
+    for &gi in &affected {
+        assignment[gi] = if assignment[gi] == k1 { k2 } else { k1 };
+    }
+    // 增量更新受影响汉字的编码
+    for &gi in &affected {
+        for &ci in &ctx.group_to_chars[gi] {
+            evaluator.update_char(ctx, assignment, ci);
+        }
+    }
+    if needs_simple {
+        evaluator.apply_simple_for_move(ctx, assignment, &affected);
+    }
+
+    evaluator.score_dirty = true;
+    let new_score = evaluator.get_score(ctx);
+    let delta = new_score - old_score;
+
+    if delta <= 0.0 || rng.gen::<f64>() < (-delta / temp).exp() {
+        if needs_simple {
+            evaluator.commit_simple();
+        }
+        true
+    } else {
+        // 回滚 usage：从「新键」扣、给「旧键」加
+        for &gi in &affected {
+            let cur_k = assignment[gi];
+            let old_k = if cur_k == k1 { k2 } else { k1 };
+            let gfs = ctx.group_freq_sum[gi];
+            evaluator.key_weighted_usage[cur_k as usize] -= gfs;
+            evaluator.key_weighted_usage[old_k as usize] += gfs;
+        }
+        // 回滚 assignment
+        for &gi in &affected {
+            assignment[gi] = if assignment[gi] == k1 { k2 } else { k1 };
+        }
+        // 回滚编码
+        for &gi in &affected {
+            for &ci in &ctx.group_to_chars[gi] {
+                evaluator.update_char(ctx, assignment, ci);
+            }
+        }
+        if needs_simple {
+            evaluator.rollback_simple();
+        }
+        evaluator.cached_score = old_score;
+        evaluator.score_dirty = false;
+        false
+    }
+}
+
 // =========================================================================
 // 🔧 增强版爬山算法
 // =========================================================================
@@ -1353,7 +1454,11 @@ pub fn simulated_annealing_resumable(
         if !did_conflict {
             let swap_prob = swap_prob_base + (1.0 - swap_prob_base) * (step as f64 / steps as f64) * 0.3;
 
-            if rng.gen::<f64>() < swap_prob && n_groups >= 2 {
+            // 整键互换（大邻域）：低概率触发，用于跳出单组 swap/move 的局部最优。
+            let fks_prob = cfg.annealing.full_key_swap_probability;
+            if fks_prob > 0.0 && n_groups >= 2 && rng.gen::<f64>() < fks_prob {
+                proposal_accepted = try_full_key_swap(ctx, &mut assignment, &mut evaluator, temp, &mut rng);
+            } else if rng.gen::<f64>() < swap_prob && n_groups >= 2 {
                 let r1 = rng.gen_range(0..n_groups);
                 let r2 = rng.gen_range(0..n_groups - 1);
                 let r2 = if r2 >= r1 { r2 + 1 } else { r2 };

@@ -27,18 +27,20 @@ swap_probability = 0.35  # 交换操作概率
 
 # 以下参数基于 total_steps 的比例计算
 min_improve_steps_ratio = 0.1    # 最小改进步数比例 (total_steps / 10)
-perturb_interval_ratio = 0.0    # 设为 0 可关闭低温扰动
-perturb_strength = 0.0          # 扰动强度
+perturb_interval_ratio = 0.05   # 低温扰动间隔比例；设为 0 可关闭
+perturb_strength = 0.03         # 扰动强度（0 则扰动不生效）
 perturb_trigger_temp_ratio = 0.01 # 扰动触发温度比例 (base_temp < comfort_temp * ratio)
 perturb_temp_multiplier = 2.0     # 扰动时温度倍率 (temp * multiplier)
 perturb_collision_pairs_limit = 10 # 扰动时优先采样的冲突对上限
-reheat_factor = 1.0             # 设为 1.0 可关闭重新加热
+reheat_factor = 1.3             # 平台期重热倍率；设为 1.0 可关闭
 max_parts = 3                    # 最大码长
 checkpoint_interval_ratio = 0.05 # checkpoint 写出间隔（单位：占 total_steps 的比例）；间隔步数 = max(1, floor(total_steps × ratio))，默认 0.05（约每 5% 写一次，与汇报频率一致）
 
-# 冲突导向算子（默认关闭：conflict_probability = 0.0）
-conflict_probability = 0.0       # 每步执行冲突导向移动的概率（0.0~1.0），0.0 表示关闭本特性
+# 冲突导向算子（已启用：0.25）
+conflict_probability = 0.25      # 每步执行冲突导向移动的概率（0.0~1.0），0.0 表示关闭本特性
 conflict_refresh_interval = 1000 # 每隔多少步重建一次冲突缓存；0 表示初始化后不再重建
+auto_temperature = true          # 自动标定 t_start/t_end（按初态采样 |Δscore|），覆盖上面的温度
+full_key_swap_probability = 0.01 # 整键互换算子概率（大邻域移动），0 关闭
 conflict_sample_window = 20      # 在排序后冲突列表的前 N 个冲突组中采样
 conflict_weight_by_freq = false  # 冲突排序：false=按汉字数量(优化重码数)，true=按字频之和(优化重码率)
 
