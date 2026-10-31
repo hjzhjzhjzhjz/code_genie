@@ -1,7 +1,8 @@
 name: 编译 Linux 完整版
 
 # 手动触发：编译 release 全功能二进制（单一 bin 含全部子命令），
-# 连同运行所需数据文件打包成 zip，供下载后在 Linux 上直接使用。
+# 连同宇浩测评（yuhao-assess 源码 + 数据）与全部运行数据打包成 zip，
+# 供下载后在 Linux 上直接使用。
 on:
   workflow_dispatch:
     inputs:
@@ -16,14 +17,21 @@ permissions:
 
 jobs:
   build:
-    name: 编译并打包（linux x86_64）
+    name: 编译并打包（linux x86_64，含宇浩测评）
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
-      - name: 检出代码
+      - name: 检出 code_genie
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
+          fetch-depth: 1
+
+      - name: 检出宇浩测评
+        uses: actions/checkout@v7
+        with:
+          repository: forfudan/yuhao-assess
+          path: yuhao-assess
           fetch-depth: 1
 
       - name: 安装 Rust
@@ -60,7 +68,7 @@ jobs:
             --output /tmp/全码表.txt
           wc -l < /tmp/全码表.txt
 
-      - name: 打包（二进制 + 数据 + 开箱即用配置 + 说明）
+      - name: 打包（二进制 + 数据 + 宇浩测评 + 一键脚本 + 说明）
         run: |
           python3 - <<'PY'
           import os, pathlib, re, shutil, subprocess
@@ -81,7 +89,8 @@ jobs:
 
           for f in ["moling/input-fixed.txt", "moling/input-roots.txt",
                     "moling/input-division.txt", "moling/pair_equivalence.txt",
-                    "moling/key_distribution.txt", "moling/chaifen-all.txt"]:
+                    "moling/key_distribution.txt", "moling/chaifen-all.txt",
+                    "codegenie-s4.jsonc"]:
               dst = pkg / f
               dst.parent.mkdir(parents=True, exist_ok=True)
               shutil.copy2(f, dst)
@@ -89,24 +98,65 @@ jobs:
           for d in ["ceping-data", "yuhao-data", "yuhao-text"]:
               shutil.copytree(d, pkg / d)
 
+          # 宇浩测评：源码（不含 .git），并把测评数据放进它的 public/
+          shutil.copytree("yuhao-assess", pkg / "yuhao-assess",
+                          ignore=shutil.ignore_patterns(".git*", "node_modules"))
+          (pkg / "yuhao-assess" / "public" / "data").mkdir(parents=True, exist_ok=True)
+          (pkg / "yuhao-assess" / "public" / "texts").mkdir(parents=True, exist_ok=True)
+          for j in pathlib.Path("yuhao-data").glob("*.json"):
+              shutil.copy2(j, pkg / "yuhao-assess" / "public" / "data" / j.name)
+          shutil.copy2("yuhao-text/literature.txt",
+                       pkg / "yuhao-assess" / "public" / "texts" / "literature.txt")
+
           cfg = pathlib.Path("config.toml.example").read_text(encoding="utf-8")
           for name in ["fixed", "dynamic", "splits", "pair_equiv", "key_dist"]:
               cfg = re.sub(rf'(?m)^({name}\s*=\s*")([^"]*)(")',
                            rf'\g<1>moling/\g<2>\g<3>', cfg)
           (pkg / "config.toml").write_text(cfg, encoding="utf-8")
 
+          准备 = """#!/usr/bin/env bash
+          # 宇浩测评环境准备：需要 Node.js 22+ 与 pnpm 9（npm i -g pnpm@9）
+          set -e
+          cd "$(dirname "$0")"
+          command -v node >/dev/null || { echo "❌ 缺 Node.js 22+"; exit 1; }
+          command -v pnpm >/dev/null || { echo "❌ 缺 pnpm 9（npm i -g pnpm@9）"; exit 1; }
+          cd yuhao-assess
+          pnpm install --frozen-lockfile
+          echo "✅ 宇浩测评环境就绪"
+          """
+          (pkg / "宇浩测评-准备.sh").write_text(准备.replace("          ", "") , encoding="utf-8")
+
+          跑 = """#!/usr/bin/env bash
+          # 一键宇浩测评：bash 宇浩测评.sh [输出目录]（默认 out-assess）
+          set -e
+          cd "$(dirname "$0")"
+          DIR="${1:-out-assess}"
+          [ -d yuhao-assess/node_modules ] || bash 宇浩测评-准备.sh
+          mkdir -p "$DIR"
+          ./code_genie assess \\
+            --dir "$DIR" \\
+            --scheme codegenie-s4.jsonc \\
+            --yuhao-dir yuhao-assess \\
+            --keep "$DIR/结果" \\
+            --summary "$DIR/汇总.md" \\
+            --profile "$DIR/方案档案" 2>&1 | tee "$DIR/assess.log"
+          echo "✅ 完成：$DIR/汇总.md"
+          """
+          (pkg / "宇浩测评.sh").write_text(跑.replace("          ", ""), encoding="utf-8")
+
           lines = [
-              "code_genie Linux 完整版",
+              "code_genie Linux 完整版（含宇浩测评）",
               "================================",
               f"{ver}",
               f"构建：{commit}（{bdate}，Ubuntu 24.04，release + LTO，单一二进制含全部功能）",
               "",
               "运行要求",
               "  Linux x86_64；glibc 较新（≥ 2.39，Ubuntu 22.04/24.04、近两年的发行版均可）。",
+              "  宇浩测评另需 Node.js 22+ 与 pnpm 9（仅测评需要，其余功能零依赖）。",
               "  如需在更老系统上跑，可再出 musl 静态版。",
               "",
               "快速开始",
-              "  chmod +x code_genie",
+              "  chmod +x code_genie 宇浩测评*.sh",
               "  ./code_genie --help                     查看全部子命令",
               "  ./code_genie -c config.toml optimize -d out",
               "                                          退火优化（改 config.toml 的",
@@ -118,12 +168,18 @@ jobs:
               "  ./code_genie chart -k out/字根键位表.txt -o 字根图.html",
               "                                          字根图",
               "",
+              "宇浩测评（一键）",
+              "  先把要测的码表放进一个目录（如 out/全码表.txt，可含简码表.txt），然后",
+              "  bash 宇浩测评.sh out",
+              "  结果：out/汇总.md（五套字频速度/码长、选重、方案档案）",
+              "  首次会自动 pnpm install（bash 宇浩测评-准备.sh 可单独执行）",
+              "",
               "子命令一览",
               "  optimize   模拟退火优化（核心）",
               "  resume     从 checkpoint 断点续算",
               "  export     导出测评用码表（字 TAB 码）",
               "  chart      字根键位图（HTML）",
-              "  assess     宇浩测评对比（需另备 yuhao-assess，包内未含）",
+              "  assess     宇浩测评对比（yuhao-assess 已含在包内）",
               "  rime       生成 Rime 方案包（星云）",
               "  pipeline   拆分流水线展示",
               "  merge      字根归并对比",
@@ -133,16 +189,35 @@ jobs:
               "数据目录",
               "  moling/          拆分表、字根文件、当量、用指分布、拆分全表",
               "  ceping-data/     诊断用的当量/字频/词表",
-              "  yuhao-data/      宇浩测评口径数据",
+              "  yuhao-data/      宇浩测评口径数据（yuhao-assess/public 已预拷贝）",
               "  yuhao-text/      整句测评语料",
+              "  yuhao-assess/    宇浩测评 CLI 源码（node_modules 首次 pnpm install 生成）",
           ]
           (pkg / "说明.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
-          print("包内容：")
-          for p in sorted(pkg.rglob("*")):
-              print(("目录 " if p.is_dir() else "文件 ") + str(p))
+          print("包内容（顶层）：")
+          for p in sorted(pkg.iter()):
+              print("  " + ("目录 " if p.is_dir() else "文件 ") + p.name)
           PY
           zip -qr code_genie-linux-x86_64.zip code_genie-linux-x86_64
           ls -lh code_genie-linux-x86_64.zip
+
+      - name: 宇浩测评端到端冒烟（临时副本装依赖，包内保持干净）
+        env:
+          GH_NODE: 22
+        run: |
+          set -e
+          pnpm --version
+          rm -rf /tmp/yh && cp -r code_genie-linux-x86_64/yuhao-assess /tmp/yh
+          (cd /tmp/yh && pnpm install --frozen-lockfile 2>&1 | tail -n 3)
+          mkdir -p /tmp/assess-dir
+          cp /tmp/全码表.txt /tmp/assess-dir/
+          ./target/release/code_genie assess \
+            --dir /tmp/assess-dir \
+            --scheme codegenie-s4.jsonc \
+            --yuhao-dir /tmp/yh \
+            --summary /tmp/测评.md
+          echo "--- 测评摘要 ---"
+          head -n 24 /tmp/测评.md
 
       - name: 包内二进制冒烟
         run: |
