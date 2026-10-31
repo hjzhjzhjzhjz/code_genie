@@ -57,6 +57,11 @@ struct Cli {
     #[arg(short = 'c', long, default_value = "config.toml")]
     config: String,
 
+    /// 多轮播种：连续跑 N 轮，第 2 轮起用上一轮输出目录自播种并复用其尺度（默认 1 = 单轮）。
+    /// 与 CI 的 repeat 循环语义一致；按 Ctrl-C 中断则停止后续轮次。
+    #[arg(long = "rounds", default_value_t = 1, global = true)]
+    rounds: usize,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -574,9 +579,17 @@ fn main() {
             seed_dir,
             seed_keymap,
             scale,
-        }) => run_optimize(&cfg, &cli.config, output_dir, seed_dir, seed_keymap, scale),
+        }) => run_optimize_rounds(
+            &cfg,
+            &cli.config,
+            output_dir,
+            seed_dir,
+            seed_keymap,
+            scale,
+            cli.rounds,
+        ),
         Some(Commands::Bench { iters, steps }) => run_bench(&cfg, iters, steps),
-        None => run_optimize(&cfg, &cli.config, None, None, None, None),
+        None => run_optimize_rounds(&cfg, &cli.config, None, None, None, None, cli.rounds),
     }
 }
 
@@ -1360,6 +1373,13 @@ fn resolve_seed_paths(
     }
 }
 
+/// 单轮 optimize 的产出：实际输出目录（缺省时由时间戳生成）与是否被 Ctrl-C 中断。
+/// 多轮播种（`--rounds`）用它决定下一轮的播种目录与尺度文件，中断则停止后续轮次。
+struct RoundOutcome {
+    output_dir: String,
+    interrupted: bool,
+}
+
 fn run_optimize(
     cfg: &Config,
     cli_config_path: &str,
@@ -1367,7 +1387,8 @@ fn run_optimize(
     seed_dir: Option<String>,
     seed_keymap: Option<String>,
     scale_arg: Option<String>,
-) {
+    stop_flag: &Arc<AtomicBool>,
+) -> RoundOutcome {
     let start_time = Instant::now();
     println!("=== CodeGenie 码灵算法优化器 v10 ===");
 
@@ -1799,12 +1820,8 @@ fn run_optimize(
         }
     }
 
-    // 安装 Ctrl-C 处理器（需求 8）：置位停止标志，退火线程检测后写最新 checkpoint 并退出。
-    let stop_flag = Arc::new(AtomicBool::new(false));
-    {
-        let sf = Arc::clone(&stop_flag);
-        let _ = ctrlc::set_handler(move || sf.store(true, Ordering::Relaxed));
-    }
+    // Ctrl-C 停止标志由调用方（多轮驱动器）创建并只安装一次处理器：
+    // `ctrlc::set_handler` 每个进程只能成功安装一次，重复调用会返回 Err 且新标志永不置位。
     println!(
         "💡 提示: 按 Ctrl-C 可暂停并保存检查点，之后用 `resume -d {}` 继续",
         output_dir
@@ -1868,7 +1885,7 @@ fn run_optimize(
                 &ctx,
                 &sa_cfg,
                 i,
-                &stop_flag,
+                stop_flag,
                 None,
                 Some(&ckpt_dir),
                 interval,
@@ -1879,6 +1896,11 @@ fn run_optimize(
 
     let interrupted = stop_flag.load(Ordering::Relaxed) || sa_results.iter().any(|r| r.interrupted);
     finalize_and_save(cfg, &ctx, sa_results, &output_dir, start_time, interrupted);
+
+    RoundOutcome {
+        output_dir,
+        interrupted,
+    }
 }
 
 /// 汇总各线程结果、打印最优、保存全部产物；optimize 与 resume 共用（需求 7.8）。
@@ -1976,6 +1998,114 @@ fn finalize_and_save(
         println!("\n⏸️  已暂停。继续续算：");
         println!("   cargo run --release -- resume -d {}", output_dir);
     }
+}
+
+/// 多轮播种：连续跑 `rounds` 轮，第 2 轮起用上一轮输出目录自播种并复用其尺度文件。
+/// 与 CI（`.github/workflows/optimize.yml` 的 repeat 循环）语义一致：
+/// 同一输出目录、每轮吃上一轮的 `thread-NN/字根键位表.txt`、复用 `尺度.json` 保证口径不漂移。
+/// Ctrl-C 中断任一轮则停止后续轮次（交互场景下不强行再跑一整轮）。
+fn run_optimize_rounds(
+    cfg: &Config,
+    cli_config_path: &str,
+    output_dir: Option<String>,
+    seed_dir: Option<String>,
+    seed_keymap: Option<String>,
+    scale_arg: Option<String>,
+    rounds: usize,
+) {
+    let rounds = rounds.max(1);
+
+    // Ctrl-C 停止标志：处理器在进程内只安装一次，各轮共用同一标志。
+    // （`ctrlc::set_handler` 重复调用会返回 Err 且新标志永不置位，多轮场景必须共用。）
+    let stop_flag = Arc::new(AtomicBool::new(false));
+    {
+        let sf = Arc::clone(&stop_flag);
+        let _ = ctrlc::set_handler(move || sf.store(true, Ordering::Relaxed));
+    }
+
+    if rounds == 1 {
+        run_optimize(
+            cfg,
+            cli_config_path,
+            output_dir,
+            seed_dir,
+            seed_keymap,
+            scale_arg,
+            &stop_flag,
+        );
+        return;
+    }
+
+    if rounds > 20 {
+        println!(
+            "⚠️ --rounds {} 偏大（建议 ≤20），每轮都是完整 total_steps，注意总耗时",
+            rounds
+        );
+    }
+    println!(
+        "🔁 多轮播种模式：共 {} 轮（第 2 轮起用上一轮输出自播种 + 复用尺度）",
+        rounds
+    );
+
+    let mut cur_output = output_dir;
+    let mut cur_seed_dir = seed_dir;
+    let mut cur_seed_keymap = seed_keymap;
+    let mut cur_scale = scale_arg;
+
+    for k in 1..=rounds {
+        // 上一轮收尾期间收到 Ctrl-C：不再开新一轮（避免白跑一次初始化与校准）。
+        if k > 1 && stop_flag.load(Ordering::Relaxed) {
+            println!(
+                "⏸️  收到中断信号，停止后续轮次（已完成 {}/{} 轮）。",
+                k - 1,
+                rounds
+            );
+            return;
+        }
+        println!("\n========== 第 {}/{} 轮 ==========", k, rounds);
+        let outcome = run_optimize(
+            cfg,
+            cli_config_path,
+            cur_output.clone(),
+            cur_seed_dir.clone(),
+            cur_seed_keymap.clone(),
+            cur_scale.clone(),
+            &stop_flag,
+        );
+
+        if outcome.interrupted {
+            println!(
+                "⏸️  第 {} 轮被中断，停止后续轮次（已完成 {}/{} 轮）。",
+                k,
+                k - 1,
+                rounds
+            );
+            println!(
+                "   续算本轮：cargo run --release -- resume -d {}",
+                outcome.output_dir
+            );
+            return;
+        }
+
+        if k == rounds {
+            break;
+        }
+
+        // 下一轮：同一输出目录自播种，并复用本轮写出的尺度文件（缺失则重新校准）。
+        let scale_path = format!("{}/尺度.json", outcome.output_dir);
+        cur_seed_dir = Some(outcome.output_dir.clone());
+        cur_seed_keymap = None; // 与 --seed-dir 互斥
+        cur_scale = if std::path::Path::new(&scale_path).exists() {
+            println!("📐 下一轮复用尺度: {}", scale_path);
+            Some(scale_path)
+        } else {
+            println!("📐 未找到 {}，下一轮将重新校准尺度", scale_path);
+            None
+        };
+        cur_output = Some(outcome.output_dir);
+    }
+
+    println!("\n✅ 多轮播种完成（共 {} 轮）", rounds);
 }
 
 /// 备份依赖输入文件到 `{output_dir}/inputs/`（需求 4）。失败仅告警，不中止。
