@@ -77,6 +77,10 @@ enum Commands {
         /// 从单个 keymap 文件播种：所有退火线程使用同一初始解。与 --seed-dir 互斥。
         #[arg(long = "seed-keymap")]
         seed_keymap: Option<String>,
+
+        /// 复用尺度文件（尺度.json）：跳过校准，保证多轮/跨运行口径一致
+        #[arg(long = "scale")]
+        scale: Option<String>,
     },
 
     /// 根据 keymap 为汉字编码
@@ -530,8 +534,9 @@ fn main() {
             output_dir,
             seed_dir,
             seed_keymap,
-        }) => run_optimize(&cfg, &cli.config, output_dir, seed_dir, seed_keymap),
-        None => run_optimize(&cfg, &cli.config, None, None, None),
+            scale,
+        }) => run_optimize(&cfg, &cli.config, output_dir, seed_dir, seed_keymap, scale),
+        None => run_optimize(&cfg, &cli.config, None, None, None, None),
     }
 }
 
@@ -1135,6 +1140,7 @@ fn run_optimize(
     output_dir_opt: Option<String>,
     seed_dir: Option<String>,
     seed_keymap: Option<String>,
+    scale_arg: Option<String>,
 ) {
     let start_time = Instant::now();
     println!("=== CodeGenie 码灵算法优化器 v10 ===");
@@ -1295,7 +1301,18 @@ fn run_optimize(
     // 构建期预计算，仅评分路径读取）。all_manual（手动 scale 跳过校准）无 temp_ctx，
     // 正式 ctx 仍需单独构建一次。
     let (scale_config, scale_source, calib_ctx): (types::ScaleConfig, &'static str, Option<OptContext>) =
-        if all_manual {
+        if let Some(sp) = scale_arg.as_deref() {
+            let text = std::fs::read_to_string(sp).unwrap_or_else(|e| {
+                eprintln!("❌ 读不了尺度文件 {}: {}", sp, e);
+                std::process::exit(1);
+            });
+            let sc: types::ScaleConfig = serde_json::from_str(&text).unwrap_or_else(|e| {
+                eprintln!("❌ 尺度文件解析失败: {}", e);
+                std::process::exit(1);
+            });
+            println!("\n📐 复用尺度文件 {}（跳过校准，多轮口径一致）", sp);
+            (sc, "复用尺度文件", None)
+        } else if all_manual {
             println!("\n📐 ScaleConfig 已全部手动配置，跳过自动校准...");
             let (sc, src) = resolve_scale_config(cfg, types::ScaleConfig::default());
             (sc, src, None)
@@ -1489,6 +1506,21 @@ fn run_optimize(
 
     // 桶存储后端选择日志（需求 12）：单线程、配置确认阶段输出一次。
     evaluator::log_bucket_backends(&ctx);
+
+    // 固化尺度：repeat 下一轮用 --scale 复用，保证多轮口径一致（跨运行播种同理）。
+    {
+        let 尺度路径 = format!("{}/尺度.json", output_dir);
+        match serde_json::to_string_pretty(&scale_config) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(&尺度路径, json) {
+                    eprintln!("⚠️ 尺度固化失败: {}", e);
+                } else {
+                    println!("📐 尺度已固化: {}", 尺度路径);
+                }
+            }
+            Err(e) => eprintln!("⚠️ 尺度序列化失败: {}", e),
+        }
+    }
 
     // 写出 checkpoint 元信息（需求 6）：校准已完成，scale_config 固定，运行期不再修改。
     let ckpt_dir = checkpoint::checkpoint_dir(&output_dir);
