@@ -2,7 +2,7 @@
 // 🔧 配置模块
 // =========================================================================
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 
@@ -167,7 +167,7 @@ fn default_conflict_weight_by_freq() -> bool { false }
 fn default_checkpoint_interval_ratio() -> f64 { 0.05 }
 
 /// 全码目标配置（对应 [targets.full_code] 段）
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct FullCodeTargets {
     pub enabled: bool,
     pub collision_count: f64,
@@ -205,7 +205,7 @@ impl Default for FullCodeTargets {
 
 /// 简码目标配置（对应 [targets.simple_code] 段）
 /// freq_max 是频率覆盖率下限约束（coverage < freq_max 时拒绝），0.0 表示不启用
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct SimpleCodeTargets {
     pub enabled: bool,
     pub collision_count: f64,
@@ -263,7 +263,7 @@ pub struct SimpleLevelConfig {
 }
 
 /// 目标配置容器（对应 [targets] 段）
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
 pub struct TargetsConfig {
     #[serde(default)]
     pub full_code: FullCodeTargets,

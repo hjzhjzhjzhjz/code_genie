@@ -12,6 +12,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use crate::config::TargetsConfig;
 use crate::types::{Metrics, ScaleConfig, SimpleMetrics};
 
 /// 当前 checkpoint 文件格式版本（兼容性校验）。
@@ -57,6 +58,10 @@ pub struct CheckpointMeta {
     pub timestamp: String,
     /// 校准得到的 ScaleConfig（resume 复用，避免重新校准导致评分口径漂移）。
     pub scale_config: ScaleConfig,
+    /// #2：目标配置（resume 复用，确保续算使用与首轮完全一致的 targets，避免“冻结”/漂移）。
+    /// 旧检查点无此字段时按默认（全部 disabled）反序列化。
+    #[serde(default)]
+    pub targets_config: TargetsConfig,
     /// 总步数（来自配置）。
     pub total_steps: usize,
     /// 线程数。
@@ -318,6 +323,7 @@ mod tests {
             version: CHECKPOINT_VERSION,
             timestamp: "2026-06-18 09:30:15".to_string(),
             scale_config: ScaleConfig::default(),
+            targets_config: TargetsConfig::default(),
             total_steps: 2_000_000,
             num_threads: 8,
             temp_start: 100.0,

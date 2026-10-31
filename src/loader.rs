@@ -76,38 +76,65 @@ pub fn load_dynamic(path: &str, constrained: &[RootGroup], allowed_keys: &str) -
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let roots: Vec<String> = line
-            .split_whitespace()
-            .map(|s| s.to_string())
-            .filter(|s| !existing.contains(s))
+        // 本行声明的全部字根（用于判断其归属的既有组）
+        let line_roots: Vec<String> = line.split_whitespace().map(|s| s.to_string()).collect();
+        if line_roots.is_empty() {
+            continue;
+        }
+        // 本行中尚未归属的「新」字根
+        let new_roots: Vec<String> = line_roots
+            .iter()
+            .filter(|r| !existing.contains(*r))
+            .cloned()
             .collect();
-
-        if roots.is_empty() {
+        if new_roots.is_empty() {
+            // 本行所有字根都已归属，无需新增
             continue;
         }
 
-        let mut merged = false;
-        for g in &mut groups {
-            if roots.iter().any(|r| g.roots.contains(r)) {
-                for r in &roots {
-                    if !g.roots.contains(r) && !existing.contains(r) {
-                        g.roots.push(r.clone());
+        // #7：先统计本行字根已落在哪些既有组，避免「遇到第一个就暴力合并」。
+        let touched: Vec<usize> = groups
+            .iter()
+            .enumerate()
+            .filter(|(_, g)| line_roots.iter().any(|r| g.roots.contains(r)))
+            .map(|(gi, _)| gi)
+            .collect();
+
+        match touched.len() {
+            // 无归属：整行新字根自成一组
+            0 => {
+                for r in &new_roots {
+                    existing.insert(r.clone());
+                }
+                groups.push(RootGroup {
+                    roots: new_roots,
+                    allowed_keys: global_allowed.clone(),
+                });
+            }
+            // 唯一归属：把新字根并入该组
+            1 => {
+                let gi = touched[0];
+                for r in &new_roots {
+                    if !groups[gi].roots.contains(r) && !existing.contains(r) {
+                        groups[gi].roots.push(r.clone());
                         existing.insert(r.clone());
                     }
                 }
-                merged = true;
-                break;
             }
-        }
-
-        if !merged {
-            for r in &roots {
-                existing.insert(r.clone());
+            // 横跨多个既有组：直接合并会破坏组语义（暴力合并），改为告警并让新字根独立成组
+            _ => {
+                eprintln!(
+                    "⚠️ 动态字根行 {:?} 同时涉及多个已有组 {:?}，为避免错误合并，新字根已独立成组",
+                    line_roots, touched
+                );
+                for r in &new_roots {
+                    existing.insert(r.clone());
+                }
+                groups.push(RootGroup {
+                    roots: new_roots,
+                    allowed_keys: global_allowed.clone(),
+                });
             }
-            groups.push(RootGroup {
-                roots,
-                allowed_keys: global_allowed.clone(),
-            });
         }
     }
 
@@ -128,7 +155,11 @@ pub fn load_splits(path: &str) -> Vec<(char, Vec<String>, u64)> {
         }
         let parts: Vec<&str> = line.split('\t').collect();
         if parts.len() >= 2 {
-            let ch = parts[0].chars().next().unwrap();
+            // #10：首字段为空（如行首就是制表符）时跳过，避免 chars().next().unwrap() panic。
+            let ch = match parts[0].trim().chars().next() {
+                Some(c) => c,
+                None => continue,
+            };
             let roots: Vec<String> = parts[1].split_whitespace().map(|s| s.to_string()).collect();
             let freq: u64 = if parts.len() >= 3 {
                 parts[2].trim().parse().unwrap_or(1)
@@ -238,17 +269,22 @@ pub fn load_keymap(keymap_path: &str, division_path: &str) -> HashMap<String, u8
         }
 
         // 获取该基础字根的后缀列表
-        let suffixes = base_to_suffixes
-            .get(base_name)
-            .cloned()
-            .unwrap_or_else(|| {
-                // 如果 division 中没有该字根，使用默认后缀 [-1, 1, 2, ...]
-                let mut default_suffixes = vec![-1];
-                for i in 1..keys.len() as i32 {
-                    default_suffixes.push(i);
+        let suffixes = match base_to_suffixes.get(base_name) {
+            Some(s) => s.clone(),
+            None => {
+                // #3：division 中不存在该字根（未知字根）。过去静默按 [-1, 1, 2, ...]
+                // 虚构 `base.1` / `base.2` 等子字根名，会与真实字根名静默错配。
+                // 现在只把该基础字根映射到编码首键，并显式告警；不再虚构子字根。
+                if keys.len() > 1 {
+                    eprintln!(
+                        "⚠️ keymap 字根 '{}' 不在拆分表中（未知字根），仅取首键，忽略其余 {} 个编码键",
+                        base_name,
+                        keys.len() - 1
+                    );
                 }
-                default_suffixes
-            });
+                vec![-1]
+            }
+        };
 
         // 将键位按后缀顺序映射到子字根名
         for (i, &key) in keys.iter().enumerate() {
@@ -273,7 +309,8 @@ pub fn load_keymap(keymap_path: &str, division_path: &str) -> HashMap<String, u8
 /// 得到的「子字根名 → 键位」映射，按**当前** `ctx` 的字根组结构折叠成 `assignment[group] = key`。
 ///
 /// 校验（均基于当前 `ctx`，不依赖种子目录里备份的旧输入）：
-/// - 仅处理属于动态/受限组的字根名；固定字根名不在 `ctx.root_to_group` 中，跳过；
+/// - 固定字根以其在 `ctx.fixed_roots` 中的权威键位为准：种子给出不同键位则返回 `Err`
+///   （`load_fixed` 与 `load_keymap` 两处输入矛盾），一致则跳过（不参与退火分配）；
 /// - 键位必须 ∈ 该组 `allowed_keys`，否则返回 `Err`（含字根名与键位）；
 /// - 同组多个子字根名映射到不同键位（组内不一致）返回 `Err`（含组信息）。
 ///
@@ -285,7 +322,7 @@ pub fn load_keymap(keymap_path: &str, division_path: &str) -> HashMap<String, u8
 /// # 返回值
 /// - `Ok((assignment, filled))`：`assignment` 长度为 `ctx.num_groups`，每组键位均合法；
 ///   `filled` 为随机填充的缺失组数。
-/// - `Err(msg)`：键位非法或组内不一致。
+/// - `Err(msg)`：键位非法、组内不一致，或固定字根键位与 `load_fixed` 矛盾。
 pub fn keymap_to_assignment(
     ctx: &crate::context::OptContext,
     root_to_key: &HashMap<String, u8>,
@@ -296,7 +333,18 @@ pub fn keymap_to_assignment(
     let mut chosen: Vec<Option<u8>> = vec![None; n];
 
     for (name, &key) in root_to_key {
-        // 仅处理属于动态/受限组的字根名；固定字根（fixed_roots）不在 root_to_group 中 → 跳过
+        // #6：固定字根的键位由 load_fixed 权威指定；若种子 keymap 给出不同键位，
+        // 说明 load_fixed 与 load_keymap 两处输入矛盾，显式报错（不再静默跳过）。
+        if let Some(&fixed_key) = ctx.fixed_roots.get(name) {
+            if fixed_key != key {
+                return Err(format!(
+                    "字根 '{}' 为固定字根（load_fixed 指定键位 {}），但 keymap 给出键位 {}，两者矛盾",
+                    name, fixed_key, key
+                ));
+            }
+            continue;
+        }
+        // 仅处理属于动态/受限组的字根名
         let gi = match ctx.root_to_group.get(name) {
             Some(&gi) => gi,
             None => continue,

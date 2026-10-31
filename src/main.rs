@@ -1449,7 +1449,12 @@ fn run_optimize(
             }
         }
 
-        let calibrated = calibrate_scales(&initial_metrics, &initial_simple_metrics, &weights);
+        let calibrated = calibrate_scales(
+            &initial_metrics,
+            &initial_simple_metrics,
+            &weights,
+            &cfg.get_targets_config(),
+        );
         let (sc, src) = resolve_scale_config(cfg, calibrated);
         // 复用校准期构建的 temp_ctx 作为正式 ctx（省去退火前第二次完整构建）。
         (sc, src, Some(temp_ctx))
@@ -1530,6 +1535,7 @@ fn run_optimize(
             version: checkpoint::CHECKPOINT_VERSION,
             timestamp: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
             scale_config,
+            targets_config: cfg.get_targets_config(),
             total_steps: cfg.annealing.total_steps,
             num_threads: cfg.annealing.threads,
             temp_start: cfg.annealing.temp_start,
@@ -1805,6 +1811,12 @@ fn run_resume(dir: &str) {
         SimpleCodeConfig { levels: vec![] }
     };
     let weights = cfg.get_weight_config();
+    // #2：优先用首轮写入的 targets；旧检查点（无该字段 → 默认）退回备份配置，避免回归。
+    let resume_targets = if meta.targets_config == TargetsConfig::default() {
+        cfg.get_targets_config()
+    } else {
+        meta.targets_config.clone()
+    };
     let mut ctx = OptContext::new_with_fixed_and_termination(
         &splits,
         &fixed_roots,
@@ -1814,7 +1826,8 @@ fn run_resume(dir: &str) {
         meta.scale_config,
         simple_config,
         weights,
-        cfg.get_targets_config(),
+        // #2：复用首轮写入的 targets，避免续算时因配置文件漂移导致评分口径“冻结”/不一致。
+        resume_targets,
         &cfg.get_fixed_simple_codes(),
         &cfg.keys.termination_keys,
     );
