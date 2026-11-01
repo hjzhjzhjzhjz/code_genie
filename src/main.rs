@@ -640,6 +640,9 @@ fn run_bench(cfg: &Config, iters: usize, steps: usize) {
         &cfg.keys.termination_keys,
     );
     println!("  组数: {}, 编码空间: {}", ctx.num_groups, ctx.code_space);
+    // 后端选择直接决定评估器的内存与随机访问模式，bench 必须报出来，
+    // 否则「这次的数字是 Dense 还是 Sparse 跑出来的」无从判断。
+    evaluator::log_bucket_backends(&ctx);
 
     let assign = annealing::deterministic_init(&ctx, cfg);
     let n = assign.len();

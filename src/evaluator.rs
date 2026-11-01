@@ -1881,9 +1881,9 @@ fn log_one_backend(label: &str, capacity: usize, elem_size: usize, n_chars: usiz
 
 /// 构造单个桶存储后端选择日志行（纯函数，便于测试，需求 12.6）。
 ///
-/// 与生产路径同判据（[`choose_backend_for`]）：同时看容量上界与 `n_chars`，
-/// 而不是只看容量——否则「4 码定长方案」会因 `code_space = 32^4` 落在阈值内被判 Dense，
-/// 实际却只用掉 1% 的槽位。
+/// 与生产路径同判据（[`choose_backend_for`]）：容量上界、Dense 绝对占用、`n_chars` 三者联合，
+/// 而不是只看容量或只看占用率——只看容量会让「4 码定长方案」预分配 48 MB，
+/// 只看占用率会让「3 码方案」误走稀疏、主循环慢约三分之一。
 pub(crate) fn backend_log_line(
     label: &str,
     capacity: usize,
@@ -1891,26 +1891,39 @@ pub(crate) fn backend_log_line(
     n_chars: usize,
 ) -> String {
     use crate::bucket_store::{
-        choose_backend_for, BackendKind, DENSE_MIN_CAPACITY, SPARSE_ENTRY_FACTOR, SPARSE_THRESHOLD,
+        choose_backend_detailed, BackendKind, BackendReason, DENSE_BUDGET_BYTES,
+        SPARSE_ENTRY_FACTOR, SPARSE_THRESHOLD,
     };
     let mb = capacity.saturating_mul(elem_size) / (1024 * 1024);
+    let budget_mb = DENSE_BUDGET_BYTES / (1024 * 1024);
     let sparse_bound = n_chars.saturating_mul(SPARSE_ENTRY_FACTOR);
-    match choose_backend_for(capacity, n_chars) {
-        BackendKind::Dense => format!(
-            "   · {label}: Dense (容量 {capacity}；容量 ≤ {DENSE_MIN_CAPACITY} 或占用率足够高\
-             —— 非空桶上界 n_chars({n_chars})×{SPARSE_ENTRY_FACTOR} = {sparse_bound}；\
-             预估 ~{mb} MB/线程)"
-        ),
-        BackendKind::Sparse => {
-            let reason = if capacity > SPARSE_THRESHOLD {
-                format!("容量 {capacity} 超绝对上限 {SPARSE_THRESHOLD}")
-            } else {
-                format!("容量 {capacity} 远超非空桶上界 {sparse_bound}")
+    let (kind, reason) = choose_backend_detailed(capacity, n_chars, elem_size);
+    match kind {
+        BackendKind::Dense => {
+            let why = match reason {
+                BackendReason::WithinDenseBudget => {
+                    format!("{capacity} 槽 × {elem_size} B ≈ {mb} MB/线程，在 {budget_mb} MB 预算内")
+                }
+                _ => format!(
+                    "占用 ≈ {mb} MB/线程虽超 {budget_mb} MB 预算，但非空桶上界 \
+                     n_chars({n_chars})×{SPARSE_ENTRY_FACTOR} = {sparse_bound} 与槽数相当，稀疏省不了内存"
+                ),
             };
-            format!(
-                "   · {label}: Sparse ({reason}；n_chars({n_chars})×{SPARSE_ENTRY_FACTOR} = {sparse_bound}；\
-                 Dense 将需 ~{mb} MB/线程，改用稀疏存储，内存随非空桶数增长)"
-            )
+            format!("   · {label}: Dense ({why}；数组索引比哈希查找快)")
+        }
+        BackendKind::Sparse => {
+            let why = if reason == BackendReason::OverAbsoluteLimit {
+                format!(
+                    "容量 {capacity} 超绝对上限 {SPARSE_THRESHOLD}（非空桶上界 \
+                     n_chars({n_chars})×{SPARSE_ENTRY_FACTOR} = {sparse_bound} 远小于容量）"
+                )
+            } else {
+                format!(
+                    "占用 ≈ {mb} MB/线程 超 {budget_mb} MB 预算，且容量 {capacity} 远超非空桶上界 \
+                     n_chars({n_chars})×{SPARSE_ENTRY_FACTOR} = {sparse_bound}"
+                )
+            };
+            format!("   · {label}: Sparse ({why}；内存随非空桶数增长)")
         }
     }
 }

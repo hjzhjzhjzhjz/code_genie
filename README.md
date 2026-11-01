@@ -125,7 +125,7 @@ src/
 ├── main.rs          # CLI 入口、子命令分发、多轮播种、尺度解析
 ├── annealing.rs     # 模拟退火主循环、邻域算子、初始化策略
 ├── evaluator.rs     # 全码/简码评估器（增量更新、目标偏差、硬约束）
-├── bucket_store.rs  # 全码桶存储（按容量+字数自适应密集/稀疏）
+├── bucket_store.rs  # 全码桶存储（按绝对内存预算+字数自适应密集/稀疏）
 ├── context.rs       # OptContext：字根组、汉字信息、当量表、反向索引
 ├── config.rs        # TOML 配置解析与默认值
 ├── calibrate.rs     # 缩放因子校准 + 自动调温

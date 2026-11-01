@@ -66,7 +66,7 @@ cargo test --release
 | `calibrate.rs` | `calibrate_scales()` 根据初始指标自动校准各维度缩放因子 |
 | `simple.rs` | 解析独立简码规则文件（非 TOML 格式），用于 evaluate 子命令的 `--simple` 参数 |
 | `output.rs` | 输出所有结果文件：字根键位表、单字编码表、简码表、合并码表、完整码表、键位分布、当量分布、汇总 |
-| `bucket_store.rs` | 全码桶存储，按 `code_space` 与 `n_chars` 共同判定密集/稀疏后端（`choose_backend_for`） |
+| `bucket_store.rs` | 全码桶存储，按「Dense 绝对占用预算」+ `n_chars` 判定密集/稀疏后端（`choose_backend_for`） |
 | `export_table.rs` | 测评码表导出；`取码序列` 实现星月 encoder 状态机（`export`/`pipeline` 共用） |
 | `rime_convert.rs` | 以星月方案包为底包，只重算 chaifen/full/words/quick/short/roots 六张表的码 |
 | `sentence.rs` | 整句准确率：逐单元首候选 + 连续码流解码；词典吃 dict.yaml 或纯 TSV；可调外部 librime 解码器 |
