@@ -2038,12 +2038,40 @@ fn finalize_and_save(
         output_dir,
         &root_usage,
     );
+
+    // 全量码表：优化为了速度只喂常用字（files.splits），但码表要覆盖全部字（如 12 万字）。
+    // 配置 files.full_splits 后，用同一套键位对全量拆分重新编码，另出一份 完整码表.txt。
+    if !cfg.files.full_splits.is_empty() {
+        let p = &cfg.files.full_splits;
+        if std::path::Path::new(p).is_file() {
+            let 全量 = crate::export_table::加载拆分表(p);
+            let (全条, 简条, 缺根) =
+                output::save_full_code_table(ctx, &best_assignment, &全量, output_dir);
+            println!(
+                "\n📄 完整码表: {} 条（全码 {} / 简码 {}，缺字根 {}），来源 {}",
+                全条 + 简条,
+                全条,
+                简条,
+                缺根,
+                p
+            );
+            if 缺根 > 0 {
+                println!("   ⚠️ 有 {} 个字因字根缺键位被跳过（键位表没覆盖全量拆分的字根）", 缺根);
+            }
+        } else {
+            eprintln!("⚠️ files.full_splits 指向的文件不存在: {}，跳过完整码表", p);
+        }
+    }
+
     save_summary(cfg, &all_results, best_thread, output_dir, elapsed);
 
     println!("\n所有结果已保存至 {}/", output_dir);
     println!("  - 汇总.txt              汇总排名");
     println!("  - output-*.txt             全局最优结果");
     println!("  - 简码表.txt  简码分配");
+    if !cfg.files.full_splits.is_empty() {
+        println!("  - 完整码表.txt           覆盖全部字的码表（来自 files.full_splits）");
+    }
     println!("  - thread-XX/               各线程结果");
     if interrupted {
         println!("\n⏸️  已暂停。继续续算：");

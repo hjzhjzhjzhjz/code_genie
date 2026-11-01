@@ -7,8 +7,9 @@
 //   字 <TAB> 码
 //
 // 简码行在前、全码行在后；码里不带尾随下划线（测评器会给短码自动补 `_`）。
-// 取码规则与 prepare-inputs.sh 的魔灵分支一致：全根取 .A，二根补末根 .S，
-// 末根补 .S/.Y，截断到最大码长；索引越界回落到该字根的末位键。
+// 取码规则为星月（yustar）encoder 状态机：
+//   1 根 A+S+S / 2 根 A1A2S2S1 / 3 根 A1A2A3S3 / ≥4 根 A1A2A3A_last，截断到最大码长；
+// 键位串不足两位时回落大码。与 `rime_convert::单字码` 同口径。
 // =========================================================================
 
 use std::collections::HashMap;
@@ -19,6 +20,8 @@ use std::fs;
 pub(crate) enum 码位 {
     A,
     S,
+    /// 星月（yustar）规则不取末码；保留以便解释表格与将来切换规则时使用
+    #[allow(dead_code)]
     Y,
 }
 
@@ -93,34 +96,51 @@ pub(crate) fn 加载简码表(path: &str) -> HashMap<String, String> {
     表
 }
 
-/// 魔灵取码序列：返回 (字根, 码位) 列表，已截断到最大码长
+/// 星月取码序列（对应 `yustar.yaml` 的 encoder 状态机）：返回 (字根, 码位) 列表，已截断到最大码长。
+///
+/// ```text
+///   1 根 : A1 S1 S1                    s1 → c0(根2不存在) → s3(S1) → s6(S1)
+///   2 根 : A1 A2 S2 S1                 s1 → s2 → c1(根3不存在) → s4(S2) → s9(S1)
+///   3 根 : A1 A2 A3 S3                 s1 → s2 → s5 → c2(根4不存在) → s8(S3)
+///   ≥4 根: A1 A2 A3 A_last             c2(根4存在) → s7(rootIndex -1)
+/// ```
+///
+/// A=键位串第 1 个字母（大码）、S=第 2 个字母（键位串只有 1 个字母时回落大码）。
+/// 与 `rime_convert::单字码` 同一口径。
 pub(crate) fn 取码序列<'a>(
     根: &'a [String],
-    键位: &HashMap<String, Vec<char>>,
+    _键位: &HashMap<String, Vec<char>>,
     最大码长: usize,
 ) -> Vec<(&'a str, 码位)> {
-    if 根.is_empty() {
+    let n = 根.len();
+    if n == 0 {
         return Vec::new();
     }
-    let mut 序列: Vec<(&'a str, 码位)> = 根.iter().map(|r| (r.as_str(), 码位::A)).collect();
-
-    let 有多个键 = |r: &str| 键位.get(r).map(|k| k.len() > 1).unwrap_or(false);
-
-    let 末尾根 = if 根.len() == 2 {
-        let 末 = 根[1].as_str();
-        if 有多个键(末) {
-            序列.push((末, 码位::S));
-        }
-        根[0].as_str()
-    } else {
-        根[根.len() - 1].as_str()
+    let mut 序列: Vec<(&'a str, 码位)> = match n {
+        1 => vec![
+            (根[0].as_str(), 码位::A),
+            (根[0].as_str(), 码位::S),
+            (根[0].as_str(), 码位::S),
+        ],
+        2 => vec![
+            (根[0].as_str(), 码位::A),
+            (根[1].as_str(), 码位::A),
+            (根[1].as_str(), 码位::S),
+            (根[0].as_str(), 码位::S),
+        ],
+        3 => vec![
+            (根[0].as_str(), 码位::A),
+            (根[1].as_str(), 码位::A),
+            (根[2].as_str(), 码位::A),
+            (根[2].as_str(), 码位::S),
+        ],
+        _ => vec![
+            (根[0].as_str(), 码位::A),
+            (根[1].as_str(), 码位::A),
+            (根[2].as_str(), 码位::A),
+            (根[n - 1].as_str(), 码位::A),
+        ],
     };
-
-    if 有多个键(末尾根) {
-        序列.push((末尾根, 码位::S));
-    }
-    序列.push((末尾根, 码位::Y));
-
     序列.truncate(最大码长);
     序列
 }
@@ -187,8 +207,11 @@ pub(crate) fn 生成表(
         };
 
         if let Some(简) = 简码.get(字.as_str()) {
-            // 简码必须是全码前缀，否则视为脏数据跳过
-            if 全码.starts_with(简.as_str()) {
+            // 简码 = 码 + 上屏键（如 `到` 的 `bi` = 码 `b` + 上屏键 `i`），
+            // 所以先按整串比，再退一格比「去掉上屏键」的码；都对不上才视为脏数据跳过。
+            let 前缀匹配 = 全码.starts_with(简.as_str())
+                || (简.len() > 1 && 全码.starts_with(&简[..简.len() - 1]));
+            if 前缀匹配 {
                 输出.push_str(&format!("{}\t{}\n", 字, 简));
                 简码条数 += 1;
             }

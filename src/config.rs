@@ -40,6 +40,11 @@ pub struct FilesConfig {
     pub splits: String,
     pub pair_equiv: String,
     pub key_dist: String,
+    /// 全量拆分表（可选）：优化为了速度通常只用常用字（`splits`），
+    /// 但码表要覆盖全部字。配置此项后，收尾会用它另出一份 `完整码表.txt`。
+    /// 为空表示不额外生成（沿用 `splits`）。
+    #[serde(default)]
+    pub full_splits: String,
 }
 
 /// 键位配置
@@ -673,6 +678,7 @@ impl Default for Config {
                 splits: "input-division.txt".to_string(),
                 pair_equiv: "pair_equivalence.txt".to_string(),
                 key_dist: "key_distribution.txt".to_string(),
+                full_splits: String::new(),
             },
             keys: KeysConfig {
                 allowed: "qwertyuiopasdfghjklzxcvbnm".to_string(),

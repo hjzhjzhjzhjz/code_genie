@@ -547,9 +547,51 @@ pub fn save_results(
     save_combined_code_output(ctx, assignment, output_dir);
 
     println!(
-        "结果已保存至 {}/字根键位表.txt, 单字编码表.txt（完整码表）, 简码表.txt, 合并码表.txt 等",
+        "结果已保存至 {}/字根键位表.txt, 单字编码表.txt, 简码表.txt, 合并码表.txt 等",
         output_dir
     );
+}
+
+/// 保存「全量码表」：覆盖 `全量拆分` 里的每一个字，格式 `字<TAB>码<TAB>频次`。
+///
+/// 优化为了速度通常只喂常用字（`files.splits`），而码表要覆盖全部字（如 12 万字）。
+/// 本函数用优化得到的键位（`assignment`）对全量拆分重新编码：简码仍取优化结果
+/// （只覆盖被优化过的字），全码覆盖全量。
+///
+/// 返回 (全码条数, 简码条数, 缺字根条数)。
+pub fn save_full_code_table(
+    ctx: &OptContext,
+    assignment: &[u8],
+    全量拆分: &[(String, Vec<String>, u64)],
+    output_dir: &str,
+) -> (usize, usize, usize) {
+    let 字根表 = 根键位串(ctx, assignment);
+
+    let mut out = String::with_capacity(全量拆分.len() * 16);
+
+    // 简码在前（只覆盖优化过的字）
+    let mut 简条 = 0usize;
+    for (_, ci, code) in evaluator_simple_selection(ctx, assignment) {
+        let (ch, _, freq) = &ctx.raw_splits[ci];
+        out.push_str(&format!("{}\t{}\t{}\n", ch, code, freq));
+        简条 += 1;
+    }
+
+    // 全码：覆盖全量拆分
+    let mut 全条 = 0usize;
+    let mut 缺根 = 0usize;
+    for (字, 根们, 频) in 全量拆分 {
+        match crate::rime_convert::单字码(根们, &字根表) {
+            Ok(code) if !code.is_empty() => {
+                out.push_str(&format!("{}\t{}\t{}\n", 字, code, 频));
+                全条 += 1;
+            }
+            _ => 缺根 += 1,
+        }
+    }
+
+    crate::fsutil::write_with_backup(format!("{}/完整码表.txt", output_dir), out).unwrap();
+    (全条, 简条, 缺根)
 }
 
 /// 保存汇总信息
