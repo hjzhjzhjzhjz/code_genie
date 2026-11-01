@@ -263,9 +263,13 @@ enum Commands {
         #[arg(long)]
         base: String,
 
-        /// 算码输出目录（含 roots.tsv 与 zigen-<前缀>.csv）
+        /// 算码输出目录（含字根键位表与 zigen-<前缀>.csv）
         #[arg(long)]
         output: String,
+
+        /// 字根键位表；缺省按 <output>/output-keymap.txt → roots.tsv 顺序自动找
+        #[arg(long)]
+        keymap: Option<String>,
 
         /// 拆分表（chaifen-all.txt：字<TAB>根 根 …<TAB>频次）
         #[arg(long, default_value = "chaifen-all.txt")]
@@ -508,6 +512,7 @@ fn main() {
         Some(Commands::RimeConvert {
             base,
             output,
+            keymap,
             chaifen,
             out,
             prefix,
@@ -515,6 +520,7 @@ fn main() {
             let 参 = rime_convert::参数 {
                 底包目录: base,
                 算码目录: output,
+                键位文件: keymap,
                 拆分文件: chaifen,
                 输出目录: out,
                 前缀: prefix,

@@ -4,7 +4,7 @@
 //
 // 底包（starmoon-ime）**一个字都不改**：文件名、schema_id、方案名、lua、
 // 主词典的裸词表、符号表全部原样沿用。只把下列词典里的**码**换成按优化结果
-// （roots.tsv）重算的字母。
+// （算码输出的字根键位表）重算的字母。
 //
 // 换码的文件：
 //   `<前缀>_chaifen.dict.yaml`          字\t[拆分式,全码,分组简码,注音,保留,字集,码位]
@@ -30,7 +30,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-/// 字根 → 键位串（如 `白` → `Fk`），取自 `roots.tsv`
+/// 字根 → 键位串（如 `白` → `Fk`），取自算码输出的字根键位表
 type 字根表 = HashMap<String, String>;
 /// 字 → 拆分根序列，取自 `chaifen-all.txt`
 type 拆分表 = HashMap<String, Vec<String>>;
@@ -38,12 +38,14 @@ type 拆分表 = HashMap<String, Vec<String>>;
 /// `rime-convert` 的入参
 ///
 /// 底包的一切（文件名、schema_id、方案名、lua、词表裸词）**原样沿用**，
-/// 只把词典里的码换成按 `roots.tsv` 重算的字母。
+/// 只把词典里的码换成按字根键位表重算的字母。
 pub struct 参数 {
     /// 底包目录（starmoon-ime 根目录）
     pub 底包目录: String,
-    /// 算码输出目录（含 `roots.tsv`、`zigen-<前缀>.csv`）
+    /// 算码输出目录（含字根键位表、`zigen-<前缀>.csv`）
     pub 算码目录: String,
+    /// 字根键位表；`None` 时按 `output-keymap.txt` → `roots.tsv` 顺序自动找
+    pub 键位文件: Option<String>,
     /// 拆分表（`chaifen-all.txt`：字\t根 根\t频次）
     pub 拆分文件: String,
     /// 输出目录
@@ -70,9 +72,15 @@ pub fn run(参: &参数) -> Result<(usize, usize), String> {
     }
 
     let 算码 = Path::new(&参.算码目录);
-    let 字根 = 读字根表(&算码.join("roots.tsv"))?;
+    let 键位路径 = 定位键位表(算码, 参.键位文件.as_deref())?;
+    let 字根 = 读字根键位(&键位路径)?;
     let 拆分 = 读拆分表(Path::new(&参.拆分文件))?;
-    println!("  roots.tsv: {} 个字根；拆分表: {} 个字", 字根.len(), 拆分.len());
+    println!(
+        "  字根键位: {} （{} 个字根）；拆分表: {} 个字",
+        键位路径.display(),
+        字根.len(),
+        拆分.len()
+    );
 
     // ---------- 1. 原样复制底包 ----------
     let 输出 = PathBuf::from(&参.输出目录);
@@ -122,7 +130,7 @@ pub fn run(参: &参数) -> Result<(usize, usize), String> {
     // ---------- 7. 字根提示 ----------
     let 字根路径 = 输出.join("yuhao").join(format!("{}.roots.dict.yaml", 前缀));
     let 图 = 算码.join(format!("zigen-{}.csv", 前缀));
-    let 字根条 = 写字根表(&字根路径, &图)?;
+    let 字根条 = 写字根表(&字根路径, &图, &字根)?;
     println!("(7) {}: {} 条字根提示（来源 {}）", 文件名(&字根路径), 字根条, 文件名(&图));
 
     println!("\n✅ 已生成：{}", 输出.display());
@@ -300,21 +308,84 @@ fn 词码(词: &str, 字码: &HashMap<String, String>) -> Option<String> {
 // 数据加载
 // =========================================================================
 
-fn 读字根表(路径: &Path) -> Result<字根表, String> {
-    let mut 表 = 字根表::new();
+/// 定位字根键位表：显式指定 > `output-keymap.txt` > `roots.tsv`
+fn 定位键位表(算码: &Path, 指定: Option<&str>) -> Result<PathBuf, String> {
+    if let Some(p) = 指定 {
+        let p = PathBuf::from(p);
+        if !p.is_file() {
+            return Err(format!("字根键位表不存在: {}", p.display()));
+        }
+        return Ok(p);
+    }
+    for 名 in ["output-keymap.txt", "roots.tsv"] {
+        let p = 算码.join(名);
+        if p.is_file() {
+            return Ok(p);
+        }
+    }
+    Err(format!(
+        "{} 下找不到字根键位表（找过 output-keymap.txt、roots.tsv），请用 --keymap 指定",
+        算码.display()
+    ))
+}
+
+fn ucfirst(s: &str) -> String {
+    let mut cs = s.chars();
+    match cs.next() {
+        Some(c) => format!("{}{}", c.to_ascii_uppercase(), cs.as_str().to_ascii_lowercase()),
+        None => String::new(),
+    }
+}
+
+/// 读算码输出的字根键位表：`字根<TAB>键位串[<TAB>频次]`，取前两列。
+///
+/// 兼容 `generate-root-chart.sh` 支持的飞键写法——同一字根拆成
+/// `白.A` / `白.S` / `白.Y`（或 `白.U` 表示飞键）多行时，按 A+S+Y（飞键取 U+S+Y）拼接，
+/// 与 `roots.tsv` 的口径一致。首字母统一大写，与底包「分组简码」风格对齐。
+fn 读字根键位(路径: &Path) -> Result<字根表, String> {
+    let mut 平表: 字根表 = HashMap::new();
+    // 根 → { A/S/Y/U: 键位串 }
+    let mut 位表: HashMap<String, HashMap<char, String>> = HashMap::new();
+
     for 行 in 读行(路径)? {
         if 行.trim().is_empty() || 行.starts_with('#') {
             continue;
         }
-        let mut 列 = 行.split('\t');
-        let 根 = 列.next().unwrap_or("").trim();
-        let 键 = 列.next().unwrap_or("").trim();
+        let 列: Vec<&str> = 行.split('\t').collect();
+        if 列.len() < 2 {
+            continue;
+        }
+        let 根 = 列[0].trim();
+        let 键 = 列[1].trim();
         if 根.is_empty() || 键.is_empty() {
             continue;
         }
-        表.insert(根.to_string(), 键.to_string());
+        // 飞键写法：<根>.A / .S / .Y / .U
+        if let Some((名, 位)) = 根.rsplit_once('.') {
+            if !名.is_empty() && 位.chars().count() == 1 {
+                let c = 位.chars().next().unwrap().to_ascii_uppercase();
+                if matches!(c, 'A' | 'S' | 'Y' | 'U') {
+                    位表.entry(名.to_string()).or_default().insert(c, 键.to_string());
+                    continue;
+                }
+            }
+        }
+        平表.insert(根.to_string(), 键.to_string());
     }
-    Ok(表)
+
+    for (根, 位) in 位表 {
+        let 首 = 位.get(&'U').or_else(|| 位.get(&'A'));
+        let Some(首) = 首 else { continue };
+        let 串 = format!(
+            "{}{}{}",
+            首,
+            位.get(&'S').map(|s| s.as_str()).unwrap_or(""),
+            位.get(&'Y').map(|s| s.as_str()).unwrap_or("")
+        );
+        平表.insert(根, 串);
+    }
+
+    Ok(平表.into_iter().map(|(k, v)| (k, ucfirst(&v))).collect())
 }
 
 fn 读拆分表(路径: &Path) -> Result<拆分表, String> {
@@ -593,7 +664,7 @@ fn 取标记(文本: &str) -> Option<String> {
 /// 字根提示表：`字根们\t/<标记><大码>` 与 `+ <小码> = 字根们\t/<标记><大码>`
 ///
 /// 标题两行（如「星月字根編碼提示」「輸入對應大碼字母」）**沿用原文件**，只重生成分组数据。
-fn 写字根表(路径: &Path, 字根图: &Path) -> Result<usize, String> {
+fn 写字根表(路径: &Path, 字根图: &Path, 字根: &字根表) -> Result<usize, String> {
     let 表头 = 词典表头(路径)?;
     let 全部 = 读行(路径)?;
     let 数据起 = 全部
@@ -615,21 +686,13 @@ fn 写字根表(路径: &Path, 字根图: &Path) -> Result<usize, String> {
 
     let mut 按大: HashMap<String, Vec<String>> = HashMap::new();
     let mut 按小: HashMap<String, HashMap<String, Vec<String>>> = HashMap::new();
-    if 字根图.is_file() {
-        for (序号, 行) in 读行(字根图)?.into_iter().enumerate() {
-            if 序号 == 0 {
-                continue;
-            }
-            let 段: Vec<&str> = 行.split(',').collect();
-            if 段.len() < 2 {
-                continue;
-            }
-            let (字形, 键) = (段[0].trim(), 段[1].trim());
+    {
+        let mut 加入 = |字形: &str, 键: &str| {
             if 字形.is_empty() || 键.is_empty() {
-                continue;
+                return;
             }
             let mut 字 = 键.chars();
-            let Some(大) = 字.next() else { continue };
+            let Some(大) = 字.next() else { return };
             let 小: String = 字.collect();
             let 大 = 大.to_string();
             按大.entry(大.clone()).or_default().push(字形.to_string());
@@ -641,9 +704,32 @@ fn 写字根表(路径: &Path, 字根图: &Path) -> Result<usize, String> {
                     .or_default()
                     .push(字形.to_string());
             }
+        };
+
+        if 字根图.is_file() {
+            // 字形变体表：字形,键位串,拼音（首行表头）
+            for (序号, 行) in 读行(字根图)?.into_iter().enumerate() {
+                if 序号 == 0 {
+                    continue;
+                }
+                let 段: Vec<&str> = 行.split(',').collect();
+                if 段.len() < 2 {
+                    continue;
+                }
+                加入(段[0].trim(), 段[1].trim());
+            }
+        } else {
+            // 没有字形表就退回用字根本身，保证只依赖算码输出的键位表
+            eprintln!(
+                "⚠️ 没有字根图 {}，改用字根键位表本身生成提示",
+                字根图.display()
+            );
+            let mut 根们: Vec<(&String, &String)> = 字根.iter().collect();
+            根们.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+            for (根, 键) in 根们 {
+                加入(根, 键);
+            }
         }
-    } else {
-        eprintln!("⚠️ 没有字根图 {}，字根提示表只写两行表头", 字根图.display());
     }
 
     let mut 文 = 表头;
@@ -690,7 +776,7 @@ mod tests {
         for (k, v) in [
             ("白", "Fk"), ("勹", "Yr"), ("丶", "Ek"), ("一", "Od"),
             ("女", "Lk"), ("子", "Ud"), ("讠", "Yd"), ("丷", "Fs"),
-            ("口", "Ie"), ("儿", "Hr"), ("打", "Fs"), ("字", "Ll"),
+            ("口", "Ie"), ("儿", "Hr"),
         ] {
             m.insert(k.to_string(), v.to_string());
         }
@@ -745,19 +831,55 @@ mod tests {
 
     #[test]
     fn 拆分式最长匹配() {
-        let 清单 = vec!["白".to_string(), "勹".to_string(), "丶".to_string(), "乞上".to_string()];
-        assert_eq!(
-            拆拆分式("白勹丶", &清单).unwrap(),
-            vec!["白", "勹", "丶"]
-        );
+        let 清单 = vec![
+            "白".to_string(),
+            "勹".to_string(),
+            "丶".to_string(),
+            "乞上".to_string(),
+        ];
+        assert_eq!(拆拆分式("白勹丶", &清单).unwrap(), vec!["白", "勹", "丶"]);
         // 含无名部件 {…} 无法匹配
         assert!(拆拆分式("十{畏下}", &清单).is_none());
     }
 
     #[test]
     fn 标记提取() {
-        assert_eq!(取标记("星月字根編碼提示\t/dl\n").as_deref(), Some("dl"));
+        assert_eq!(
+            取标记("星月字根編碼提示\t/dl\n").as_deref(),
+            Some("dl")
+        );
         assert_eq!(取标记("no marker").as_deref(), None);
+    }
+
+    #[test]
+    fn 键位表首字母大写并忽略频次列() {
+        let 目录 = std::env::temp_dir().join(format!("cg-keymap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&目录);
+        std::fs::create_dir_all(&目录).unwrap();
+        let 路径 = 目录.join("output-keymap.txt");
+        std::fs::write(&路径, "# 注释\n女\tlk\t100\n子\tUd\n").unwrap();
+        let 表 = 读字根键位(&路径).unwrap();
+        assert_eq!(表.get("女").map(|s| s.as_str()), Some("Lk"), "应首字母大写");
+        assert_eq!(表.get("子").map(|s| s.as_str()), Some("Ud"));
+        let _ = std::fs::remove_dir_all(&目录);
+    }
+
+    #[test]
+    fn 键位表飞键写法合并() {
+        let 目录 = std::env::temp_dir().join(format!("cg-keymap-fly-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&目录);
+        std::fs::create_dir_all(&目录).unwrap();
+        let 路径 = 目录.join("output-keymap.txt");
+        // 白.A/.S/.Y 拼成 ASY；艹.U 表示飞键，取 U+S+Y
+        std::fs::write(
+            &路径,
+            "白.A\tF\n白.S\tk\n白.Y\te\n艹.U\tx\n艹.S\tq\n艹.Y\tw\n",
+        )
+        .unwrap();
+        let 表 = 读字根键位(&路径).unwrap();
+        assert_eq!(表.get("白").map(|s| s.as_str()), Some("Fke"));
+        assert_eq!(表.get("艹").map(|s| s.as_str()), Some("Xqw"), "飞键应取 U+S+Y");
+        let _ = std::fs::remove_dir_all(&目录);
     }
 
     #[test]
@@ -768,103 +890,69 @@ mod tests {
         std::fs::create_dir_all(底包.join("yuhao")).unwrap();
         std::fs::create_dir_all(底包.join("lua/yuhao")).unwrap();
 
-        std::fs::write(
-            底包.join("starmoon_chaifen.dict.yaml"),
-            "---
-name: \"starmoon_chaifen\"
-...
+        let 写 = |名: &str, 内容: &str| {
+            let 路径 = 底包.join(名);
+            if let Some(父) = 路径.parent() {
+                std::fs::create_dir_all(父).unwrap();
+            }
+            std::fs::write(&路径, 内容).unwrap();
+        };
 
-好	[女子,LkUd,Lk-Ud,㊌hao,,CJK,597D]
-一	[一,Odd,Od,㊌it,,CJK,4E00]
-打	[打,Fss,Fs,㊌da,,CJK,6253]
-字	[字,Lls,Ll,㊌zi,,CJK,5B57]
-",
-        ).unwrap();
-        std::fs::write(
-            底包.join("yuhao/starmoon.full.dict.yaml"),
-            "---
-name: \"starmoon.full\"
-...
+        let 头 = |名: &str| format!("---\nname: \"{}\"\n...\n\n", 名);
 
-好	ludk	100
-一	odd	50
-打	fss	80
-字	lll	70
-",
-        ).unwrap();
-        std::fs::write(
-            底包.join("yuhao/starmoon_sc.words.dict.yaml"),
-            "---
-name: \"starmoon_sc.words\"
-...
+        // 拆分表：字<TAB>[拆分式,全码,分组简码,注音,保留,字集,码位]
+        let mut 拆分 = 头("starmoon_chaifen");
+        拆分.push_str(&"好\t[女子,LkUd,Lk-Ud,㊌hao,,CJK,597D]\n一\t[一,Odd,Od,㊌it,,CJK,4E00]\n打\t[打,Fss,Fs,㊌da,,CJK,6253]\n字\t[字,Lls,Ll,㊌zi,,CJK,5B57]\n");
+        写("starmoon_chaifen.dict.yaml", &拆分);
 
-打字	fsll
-",
-        ).unwrap();
-        std::fs::write(
-            底包.join("yuhao/starmoon_sc.quick.dict.yaml"),
-            "---
-name: \"starmoon_sc.quick\"
-...
+        let mut 全码 = 头("starmoon.full");
+        全码.push_str(&"好\tludk\t100\n一\todd\t50\n打\tfss\t80\n字\tlll\t70\n");
+        写("yuhao/starmoon.full.dict.yaml", &全码);
 
-好	l
-一	o
-",
-        ).unwrap();
-        std::fs::write(
-            底包.join("yuhao/starmoon_sc.short.dict.yaml"),
-            "---
-name: \"starmoon_sc.short\"
-...
+        let mut 词 = 头("starmoon_sc.words");
+        词.push_str("打字\tfsll\n");
+        写("yuhao/starmoon_sc.words.dict.yaml", &词);
 
-打字	f
-",
-        ).unwrap();
-        std::fs::write(
-            底包.join("yuhao/starmoon.roots.dict.yaml"),
-            "---
-name: \"starmoon.roots\"
-...
+        let mut 快 = 头("starmoon_sc.quick");
+        快.push_str("好\tl\n一\to\n");
+        写("yuhao/starmoon_sc.quick.dict.yaml", &快);
 
-星月字根編碼提示	/dl
-輸入對應大碼字母	/dl
-",
-        ).unwrap();
-        std::fs::write(底包.join("starmoon_sc.dict.yaml"), "---
-name: \"starmoon_sc\"
-...
-").unwrap();
-        std::fs::write(
-            底包.join("default.custom.yaml"),
-            "patch:
-  schema_list:
-    - {schema: starmoon_sc}
-",
-        ).unwrap();
-        std::fs::write(底包.join("yuhao.essay.txt"), "星月文本").unwrap();
+        let mut 简 = 头("starmoon_sc.short");
+        简.push_str("打字\tf\n");
+        写("yuhao/starmoon_sc.short.dict.yaml", &简);
 
+        let mut 根 = 头("starmoon.roots");
+        根.push_str("星月字根編碼提示\t/dl\n輸入對應大碼字母\t/dl\n");
+        写("yuhao/starmoon.roots.dict.yaml", &根);
+
+        写("starmoon_sc.dict.yaml", &头("starmoon_sc"));
+        写(
+            "default.custom.yaml",
+            "patch:\n  schema_list:\n    - {schema: starmoon_sc}\n",
+        );
+        写("yuhao.essay.txt", "星月文本");
+
+        // 算码输出：只有字根键位表（带注释行与频次列），不给 zigen 图
         let 算码 = 目录.join("calc");
         std::fs::create_dir_all(&算码).unwrap();
-        std::fs::write(算码.join("roots.tsv"), "女	Lk
-子	Ud
-一	Od
-打	Fs
-字	Ll
-").unwrap();
-        std::fs::write(算码.join("zigen-starmoon.csv"), "字形,键位,拼音
-女,Lk,nv
-").unwrap();
-        let 拆分 = 目录.join("chaifen-all.txt");
-        std::fs::write(&拆分, "好	女 子	100
-一	一	50
-打	打	80
-字	字	70
-").unwrap();
+        std::fs::write(
+            算码.join("output-keymap.txt"),
+            "# 综合得分: 0.88\n女\tLk\t100\n子\tUd\t90\n一\tOd\t80\n打\tFs\t70\n字\tLl\t60\n",
+        )
+        .unwrap();
+
+        let 拆分文件 = 目录.join("chaifen-all.txt");
+        std::fs::write(
+            &拆分文件,
+            "好\t女 子\t100\n一\t一\t50\n打\t打\t80\n字\t字\t70\n",
+        )
+        .unwrap();
 
         let 参 = 参数 {
             底包目录: 底包.to_string_lossy().to_string(),
             算码目录: 算码.to_string_lossy().to_string(),
-            拆分文件: 拆分.to_string_lossy().to_string(),
+            键位文件: None,
+            拆分文件: 拆分文件.to_string_lossy().to_string(),
             输出目录: 目录.join("out").to_string_lossy().to_string(),
             前缀: "starmoon".into(),
         };
@@ -872,39 +960,42 @@ name: \"starmoon_sc\"
 
         let 输出 = 目录.join("out");
         // 文件名一律沿用底包
-        assert!(输出.join("starmoon_chaifen.dict.yaml").is_file(), "文件名不该改");
+        assert!(
+            输出.join("starmoon_chaifen.dict.yaml").is_file(),
+            "文件名不该改"
+        );
 
         let 拆分文 = std::fs::read_to_string(输出.join("starmoon_chaifen.dict.yaml")).unwrap();
         assert!(
-            拆分文.contains("好	[女子,ludk,Lk-Ud,㊌hao,,CJK,597D]"),
+            拆分文.contains("好\t[女子,ludk,Lk-Ud,㊌hao,,CJK,597D]"),
             "拆分表应换码并保留注音等字段: {}",
             拆分文
         );
 
-        let 全码 = std::fs::read_to_string(输出.join("yuhao/starmoon.full.dict.yaml")).unwrap();
-        assert!(全码.contains("好	ludk	100"), "{}", 全码);
-        assert!(全码.contains("一	odd	50"), "{}", 全码);
+        let 全码文 = std::fs::read_to_string(输出.join("yuhao/starmoon.full.dict.yaml")).unwrap();
+        assert!(全码文.contains("好\tludk\t100"), "{}", 全码文);
+        assert!(全码文.contains("一\todd\t50"), "{}", 全码文);
 
-        // 底包其余内容原样：schema 名、词表裸词、essay 文本都不该被动
+        // 底包其余内容原样：schema 名与文本都不该被动
         let 默认 = std::fs::read_to_string(输出.join("default.custom.yaml")).unwrap();
         assert!(默认.contains("starmoon_sc"), "{}", 默认);
         let 文本 = std::fs::read_to_string(输出.join("yuhao.essay.txt")).unwrap();
         assert_eq!(文本, "星月文本", "底包文本不该被替换");
 
-        // 字根表标题沿用原文，只重生成数据
-        let 字根 = std::fs::read_to_string(输出.join("yuhao/starmoon.roots.dict.yaml")).unwrap();
-        assert!(字根.contains("星月字根編碼提示	/dl"), "{}", 字根);
-        assert!(字根.contains("輸入對應大碼字母	/dl"), "{}", 字根);
-        assert!(字根.contains("	/dlL"), "应按新码重生成分组: {}", 字根);
+        // 字根表：标题沿用原文，数据按新码重生成（没有 zigen 图时用键位表兜底）
+        let 字根文 = std::fs::read_to_string(输出.join("yuhao/starmoon.roots.dict.yaml")).unwrap();
+        assert!(字根文.contains("星月字根編碼提示\t/dl"), "{}", 字根文);
+        assert!(字根文.contains("輸入對應大碼字母\t/dl"), "{}", 字根文);
+        assert!(字根文.contains("\t/dlL"), "应按新码重生成分组: {}", 字根文);
 
-        let 词 = std::fs::read_to_string(输出.join("yuhao/starmoon_sc.words.dict.yaml")).unwrap();
-        assert!(词.contains("打字	fsll"), "词码应重算: {}", 词);
+        let 词文 = std::fs::read_to_string(输出.join("yuhao/starmoon_sc.words.dict.yaml")).unwrap();
+        assert!(词文.contains("打字\tfsll"), "词码应重算: {}", 词文);
 
-        let 快 = std::fs::read_to_string(输出.join("yuhao/starmoon_sc.quick.dict.yaml")).unwrap();
-        assert!(快.contains("好	l"), "快码应保留档位: {}", 快);
+        let 快文 = std::fs::read_to_string(输出.join("yuhao/starmoon_sc.quick.dict.yaml")).unwrap();
+        assert!(快文.contains("好\tl"), "快码应保留档位: {}", 快文);
 
-        let 简 = std::fs::read_to_string(输出.join("yuhao/starmoon_sc.short.dict.yaml")).unwrap();
-        assert!(简.contains("打字	f"), "简码应保留档位: {}", 简);
+        let 简文 = std::fs::read_to_string(输出.join("yuhao/starmoon_sc.short.dict.yaml")).unwrap();
+        assert!(简文.contains("打字\tf"), "简码应保留档位: {}", 简文);
 
         let _ = std::fs::remove_dir_all(&目录);
     }
