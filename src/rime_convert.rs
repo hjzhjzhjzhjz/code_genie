@@ -17,14 +17,11 @@
 // 其余一律不动：`<前缀>_sc.dict.yaml` 主词典、`*.schema.yaml`、`lua/yuhao/*`、
 // `yuhao.*` 符号表、`default.custom.yaml`。
 //
-// 单字编码规则（`--rule`，默认 `starmoon`；用星月 123372 条真实数据全量反推并闭环验证）：
+// 单字编码规则（星月口径，用底包 123372 条真实数据全量反推并闭环验证）：
 //   1 根 : A + S + Y
 //   2 根 : A1 A2 S2 S1
 //   ≥3 根: A1 A2 … An + S_末，截断到 4 码
 // 其中 A=键位串首字母、S=第 2 个字母（不足两字母则取首字母）、Y=末字母。
-//
-// `--rule moling` 切到魔灵口径：单根字只取 A+S（两码），多根与星月完全一致。
-// 两套规则仅此一处不同，切换不影响词码与简码档位。
 //
 // 词码规则与星月 `encoder.rules` 一致：
 //   2 字 AaAbBaBb / 3 字 AaBaCaCb / 4+ 字 AaBaCaZa
@@ -55,8 +52,6 @@ pub struct 参数 {
     pub 输出目录: String,
     /// 底包的方案前缀（同时用于 `zigen-<前缀>.csv`）
     pub 前缀: String,
-    /// 单字编码规则：`starmoon`（星月/宇浩，默认）或 `moling`（魔灵）
-    pub 规则: String,
 }
 
 // =========================================================================
@@ -75,9 +70,6 @@ pub fn run(参: &参数) -> Result<(usize, usize), String> {
             文件名(&拆分源)
         ));
     }
-
-    let 编码规则 = 规则::解析(&参.规则)?;
-    println!("  单字编码规则: {}", 编码规则.名称());
 
     let 算码 = Path::new(&参.算码目录);
     let 键位路径 = 定位键位表(算码, 参.键位文件.as_deref())?;
@@ -101,13 +93,13 @@ pub fn run(参: &参数) -> Result<(usize, usize), String> {
     // ---------- 2. 拆分表 ----------
     let 拆分路径 = 输出.join(format!("{}_chaifen.dict.yaml", 前缀));
     let 根清单 = 根清单(&拆分, &字根);
-    let (已解析, 改, 留) = 重写拆分表(&拆分路径, &拆分, &字根, &根清单, 编码规则)?;
+    let (已解析, 改, 留) = 重写拆分表(&拆分路径, &拆分, &字根, &根清单)?;
     let mut 警告 = 留;
     println!("(2) {}: 重写 {} 行，保留 {} 行", 文件名(&拆分路径), 改, 留);
 
     // ---------- 3. 全码表 ----------
     let 全码路径 = 输出.join("yuhao").join(format!("{}.full.dict.yaml", 前缀));
-    let (字码, 全条, 跳) = 重写全码表(&全码路径, &已解析, &字根, 编码规则)?;
+    let (字码, 全条, 跳) = 重写全码表(&全码路径, &已解析, &字根)?;
     警告 += 跳;
     println!("(3) {}: {} 条全码", 文件名(&全码路径), 全条);
 
@@ -256,41 +248,7 @@ fn 末(k: &str) -> char {
 }
 
 /// 单字全码（星月规则），返回小写 3~4 码
-/// 单字编码规则
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum 规则 {
-    /// 星月 / 宇浩（底包原生规则，默认）
-    ///   1 根 : A + S + Y
-    ///   2 根 : A1 A2 S2 S1
-    ///   ≥3 根: A1 A2 … An + S_末，截断到 4 码
-    星月,
-    /// 魔灵（`convert-yuling-rime-schema-to-moling.sh` 的口径）
-    ///   单根只取 A + S（两码），其余与星月一致
-    魔灵,
-}
-
-impl 规则 {
-    /// 从命令行取值解析；`None` 时用默认（星月）
-    pub fn 解析(s: &str) -> Result<Self, String> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "" | "starmoon" | "xingyue" | "yuhao" => Ok(规则::星月),
-            "moling" => Ok(规则::魔灵),
-            other => Err(format!(
-                "未知编码规则「{}」：可选 starmoon（星月/宇浩）或 moling（魔灵）",
-                other
-            )),
-        }
-    }
-
-    fn 名称(self) -> &'static str {
-        match self {
-            规则::星月 => "starmoon（星月/宇浩）",
-            规则::魔灵 => "moling（魔灵）",
-        }
-    }
-}
-
-fn 单字码(根们: &[String], 字根: &字根表, 规则: 规则) -> Result<String, String> {
+fn 单字码(根们: &[String], 字根: &字根表) -> Result<String, String> {
     if 根们.is_empty() {
         return Ok(String::new());
     }
@@ -304,10 +262,7 @@ fn 单字码(根们: &[String], 字根: &字根表, 规则: 规则) -> Result<St
     Ok(match 键们.len() {
         1 => {
             let k = 键们[0];
-            match 规则 {
-                规则::星月 => format!("{}{}{}", 首(k), 次(k), 末(k)),
-                规则::魔灵 => format!("{}{}", 首(k), 次(k)),
-            }
+            format!("{}{}{}", 首(k), 次(k), 末(k))
         }
         2 => format!(
             "{}{}{}{}",
@@ -519,7 +474,6 @@ fn 重写拆分表(
     拆分: &拆分表,
     字根: &字根表,
     清单: &[String],
-    规则: 规则,
 ) -> Result<(HashMap<String, Vec<String>>, usize, usize), String> {
     let mut 输出 = Vec::new();
     let mut 已解析: HashMap<String, Vec<String>> = HashMap::new();
@@ -550,7 +504,7 @@ fn 重写拆分表(
             留 += 1;
             continue;
         };
-        let 码 = match 单字码(&根们, 字根, 规则) {
+        let 码 = match 单字码(&根们, 字根) {
             Ok(c) => c,
             Err(_) => {
                 输出.push(行);
@@ -580,7 +534,6 @@ fn 重写全码表(
     路径: &Path,
     已解析: &HashMap<String, Vec<String>>,
     字根: &字根表,
-    规则: 规则,
 ) -> Result<(HashMap<String, String>, usize, usize), String> {
     let 表头 = 词典表头(路径)?;
 
@@ -598,7 +551,7 @@ fn 重写全码表(
     let mut 条目: Vec<(String, String, u64)> = Vec::with_capacity(已解析.len());
     let mut 跳 = 0usize;
     for (字, 根们) in 已解析 {
-        match 单字码(根们, 字根, 规则) {
+        match 单字码(根们, 字根) {
             Ok(码) => {
                 let 频 = 频次.get(字).copied().unwrap_or(0);
                 条目.push((字.clone(), 码, 频));
@@ -836,46 +789,20 @@ mod tests {
     #[test]
     fn 单根字取_asy() {
         let m = 造字根();
-        assert_eq!(单字码(&["一".into()], &m, 规则::星月).unwrap(), "odd");
-    }
-
-    #[test]
-    fn 魔灵单根只取两码() {
-        let m = 造字根();
-        // 魔灵口径：单根只取 A+S
-        assert_eq!(单字码(&["一".into()], &m, 规则::魔灵).unwrap(), "od");
-        // 多根与星月一致
-        assert_eq!(
-            单字码(&["女".into(), "子".into()], &m, 规则::魔灵).unwrap(),
-            "ludk"
-        );
-        assert_eq!(
-            单字码(&["白".into(), "勹".into(), "丶".into()], &m, 规则::魔灵).unwrap(),
-            "fyek"
-        );
-    }
-
-    #[test]
-    fn 规则解析() {
-        assert!(matches!(规则::解析("").unwrap(), 规则::星月));
-        assert!(matches!(规则::解析("starmoon").unwrap(), 规则::星月));
-        assert!(matches!(规则::解析("STARMOON").unwrap(), 规则::星月));
-        assert!(matches!(规则::解析("yuhao").unwrap(), 规则::星月));
-        assert!(matches!(规则::解析("moling").unwrap(), 规则::魔灵));
-        assert!(规则::解析("unknown").is_err());
+        assert_eq!(单字码(&["一".into()], &m).unwrap(), "odd");
     }
 
     #[test]
     fn 二根字取_a1a2s2s1() {
         let m = 造字根();
-        assert_eq!(单字码(&["女".into(), "子".into()], &m, 规则::星月).unwrap(), "ludk");
+        assert_eq!(单字码(&["女".into(), "子".into()], &m).unwrap(), "ludk");
     }
 
     #[test]
     fn 三根字取三大码加末小码() {
         let m = 造字根();
         assert_eq!(
-            单字码(&["白".into(), "勹".into(), "丶".into()], &m, 规则::星月).unwrap(),
+            单字码(&["白".into(), "勹".into(), "丶".into()], &m).unwrap(),
             "fyek"
         );
     }
@@ -884,7 +811,7 @@ mod tests {
     fn 四根字取四大码() {
         let m = 造字根();
         assert_eq!(
-            单字码(&["讠".into(), "丷".into(), "口".into(), "儿".into()], &m, 规则::星月).unwrap(),
+            单字码(&["讠".into(), "丷".into(), "口".into(), "儿".into()], &m).unwrap(),
             "yfih"
         );
     }
@@ -892,7 +819,7 @@ mod tests {
     #[test]
     fn 未知字根报错() {
         let m = 造字根();
-        assert!(单字码(&["不存在".into()], &m, 规则::星月).is_err());
+        assert!(单字码(&["不存在".into()], &m).is_err());
     }
 
     #[test]
@@ -1031,7 +958,6 @@ mod tests {
             拆分文件: 拆分文件.to_string_lossy().to_string(),
             输出目录: 目录.join("out").to_string_lossy().to_string(),
             前缀: "starmoon".into(),
-            规则: "starmoon".into(),
         };
         run(&参).unwrap();
 

@@ -282,10 +282,6 @@ enum Commands {
         /// 底包的方案前缀（同时用于 zigen-<前缀>.csv）
         #[arg(long, default_value = "starmoon")]
         prefix: String,
-
-        /// 单字编码规则：starmoon（星月/宇浩，默认）或 moling（魔灵）
-        #[arg(long, default_value = "starmoon")]
-        rule: String,
     },
 
     /// 整句准确率：逐单元首候选 + 连续码流解码，两个口径一起给
@@ -520,7 +516,6 @@ fn main() {
             chaifen,
             out,
             prefix,
-            rule,
         }) => {
             let 参 = rime_convert::参数 {
                 底包目录: base,
@@ -529,7 +524,6 @@ fn main() {
                 拆分文件: chaifen,
                 输出目录: out,
                 前缀: prefix,
-                规则: rule,
             };
             if let Err(e) = rime_convert::run(&参) {
                 eprintln!("❌ {}", e);
