@@ -134,9 +134,16 @@ fn default_simple_protect_top_n() -> usize { 0 }
 pub struct AnnealingConfig {
     pub threads: usize,
     pub total_steps: usize,
+    /// 初温 / 末温：**运行时自动标定**（按初态采样 |Δscore| 闭式求解），
+    /// 这里的值只是采样失败时的兜底，配置文件里通常不需要写。
+    #[serde(default = "default_temp_start")]
     pub temp_start: f64,
+    #[serde(default = "default_temp_end")]
     pub temp_end: f64,
-    pub comfort_temp: f64,
+    /// 舒适区温度 = `comfort_ratio × t_start`。
+    /// 温度由运行时自动标定，所以舒适区用**比例**表达才不随评分尺度漂移。缺省 0.1。
+    #[serde(default = "default_comfort_ratio")]
+    pub comfort_ratio: f64,
     pub comfort_width: f64,
     pub comfort_slowdown: f64,
     pub swap_probability: f64,
@@ -164,9 +171,6 @@ pub struct AnnealingConfig {
     #[serde(default = "default_checkpoint_interval_ratio")]
     pub checkpoint_interval_ratio: f64,
 
-    /// 自动标定温度：按初态采样 |Δscore| 闭式给出 t_start/t_end（覆盖配置温度）。缺省 true。
-    #[serde(default = "default_auto_temperature")]
-    pub auto_temperature: bool,
     /// 整键互换（full_key_swap）算子执行概率（0.0~1.0），0 关闭。缺省 0.01。
     #[serde(default = "default_full_key_swap_probability")]
     pub full_key_swap_probability: f64,
@@ -177,7 +181,9 @@ fn default_conflict_refresh_interval() -> usize { 1000 }
 fn default_conflict_sample_window() -> usize { 20 }
 fn default_conflict_weight_by_freq() -> bool { false }
 fn default_checkpoint_interval_ratio() -> f64 { 0.05 }
-fn default_auto_temperature() -> bool { true }
+fn default_temp_start() -> f64 { 1.0 }
+fn default_temp_end() -> f64 { 1e-6 }
+fn default_comfort_ratio() -> f64 { 0.1 }
 fn default_full_key_swap_probability() -> f64 { 0.01 }
 
 /// 全码目标配置（对应 [targets.full_code] 段）
@@ -717,7 +723,7 @@ impl Default for Config {
                 total_steps: 10_000,
                 temp_start: 1.0,
                 temp_end: 0.000001,
-                comfort_temp: 0.2,
+                comfort_ratio: default_comfort_ratio(),
                 comfort_width: 0.15,
                 comfort_slowdown: 0.8,
                 swap_probability: 0.3,
@@ -731,7 +737,6 @@ impl Default for Config {
                 conflict_sample_window: 20,
                 conflict_weight_by_freq: false,
                 checkpoint_interval_ratio: default_checkpoint_interval_ratio(),
-                auto_temperature: default_auto_temperature(),
                 full_key_swap_probability: default_full_key_swap_probability(),
             },
             simple_levels: vec![
@@ -875,7 +880,7 @@ threads = 4
 total_steps = 1000
 temp_start = 1.0
 temp_end = 0.000001
-comfort_temp = 0.2
+comfort_ratio = 0.1
 comfort_width = 0.15
 comfort_slowdown = 0.8
 swap_probability = 0.3
@@ -950,7 +955,7 @@ threads = 1
 total_steps = 100
 temp_start = 1.0
 temp_end = 0.001
-comfort_temp = 0.2
+comfort_ratio = 0.1
 comfort_width = 0.1
 comfort_slowdown = 0.8
 swap_probability = 0.3
@@ -1005,7 +1010,7 @@ threads = 1
 total_steps = 100
 temp_start = 1.0
 temp_end = 0.001
-comfort_temp = 0.2
+comfort_ratio = 0.1
 comfort_width = 0.1
 comfort_slowdown = 0.8
 swap_probability = 0.3

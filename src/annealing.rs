@@ -1119,7 +1119,7 @@ pub fn simulated_annealing_resumable(
     let schedule = TemperatureSchedule::build(
         cfg.annealing.temp_start,
         cfg.annealing.temp_end,
-        cfg.annealing.comfort_temp,
+        cfg.annealing.temp_start * cfg.annealing.comfort_ratio,
         cfg.annealing.comfort_width,
         cfg.annealing.comfort_slowdown,
     );
@@ -1132,9 +1132,9 @@ pub fn simulated_annealing_resumable(
         if simple_enabled {
             let ts = cfg.annealing.temp_start;
             let te = cfg.annealing.temp_end;
-            let ct = cfg.annealing.comfort_temp;
+            let ct = cfg.annealing.temp_start * cfg.annealing.comfort_ratio;
             let cw = cfg.annealing.comfort_width;
-            // 舒适区进度 comfort_progress = ln(comfort_temp/temp_start)/ln(temp_end/temp_start)
+            // 舒适区进度 comfort_progress = ln((comfort_ratio·t_start)/t_start)/ln(t_end/t_start)
             let comfort_progress = if ts <= te || ct >= ts {
                 0.0
             } else if ct <= te {
@@ -1157,7 +1157,7 @@ pub fn simulated_annealing_resumable(
                 }
             }
 
-            // (2) 激活点过晚：p_start 越过舒适区中心（基温 < comfort_temp），简码优化空间有限（需求 27.5）。
+            // (2) 激活点过晚：p_start 越过舒适区中心（基温 < comfort_ratio×t_start），简码优化空间有限（需求 27.5）。
             if p_start > comfort_progress {
                 let lo = (comfort_progress - cw).max(0.0);
                 let rec = (comfort_progress - cw / 2.0).max(0.0);
@@ -1184,6 +1184,8 @@ pub fn simulated_annealing_resumable(
     let perturb_interval = cfg.perturb_interval();
 
     let swap_prob_base = cfg.annealing.swap_probability;
+    // 舒适区温度（绝对值）：温度自动标定后，舒适区按 `comfort_ratio × t_start` 换算
+    let comfort_abs = cfg.annealing.temp_start * cfg.annealing.comfort_ratio;
 
     // 冲突导向算子状态（仅在启用时维护；关闭时零开销且不消耗额外随机数，保持 RNG 序列与原实现一致）
     let conflict_prob = cfg.annealing.conflict_probability;
@@ -1546,7 +1548,7 @@ pub fn simulated_annealing_resumable(
         }
 
         // 智能低温扰动
-        if perturb_interval > 0 && step > 0 && step % perturb_interval == 0 && base_temp < cfg.annealing.comfort_temp * 0.01 {
+        if perturb_interval > 0 && step > 0 && step % perturb_interval == 0 && base_temp < comfort_abs * 0.01 {
             let collisions = find_collision_groups(ctx, &assignment, false);
             let n_perturb = (n_groups as f64 * cfg.annealing.perturb_strength) as usize;
             

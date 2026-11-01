@@ -1464,8 +1464,7 @@ fn run_optimize(
         cfg.annealing.threads, cfg.annealing.total_steps
     );
     println!(
-        "初始温度: {}, 结束温度: {}",
-        cfg.annealing.temp_start, cfg.annealing.temp_end
+        "温度: 自动标定（按初态采样 |Δscore|，运行时打印实际 t_start/t_end）"
     );
     println!("全局允许键位: {}", cfg.keys.allowed);
     println!(
@@ -1814,24 +1813,22 @@ fn run_optimize(
     // 桶存储后端选择日志（需求 12）：单线程、配置确认阶段输出一次。
     evaluator::log_bucket_backends(&ctx);
 
-    // === 自动调温（参考 libchai 调参）：按初态采样标定 t_start/t_end，覆盖配置温度 ===
-    // 使温度随权重/scale 自动标定，而非写死；采样失败回退配置温度。
+    // === 自动调温：按初态采样 |Δscore| 标定 t_start/t_end ===
+    // 温度不写死在配置里（写死会与评分尺度错配），每次运行按当前权重/scale 现算。
     let sa_cfg = {
         let mut c = cfg.clone();
-        if cfg.annealing.auto_temperature {
-            let init = annealing::deterministic_init(&ctx, cfg);
-            let mut rng = rand::thread_rng();
-            match auto_temperature(&ctx, &init, &mut rng) {
-                Some((t0, t1)) => {
-                    println!(
-                        "🌡️ 自动调温: t_start={:.6e}, t_end={:.6e}（配置 {:.6e}/{:.6e}）",
-                        t0, t1, cfg.annealing.temp_start, cfg.annealing.temp_end
-                    );
-                    c.annealing.temp_start = t0;
-                    c.annealing.temp_end = t1;
-                }
-                None => eprintln!("⚠️ 自动调温采样失败，沿用配置温度"),
+        let init = annealing::deterministic_init(&ctx, cfg);
+        let mut rng = rand::thread_rng();
+        match auto_temperature(&ctx, &init, &mut rng) {
+            Some((t0, t1)) => {
+                println!("🌡️ 自动调温: t_start={:.6e}, t_end={:.6e}", t0, t1);
+                c.annealing.temp_start = t0;
+                c.annealing.temp_end = t1;
             }
+            None => eprintln!(
+                "⚠️ 自动调温采样失败（无合法移动或 Δscore 恒为 0），回退到兜底温度 {:.6e}/{:.6e}",
+                c.annealing.temp_start, c.annealing.temp_end
+            ),
         }
         c
     };
@@ -1864,7 +1861,7 @@ fn run_optimize(
             num_threads: cfg.annealing.threads,
             temp_start: sa_cfg.annealing.temp_start,
             temp_end: sa_cfg.annealing.temp_end,
-            comfort_temp: cfg.annealing.comfort_temp,
+            comfort_temp: sa_cfg.annealing.temp_start * cfg.annealing.comfort_ratio,
         };
         if let Err(e) = checkpoint::save_meta(&meta, &ckpt_dir) {
             eprintln!("⚠️ 写 checkpoint 元信息失败: {}", e);

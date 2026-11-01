@@ -18,9 +18,7 @@ key_dist = "key_distribution-xiaoming.txt"    # 用指分布文件
 [annealing]
 threads = 8              # 并行线程数（摸底轮）
 total_steps = 20000000   # 总迭代步数（与第 13 轮相同，只把静重目标放到 110）
-temp_start = 0.015       # 初始温度（回到 00:57 当量最好那轮）
-temp_end = 0.0002        # 结束温度（末段仍保留少量上坡接受）
-comfort_temp = 0.0015    # 舒适温度区间（放在当量仍在下降的温度带）
+comfort_ratio = 0.1     # 舒适区温度 = 0.1 × t_start（t_start 运行时自动标定）
 comfort_width = 0.18     # 舒适区宽度
 comfort_slowdown = 0.55  # 舒适区减速因子
 swap_probability = 0.60  # 交换操作概率（速度取决于键对，提高交换占比）
@@ -29,7 +27,7 @@ swap_probability = 0.60  # 交换操作概率（速度取决于键对，提高�
 min_improve_steps_ratio = 0.05   # 最小改进步数比例（回到 00:57 当量最好那轮）
 perturb_interval_ratio = 0.0    # 设为 0 可关闭低温扰动
 perturb_strength = 0.0          # 扰动强度
-perturb_trigger_temp_ratio = 0.01 # 扰动触发温度比例 (base_temp < comfort_temp * ratio)
+perturb_trigger_temp_ratio = 0.01 # 扰动触发温度比例 (base_temp < 舒适区温度 * ratio)
 perturb_temp_multiplier = 2.0     # 扰动时温度倍率 (temp * multiplier)
 perturb_collision_pairs_limit = 10 # 扰动时优先采样的冲突对上限
 reheat_factor = 1.6             # 平台期重热倍率（回到 00:57 当量最好那轮）
