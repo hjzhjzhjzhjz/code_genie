@@ -5,10 +5,23 @@
 // 统一封装「按编码值 `code` 索引的桶集合」，对调用方屏蔽底层是密集 `Vec`
 // 还是稀疏 `FxHashMap`（需求 1/5）。
 //
-// 选择依据：仅看容量上界（`code_space` 或 `code_base^L`），不看实际占用——
-// 因为密集后端按容量一次性预分配，无论多稀疏都吃满 `capacity × sizeof(B)`。
-// 容量超过阈值则改用稀疏后端，使内存随非空桶数（其上界为汉字数 n_chars）增长，
-// 而非随容量增长（需求 5）。
+// 选择依据：**同时看容量上界与实际字数**。
+//
+// 密集后端按容量一次性预分配，无论多稀疏都吃满 `capacity × sizeof(B)`；
+// 稀疏后端的内存随非空桶数增长，而非空桶数恒 ≤ n_chars。因此判据是
+// 「Dense 的槽位数」与「Sparse 的条目上界（n_chars × 常数）」哪个更小：
+//
+//   - `capacity > SPARSE_THRESHOLD`         → Sparse（绝对上限，防容量爆内存）
+//   - `capacity ≤ DENSE_MIN_CAPACITY`       → Dense（小容量便宜且索引快，不必稀疏化）
+//   - `capacity > n_chars × SPARSE_ENTRY_FACTOR` → Sparse（槽数远超可能占用）
+//   - 否则                                  → Dense（占用率足够高，Dense 更快）
+//
+// 只看容量的旧判据会让「4 码定长方案」误判：`code_space` 落在 `SPARSE_THRESHOLD = 2^21`
+// 之下（本项目 25 键 × 4 码位 → `25^4 = 390,625`；32 键则 `32^4 = 1,048,576`），
+// 于是全部槽位一次性预分配（`FullBucket` 48 B → 每评估器 17.9 MB），
+// 而实际非空桶仅约 1.1 万个（利用率 3%）。多线程下每个线程各持一份，
+// 且 `update_char` 每次都在近 18 MB 工作集里随机跳，远超 L3 —— 缓存缺失严重。
+// 计入 n_chars 后该场景判为 Sparse（约 0.7 MB），既省内存也改善局部性。
 //
 // 关键不变量（需求 2）：调用方在桶成员降为 0 后必须调用 `remove`，使稀疏后端
 // 的条目集合恒等于「当前非空桶集合」，条目数 ≤ n_chars。
@@ -31,9 +44,23 @@ pub type Members = SmallVec<[u32; 2]>;
 
 /// 后端选择阈值（需求 12.6：唯一允许的编译期规模常量）。
 ///
-/// 取 `2^21 = 2,097,152`：使 `code_space ≤ 1,048,576`（`max_parts ≤ 4`）走密集后端、
-/// `code_space = 33,554,432`（`max_parts = 5`）走稀疏后端（需求 5.4）。
+/// 取 `2^21 = 2,097,152`：作为**容量绝对上限**——超过它一律走稀疏后端，
+/// 不参与「容量 vs 字数」的权衡（避免 n_chars 很大时 Dense 仍然爆内存）。
 pub const SPARSE_THRESHOLD: usize = 1 << 21;
+
+/// 容量不超过此值时**无条件**用密集后端。
+///
+/// `4096 × 48 B ≈ 192 KB`，即使最坏情况也可接受；而小容量的数组索引比哈希查找快，
+/// 简码各级别桶（`code_base^L`，L 通常 1~2）与测试规模都落在这里。
+pub const DENSE_MIN_CAPACITY: usize = 1 << 12;
+
+/// 稀疏后端的「每字条目开销」相对系数（判据用）。
+///
+/// 稀疏后端的非空桶数恒 ≤ n_chars，故其内存上界 ≈ `n_chars × 每条目开销`。
+/// 每条目含哈希表 entry（key u32 + 桶结构）与负载因子（~0.85）的开销，
+/// 折合约 `SPARSE_ENTRY_FACTOR` 个密集槽位。取 4 是保守估计：宁可多走 Dense，
+/// 也不在占用率本就不低时误判为 Sparse（哈希查找比数组索引慢）。
+pub const SPARSE_ENTRY_FACTOR: usize = 4;
 
 /// 后端类型（用于日志与测试观测）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,7 +70,11 @@ pub enum BackendKind {
 }
 
 /// 依据容量上界选择后端（纯函数，便于测试，需求 5.1/12.2）。
+///
+/// 只按容量判断，**不含字数维度**；生产路径请用 [`choose_backend_for`]，
+/// 它能把「大容量 + 少字数」的稀疏场景正确判成 Sparse。
 #[inline]
+#[allow(dead_code)] // 生产走 choose_backend_for；此函数保留给 new_with_threshold 与阈值边界测试
 pub fn choose_backend_with_threshold(capacity: usize, threshold: usize) -> BackendKind {
     if capacity <= threshold {
         BackendKind::Dense
@@ -52,10 +83,26 @@ pub fn choose_backend_with_threshold(capacity: usize, threshold: usize) -> Backe
     }
 }
 
-/// 依据容量上界与默认阈值选择后端。
+/// 生产用后端选择：同时考虑容量上界与实际字数（纯函数，便于测试）。
+///
+/// 判据见文件头：容量超绝对上限 → Sparse；小容量 → Dense；
+/// 否则比较「Dense 槽位数」与「Sparse 条目上界 `n_chars × SPARSE_ENTRY_FACTOR`」。
 #[inline]
-pub fn choose_backend(capacity: usize) -> BackendKind {
-    choose_backend_with_threshold(capacity, SPARSE_THRESHOLD)
+pub fn choose_backend_for(capacity: usize, n_chars: usize) -> BackendKind {
+    // 绝对上限：容量过大时 Dense 无论如何都吃不下。
+    if capacity > SPARSE_THRESHOLD {
+        return BackendKind::Sparse;
+    }
+    // 小容量：Dense 便宜且索引快，不必为省几百 KB 换成哈希查找。
+    if capacity <= DENSE_MIN_CAPACITY {
+        return BackendKind::Dense;
+    }
+    // 大容量 + 少字数：Dense 的槽数远超可能的非空桶数，稀疏化省内存且改善局部性。
+    if capacity > n_chars.saturating_mul(SPARSE_ENTRY_FACTOR) {
+        BackendKind::Sparse
+    } else {
+        BackendKind::Dense
+    }
 }
 
 // 测试用：线程局部阈值覆盖，使 `BucketStore::new`（含 Evaluator/SimpleEvaluator 内部构造）
@@ -104,8 +151,11 @@ pub struct BucketStore<B: Bucket> {
 
 impl<B: Bucket> BucketStore<B> {
     #![allow(dead_code)] // 部分访问器（backend_kind/capacity/nonempty_count/get_or_default）仅测试/日志用
-    /// 按默认阈值构建（需求 5.1-5.4）。
-    pub fn new(capacity: usize) -> Self {
+    /// 按默认判据构建（需求 5.1-5.4）。
+    ///
+    /// `n_chars` 参与后端选择：稀疏后端的非空桶数恒 ≤ 它，故「大容量 + 少字数」应走稀疏
+    /// （见 [`choose_backend_for`]）。传 `usize::MAX` 等价于只看容量。
+    pub fn new(capacity: usize, n_chars: usize) -> Self {
         // 测试可经线程局部覆盖阈值以强制走稀疏/密集后端（生产编译时整段移除，零开销）。
         #[cfg(test)]
         {
@@ -113,12 +163,19 @@ impl<B: Bucket> BucketStore<B> {
                 return Self::new_with_threshold(capacity, t);
             }
         }
-        Self::new_with_threshold(capacity, SPARSE_THRESHOLD)
+        Self::new_by_kind(capacity, choose_backend_for(capacity, n_chars))
     }
 
-    /// 按指定阈值构建（供测试强制稀疏/密集路径）。
+    /// 按指定阈值构建（**测试专用**：强制走稀疏/密集路径以覆盖两后端一致性）。
+    ///
+    /// 生产路径走 [`BucketStore::new`] + [`choose_backend_for`]（容量 + 字数联合判据）。
+    #[allow(dead_code)] // 仅 #[cfg(test)] 与单测调用；生产编译时无调用者
     pub fn new_with_threshold(capacity: usize, threshold: usize) -> Self {
-        let kind = choose_backend_with_threshold(capacity, threshold);
+        Self::new_by_kind(capacity, choose_backend_with_threshold(capacity, threshold))
+    }
+
+    /// 按已定的后端类型构建存储本体。
+    fn new_by_kind(capacity: usize, kind: BackendKind) -> Self {
         let backend = match kind {
             BackendKind::Dense => Backend::Dense(vec![B::default(); capacity]),
             BackendKind::Sparse => Backend::Sparse(FxHashMap::default()),
@@ -362,13 +419,49 @@ mod tests {
 
     #[test]
     fn choose_backend_threshold_boundary() {
-        // 容量 ≤ 阈值 → Dense；＞ 阈值 → Sparse（需求 5.1-5.4, 12.2）。
-        assert_eq!(choose_backend(SPARSE_THRESHOLD), BackendKind::Dense);
-        assert_eq!(choose_backend(SPARSE_THRESHOLD + 1), BackendKind::Sparse);
-        // 运行时容量（不写死 max_parts）：32^4 走 Dense、32^5 走 Sparse。
+        // 纯阈值判据（`new_with_threshold` 用的那条）：容量 ≤ 阈值 → Dense，＞ 阈值 → Sparse。
+        let by_cap = |c: usize| choose_backend_with_threshold(c, SPARSE_THRESHOLD);
+        assert_eq!(by_cap(SPARSE_THRESHOLD), BackendKind::Dense);
+        assert_eq!(by_cap(SPARSE_THRESHOLD + 1), BackendKind::Sparse);
+        // 运行时容量（不写死 max_parts）：32^4 在阈值内、32^5 超阈值。
         let code_base = 32usize;
-        assert_eq!(choose_backend(code_base.pow(4)), BackendKind::Dense);
-        assert_eq!(choose_backend(code_base.pow(5)), BackendKind::Sparse);
+        assert_eq!(by_cap(code_base.pow(4)), BackendKind::Dense);
+        assert_eq!(by_cap(code_base.pow(5)), BackendKind::Sparse);
+    }
+
+    // 生产判据：容量与字数共同决定后端。
+    // 关键回归：4 码定长方案（code_space = 32^4 = 1,048,576，n_chars ≈ 1.1 万）必须走 Sparse，
+    // 否则每评估器预分配 1,048,576 × 48 B ≈ 48 MB，而实际非空桶只有 ~1.1 万个（利用率 1%）。
+    #[test]
+    fn choose_backend_for_considers_n_chars() {
+        let code_base = 32usize;
+        // 4 码 + 1.1 万字：槽数 1,048,576 远超非空桶上界 11,177×4 = 44,708 → Sparse
+        assert_eq!(
+            choose_backend_for(code_base.pow(4), 11_177),
+            BackendKind::Sparse,
+            "4 码定长 + 1.1 万字应走稀疏后端（修前误判 Dense，48 MB/评估器）"
+        );
+        // 3 码 + 1.1 万字：32,768 槽 < 上界 44,708 → Dense（占用率够高，数组索引更快）
+        assert_eq!(
+            choose_backend_for(code_base.pow(3), 11_177),
+            BackendKind::Dense
+        );
+        // 小容量无条件 Dense（简码各级别桶落在这里）
+        assert_eq!(
+            choose_backend_for(DENSE_MIN_CAPACITY, 1),
+            BackendKind::Dense
+        );
+        assert_eq!(choose_backend_for(1, usize::MAX), BackendKind::Dense);
+        // 绝对上限优先：容量超上限时即便字数极多也走 Sparse（饱和乘法不溢出）
+        assert_eq!(
+            choose_backend_for(SPARSE_THRESHOLD + 1, usize::MAX / 8),
+            BackendKind::Sparse
+        );
+        // 字数足够多时，同样的容量应回到 Dense（占用率上来了）
+        assert_eq!(
+            choose_backend_for(code_base.pow(4), 1_000_000),
+            BackendKind::Dense
+        );
     }
 
     // Feature: sparse-bucket-memory-optimization, Property 1: 空桶语义一致

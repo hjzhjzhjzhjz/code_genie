@@ -294,7 +294,7 @@ impl SimpleEvaluator {
                     // 有上屏键 = Σ_{有效上屏键} max(0, code_num−占用)）。
                     code_num: ctx.simple_config.levels[li].code_num,
                     capacity: cap,
-                    buckets: BucketStore::new(cap),
+                    buckets: BucketStore::new(cap, n_chars),
                     current_simple_code: vec![-1i64; n_chars],
                     selected: vec![false; n_chars],
                     covered_freq: 0,
@@ -556,7 +556,7 @@ impl SimpleEvaluator {
 
         // 重置所有级别状态：以全新桶存储替换（Sparse 后端 O(1)，Dense 后端重分配，均不残留旧成员）。
         for level in self.levels.iter_mut() {
-            level.buckets = BucketStore::new(level.capacity);
+            level.buckets = BucketStore::new(level.capacity, n_chars);
             for c in level.current_simple_code.iter_mut() {
                 *c = -1;
             }
@@ -1827,8 +1827,8 @@ pub(crate) fn log_bucket_backends(ctx: &OptContext) {
     use crate::bucket_store::SPARSE_THRESHOLD;
     let n_chars = ctx.char_infos.len();
     println!(
-        "📦 桶存储后端选择 (code_base={}, max_parts={}, code_space={}, 阈值={}):",
-        ctx.code_base, ctx.max_parts, ctx.code_space, SPARSE_THRESHOLD
+        "📦 桶存储后端选择 (code_base={}, max_parts={}, code_space={}, n_chars={}, 容量绝对上限={}):",
+        ctx.code_base, ctx.max_parts, ctx.code_space, n_chars, SPARSE_THRESHOLD
     );
     log_one_backend("全码桶", ctx.code_space, std::mem::size_of::<FullBucket>(), n_chars);
     // 简码级别桶：仅在启用简码时输出（需求 12.7）。
@@ -1850,18 +1850,33 @@ fn log_one_backend(label: &str, capacity: usize, elem_size: usize, n_chars: usiz
 }
 
 /// 构造单个桶存储后端选择日志行（纯函数，便于测试，需求 12.6）。
-/// 全部数字来自运行时参数，无硬编码规模常量（阈值除外）。
+///
+/// 与生产路径同判据（[`choose_backend_for`]）：同时看容量上界与 `n_chars`，
+/// 而不是只看容量——否则「4 码定长方案」会因 `code_space = 32^4` 落在阈值内被判 Dense，
+/// 实际却只用掉 1% 的槽位。
 pub(crate) fn backend_log_line(label: &str, capacity: usize, elem_size: usize, n_chars: usize) -> String {
-    use crate::bucket_store::{choose_backend, BackendKind, SPARSE_THRESHOLD};
+    use crate::bucket_store::{
+        choose_backend_for, BackendKind, DENSE_MIN_CAPACITY, SPARSE_ENTRY_FACTOR, SPARSE_THRESHOLD,
+    };
     let mb = capacity.saturating_mul(elem_size) / (1024 * 1024);
-    match choose_backend(capacity) {
+    let sparse_bound = n_chars.saturating_mul(SPARSE_ENTRY_FACTOR);
+    match choose_backend_for(capacity, n_chars) {
         BackendKind::Dense => format!(
-            "   · {label}: Dense (容量 {capacity} ≤ 阈值 {SPARSE_THRESHOLD}；预估 ~{mb} MB/线程)"
+            "   · {label}: Dense (容量 {capacity}；容量 ≤ {DENSE_MIN_CAPACITY} 或占用率足够高\
+             —— 非空桶上界 n_chars({n_chars})×{SPARSE_ENTRY_FACTOR} = {sparse_bound}；\
+             预估 ~{mb} MB/线程)"
         ),
-        BackendKind::Sparse => format!(
-            "   · {label}: Sparse (容量 {capacity} > 阈值 {SPARSE_THRESHOLD}；Dense 将需 ~{mb} MB/线程，\
-             改用稀疏存储，内存随非空桶数 ≤ n_chars({n_chars}) 增长)"
-        ),
+        BackendKind::Sparse => {
+            let reason = if capacity > SPARSE_THRESHOLD {
+                format!("容量 {capacity} 超绝对上限 {SPARSE_THRESHOLD}")
+            } else {
+                format!("容量 {capacity} 远超非空桶上界 {sparse_bound}")
+            };
+            format!(
+                "   · {label}: Sparse ({reason}；n_chars({n_chars})×{SPARSE_ENTRY_FACTOR} = {sparse_bound}；\
+                 Dense 将需 ~{mb} MB/线程，改用稀疏存储，内存随非空桶数增长)"
+            )
+        }
     }
 }
 
@@ -1873,7 +1888,7 @@ pub(crate) fn build_full_buckets(
     assignment: &[u8],
 ) -> (BucketStore<FullBucket>, Vec<bool>) {
     let n = ctx.char_infos.len();
-    let mut fb: BucketStore<FullBucket> = BucketStore::new(ctx.code_space);
+    let mut fb: BucketStore<FullBucket> = BucketStore::new(ctx.code_space, n);
     fb.reserve_nonempty(n); // 稀疏后端预留 n_chars，避免 rehash、降低负载因子
     for ci in 0..n {
         let code = ctx.calc_code_only(ci, assignment);
@@ -2011,7 +2026,7 @@ impl Evaluator {
     fn new_impl(ctx: &OptContext, assignment: &[u8], build_simple: bool, simple_output_scope: bool) -> Self {
         let n = ctx.char_infos.len();
         let cs = ctx.code_space;
-        let mut full_buckets: BucketStore<FullBucket> = BucketStore::new(cs);
+        let mut full_buckets: BucketStore<FullBucket> = BucketStore::new(cs, n);
         // 稀疏后端预留 n_chars 容量：避免退火期 rehash、降低负载因子（缩短探测、减少缓存缺失）。
         full_buckets.reserve_nonempty(n);
         let mut char_bucket_pos = vec![0usize; n];
@@ -3299,12 +3314,25 @@ mod first_candidate_tests {
     fn backend_log_line_content() {
         // 小容量 → Dense，行内含 "Dense" 与预估 MB。
         let dense = backend_log_line("全码桶", 1024, 40, 11177);
-        assert!(dense.contains("Dense"), "应标记 Dense: {dense}");
+        assert!(dense.contains("Dense ("), "应标记 Dense: {dense}");
         assert!(dense.contains("1024"), "应含运行时容量: {dense}");
         // 超阈值容量 → Sparse，行内含 "Sparse" 与运行时 n_chars 提示。
         let sparse = backend_log_line("全码桶", 33_554_432, 40, 11177);
         assert!(sparse.contains("Sparse"), "应标记 Sparse: {sparse}");
         assert!(sparse.contains("n_chars(11177)"), "应含运行时 n_chars 提示: {sparse}");
+    }
+
+    // 回归：4 码定长方案（code_space = 32^4，n_chars ≈ 1.1 万）必须判 Sparse。
+    // 修前只看容量（1,048,576 ≤ 2^21）→ Dense → 每评估器 48 MB，实际只用到 1%。
+    #[test]
+    fn backend_log_line_4code_is_sparse() {
+        let line = backend_log_line("全码桶", 32usize.pow(4), std::mem::size_of::<FullBucket>(), 11_177);
+        assert!(line.contains("Sparse"), "4 码定长方案应判稀疏后端: {line}");
+        assert!(line.contains("n_chars(11177)"), "应含运行时 n_chars: {line}");
+        assert!(line.contains("44,708") || line.contains("44708"), "应给出非空桶上界: {line}");
+        // 3 码仍是 Dense（占用率够高，数组索引更快）
+        let line3 = backend_log_line("全码桶", 32usize.pow(3), std::mem::size_of::<FullBucket>(), 11_177);
+        assert!(line3.contains("Dense ("), "3 码方案应判密集后端: {line3}");
     }
 
     /// 构建最小 OptContext：每个频率对应一个动态组，每组含 1 个字根、1 个单部件汉字。
