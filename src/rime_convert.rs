@@ -1,23 +1,23 @@
 // =========================================================================
-// 🔄 星月 RIME 方案包 → 魔灵 RIME 方案包（只换码）
+// 🔄 星月 RIME 方案包：只换码
 // =========================================================================
 //
-// 以现成的星月（starmoon-ime）方案包为底包，复制一份出来，把里面所有**单字码、
-// 词码、简码**换成按优化结果（roots.tsv）重算的字母；schema / lua / 注音 / 字集
-// / 码位等其余内容原样保留。
+// 底包（starmoon-ime）**一个字都不改**：文件名、schema_id、方案名、lua、
+// 主词典的裸词表、符号表全部原样沿用。只把下列词典里的**码**换成按优化结果
+// （roots.tsv）重算的字母。
 //
-// 要换码的文件：
+// 换码的文件：
 //   `<前缀>_chaifen.dict.yaml`          字\t[拆分式,全码,分组简码,注音,保留,字集,码位]
 //   `yuhao/<前缀>.full.dict.yaml`       字\t码\t频次
 //   `yuhao/<前缀>_sc.words.dict.yaml`   词\t码
 //   `yuhao/<前缀>_sc.quick.dict.yaml`   字\t简码（保留原档位，只换字母）
 //   `yuhao/<前缀>_sc.short.dict.yaml`   词\t简码（保留原档位，只换字母）
-//   `yuhao/<前缀>.roots.dict.yaml`      字根提示（由 zigen-*.csv 重新生成）
+//   `yuhao/<前缀>.roots.dict.yaml`      字根提示（标题行沿用原文，只重生成分组）
 //
-// 不动的：`*_sc.dict.yaml` 主词典（import_tables 只做改名）、`*.schema.yaml`、
-// `lua/yuhao/*`、`yuhao.*` 符号表 —— 仅做「星月 → 魔灵」文本替换。
+// 其余一律不动：`<前缀>_sc.dict.yaml` 主词典、`*.schema.yaml`、`lua/yuhao/*`、
+// `yuhao.*` 符号表、`default.custom.yaml`。
 //
-// 单字编码规则（用星月 123372 条真实数据全量反推验证，0 不符）：
+// 单字编码规则（用星月 123372 条真实数据全量反推并闭环验证）：
 //   1 根 : A + S + Y
 //   2 根 : A1 A2 S2 S1
 //   ≥3 根: A1 A2 … An + S_末，截断到 4 码
@@ -36,23 +36,20 @@ type 字根表 = HashMap<String, String>;
 type 拆分表 = HashMap<String, Vec<String>>;
 
 /// `rime-convert` 的入参
+///
+/// 底包的一切（文件名、schema_id、方案名、lua、词表裸词）**原样沿用**，
+/// 只把词典里的码换成按 `roots.tsv` 重算的字母。
 pub struct 参数 {
     /// 底包目录（starmoon-ime 根目录）
     pub 底包目录: String,
-    /// 算码输出目录（含 `roots.tsv`、`zigen-<标识>.csv`）
+    /// 算码输出目录（含 `roots.tsv`、`zigen-<前缀>.csv`）
     pub 算码目录: String,
     /// 拆分表（`chaifen-all.txt`：字\t根 根\t频次）
     pub 拆分文件: String,
     /// 输出目录
     pub 输出目录: String,
-    /// 新方案标识（文件名前缀 + schema_id）
-    pub 标识: String,
-    /// 新方案显示名
-    pub 名称: String,
-    /// 底包的方案前缀
-    pub 源前缀: String,
-    /// 底包的方案显示名（正文替换用）
-    pub 源名称: String,
+    /// 底包的方案前缀（同时用于 `zigen-<前缀>.csv`）
+    pub 前缀: String,
 }
 
 // =========================================================================
@@ -62,7 +59,8 @@ pub struct 参数 {
 /// 执行转换。返回 (改写条数, 告警数)。
 pub fn run(参: &参数) -> Result<(usize, usize), String> {
     let 底包 = Path::new(&参.底包目录);
-    let 拆分源 = 底包.join(format!("{}_chaifen.dict.yaml", 参.源前缀));
+    let 前缀 = &参.前缀;
+    let 拆分源 = 底包.join(format!("{}_chaifen.dict.yaml", 前缀));
     if !拆分源.is_file() {
         return Err(format!(
             "底包目录不对：{} 下没有 {}",
@@ -76,64 +74,59 @@ pub fn run(参: &参数) -> Result<(usize, usize), String> {
     let 拆分 = 读拆分表(Path::new(&参.拆分文件))?;
     println!("  roots.tsv: {} 个字根；拆分表: {} 个字", 字根.len(), 拆分.len());
 
-    // ---------- 1. 复制 ----------
+    // ---------- 1. 原样复制底包 ----------
     let 输出 = PathBuf::from(&参.输出目录);
     if 输出.exists() {
         crate::fsutil::archive_if_exists(&输出);
     }
-    复制底包(底包, &输出, &参.源前缀)?;
-    println!("(1) 已复制底包到 {}", 输出.display());
+    复制底包(底包, &输出, 前缀)?;
+    println!("(1) 已原样复制底包到 {}", 输出.display());
 
-    // ---------- 2. 改名 + 正文替换 ----------
-    let 改名 = 重命名(&输出, &参.源前缀, &参.标识)?;
-    let 替换 = 替换正文(&输出, &参.源前缀, &参.标识, &参.源名称, &参.名称)?;
-    println!("(2) 改名 {} 个，正文替换 {} 个文件", 改名, 替换);
-
-    // ---------- 3. 拆分表 ----------
-    let 拆分路径 = 输出.join(format!("{}_chaifen.dict.yaml", 参.标识));
+    // ---------- 2. 拆分表 ----------
+    let 拆分路径 = 输出.join(format!("{}_chaifen.dict.yaml", 前缀));
     let 根清单 = 根清单(&拆分, &字根);
     let (已解析, 改, 留) = 重写拆分表(&拆分路径, &拆分, &字根, &根清单)?;
     let mut 警告 = 留;
-    println!("(3) {}: 重写 {} 行，保留 {} 行", 文件名(&拆分路径), 改, 留);
+    println!("(2) {}: 重写 {} 行，保留 {} 行", 文件名(&拆分路径), 改, 留);
 
-    // ---------- 4. 全码表 ----------
-    let 全码路径 = 输出.join("yuhao").join(format!("{}.full.dict.yaml", 参.标识));
+    // ---------- 3. 全码表 ----------
+    let 全码路径 = 输出.join("yuhao").join(format!("{}.full.dict.yaml", 前缀));
     let (字码, 全条, 跳) = 重写全码表(&全码路径, &已解析, &字根)?;
     警告 += 跳;
-    println!("(4) {}: {} 条全码", 文件名(&全码路径), 全条);
+    println!("(3) {}: {} 条全码", 文件名(&全码路径), 全条);
 
-    // ---------- 5. 词表 ----------
+    // ---------- 4. 词表 ----------
     let 词路径 = 输出
         .join("yuhao")
-        .join(format!("{}_sc.words.dict.yaml", 参.标识));
+        .join(format!("{}_sc.words.dict.yaml", 前缀));
     let (词码表, 词条, 跳) = 重写词表(&词路径, &字码)?;
     警告 += 跳;
-    println!("(5) {}: {} 条词", 文件名(&词路径), 词条);
+    println!("(4) {}: {} 条词", 文件名(&词路径), 词条);
 
-    // ---------- 6. 快码（单字简码）----------
+    // ---------- 5. 快码（单字简码）----------
     let 快码路径 = 输出
         .join("yuhao")
-        .join(format!("{}_sc.quick.dict.yaml", 参.标识));
+        .join(format!("{}_sc.quick.dict.yaml", 前缀));
     let (快条, 跳) = 重写简码表(&快码路径, &字码)?;
     警告 += 跳;
-    println!("(6) {}: {} 条快码", 文件名(&快码路径), 快条);
+    println!("(5) {}: {} 条快码", 文件名(&快码路径), 快条);
 
-    // ---------- 7. 简码（词组简码）----------
+    // ---------- 6. 简码（词组简码）----------
     let 简码路径 = 输出
         .join("yuhao")
-        .join(format!("{}_sc.short.dict.yaml", 参.标识));
+        .join(format!("{}_sc.short.dict.yaml", 前缀));
     let (简条, 跳) = 重写简码表(&简码路径, &词码表)?;
     警告 += 跳;
-    println!("(7) {}: {} 条简码", 文件名(&简码路径), 简条);
+    println!("(6) {}: {} 条简码", 文件名(&简码路径), 简条);
 
-    // ---------- 8. 字根提示 ----------
-    let 字根路径 = 输出.join("yuhao").join(format!("{}.roots.dict.yaml", 参.标识));
-    let 图 = 算码.join(format!("zigen-{}.csv", 参.标识));
-    let 字根条 = 写字根表(&字根路径, &图, &参.名称)?;
-    println!("(8) {}: {} 条字根提示（来源 {}）", 文件名(&字根路径), 字根条, 文件名(&图));
+    // ---------- 7. 字根提示 ----------
+    let 字根路径 = 输出.join("yuhao").join(format!("{}.roots.dict.yaml", 前缀));
+    let 图 = 算码.join(format!("zigen-{}.csv", 前缀));
+    let 字根条 = 写字根表(&字根路径, &图)?;
+    println!("(7) {}: {} 条字根提示（来源 {}）", 文件名(&字根路径), 字根条, 文件名(&图));
 
-    println!("\n✅ 魔灵方案包已生成：{}", 输出.display());
-    println!("   装法：把该目录内容拷进 Rime 用户目录，重新部署后选「{}」", 参.名称);
+    println!("\n✅ 已生成：{}", 输出.display());
+    println!("   除码以外与底包完全一致；拷进 Rime 用户目录重新部署即可");
     if 警告 > 0 {
         println!("⚠️ 共 {} 处告警，详见上方输出", 警告);
     }
@@ -225,80 +218,6 @@ fn 复制目录(源: &Path, 目标: &Path) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-/// 递归收集条目，深度降序（先改深层，避免父目录改名后子路径失效）
-fn 全部条目(根: &Path) -> Result<Vec<PathBuf>, String> {
-    let mut 结果 = Vec::new();
-    let mut 栈 = vec![根.to_path_buf()];
-    while let Some(当前) = 栈.pop() {
-        for 一条 in std::fs::read_dir(&当前)
-            .map_err(|e| format!("读目录 {} 失败: {}", 当前.display(), e))?
-            .flatten()
-        {
-            let 路径 = 一条.path();
-            if 路径.is_dir() {
-                栈.push(路径.clone());
-            }
-            结果.push(路径);
-        }
-    }
-    结果.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
-    Ok(结果)
-}
-
-fn 重命名(输出: &Path, 旧: &str, 新: &str) -> Result<usize, String> {
-    let mut 数 = 0usize;
-    for 路径 in 全部条目(输出)? {
-        let Some(名) = 路径.file_name().map(|n| n.to_string_lossy().to_string()) else {
-            continue;
-        };
-        if !名.starts_with(旧) {
-            continue;
-        }
-        let 新名 = 名.replace(旧, 新);
-        if 新名 == 名 {
-            continue;
-        }
-        let 目标 = 路径.with_file_name(&新名);
-        std::fs::rename(&路径, &目标)
-            .map_err(|e| format!("改名 {} → {} 失败: {}", 路径.display(), 目标.display(), e))?;
-        数 += 1;
-    }
-    Ok(数)
-}
-
-/// 正文替换：源前缀 → 标识，源名称 → 名称（只处理文本文件）
-fn 替换正文(
-    输出: &Path,
-    源前缀: &str,
-    标识: &str,
-    源名称: &str,
-    名称: &str,
-) -> Result<usize, String> {
-    let mut 数 = 0usize;
-    for 路径 in 全部条目(输出)? {
-        if !路径.is_file() {
-            continue;
-        }
-        let 扩展 = 路径
-            .extension()
-            .map(|e| e.to_string_lossy().to_ascii_lowercase())
-            .unwrap_or_default();
-        if !matches!(扩展.as_str(), "yaml" | "yml" | "txt" | "lua") {
-            continue;
-        }
-        let 原文 = match std::fs::read_to_string(&路径) {
-            Ok(x) => x,
-            Err(_) => continue,
-        };
-        let 新文 = 原文.replace(源前缀, 标识).replace(源名称, 名称);
-        if 新文 != 原文 {
-            写文本(&路径, &新文)?;
-            数 += 1;
-        }
-    }
-    Ok(数)
 }
 
 // =========================================================================
@@ -672,9 +591,27 @@ fn 取标记(文本: &str) -> Option<String> {
 }
 
 /// 字根提示表：`字根们\t/<标记><大码>` 与 `+ <小码> = 字根们\t/<标记><大码>`
-fn 写字根表(路径: &Path, 字根图: &Path, 名称: &str) -> Result<usize, String> {
+///
+/// 标题两行（如「星月字根編碼提示」「輸入對應大碼字母」）**沿用原文件**，只重生成分组数据。
+fn 写字根表(路径: &Path, 字根图: &Path) -> Result<usize, String> {
     let 表头 = 词典表头(路径)?;
-    let 标记 = 取标记(&表头).unwrap_or_else(|| "dl".to_string());
+    let 全部 = 读行(路径)?;
+    let 数据起 = 全部
+        .iter()
+        .position(|l| l.starts_with("..."))
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    // 数据区开头两个非空行就是原标题行
+    let 标题: Vec<String> = 全部[数据起..]
+        .iter()
+        .filter(|l| !l.trim().is_empty())
+        .take(2)
+        .cloned()
+        .collect();
+    let 标记 = 标题
+        .first()
+        .and_then(|l| 取标记(l))
+        .unwrap_or_else(|| "dl".to_string());
 
     let mut 按大: HashMap<String, Vec<String>> = HashMap::new();
     let mut 按小: HashMap<String, HashMap<String, Vec<String>>> = HashMap::new();
@@ -710,9 +647,12 @@ fn 写字根表(路径: &Path, 字根图: &Path, 名称: &str) -> Result<usize, 
     }
 
     let mut 文 = 表头;
-    文.push_str(&format!("{}字根編碼提示\t/{}\n", 名称, 标记));
-    文.push_str(&format!("輸入對應大碼字母\t/{}\n", 标记));
-    let mut 条 = 2usize;
+    let mut 条 = 0usize;
+    for 行 in &标题 {
+        文.push_str(行);
+        文.push('\n');
+        条 += 1;
+    }
 
     let mut 大们: Vec<String> = 按大.keys().cloned().collect();
     大们.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
@@ -830,83 +770,141 @@ mod tests {
 
         std::fs::write(
             底包.join("starmoon_chaifen.dict.yaml"),
-            "---\nname: \"starmoon_chaifen\"\n...\n\n好\t[女子,LkUd,Lk-Ud,㊌hao,,CJK,597D]\n一\t[一,Odd,Od,㊌it,,CJK,4E00]\n打\t[打,Fss,Fs,㊌da,,CJK,6253]\n字\t[字,Lls,Ll,㊌zi,,CJK,5B57]\n",
+            "---
+name: \"starmoon_chaifen\"
+...
+
+好	[女子,LkUd,Lk-Ud,㊌hao,,CJK,597D]
+一	[一,Odd,Od,㊌it,,CJK,4E00]
+打	[打,Fss,Fs,㊌da,,CJK,6253]
+字	[字,Lls,Ll,㊌zi,,CJK,5B57]
+",
         ).unwrap();
         std::fs::write(
             底包.join("yuhao/starmoon.full.dict.yaml"),
-            "---\nname: \"starmoon.full\"\n...\n\n好\tludk\t100\n一\todd\t50\n打\tfss\t80\n字\tlll\t70\n",
+            "---
+name: \"starmoon.full\"
+...
+
+好	ludk	100
+一	odd	50
+打	fss	80
+字	lll	70
+",
         ).unwrap();
         std::fs::write(
             底包.join("yuhao/starmoon_sc.words.dict.yaml"),
-            "---\nname: \"starmoon_sc.words\"\n...\n\n打字\tfsll\n",
+            "---
+name: \"starmoon_sc.words\"
+...
+
+打字	fsll
+",
         ).unwrap();
         std::fs::write(
             底包.join("yuhao/starmoon_sc.quick.dict.yaml"),
-            "---\nname: \"starmoon_sc.quick\"\n...\n\n好\tl\n一\to\n",
+            "---
+name: \"starmoon_sc.quick\"
+...
+
+好	l
+一	o
+",
         ).unwrap();
         std::fs::write(
             底包.join("yuhao/starmoon_sc.short.dict.yaml"),
-            "---\nname: \"starmoon_sc.short\"\n...\n\n打字\tf\n",
+            "---
+name: \"starmoon_sc.short\"
+...
+
+打字	f
+",
         ).unwrap();
         std::fs::write(
             底包.join("yuhao/starmoon.roots.dict.yaml"),
-            "---\nname: \"starmoon.roots\"\n...\n\n星月字根編碼提示\t/dl\n",
+            "---
+name: \"starmoon.roots\"
+...
+
+星月字根編碼提示	/dl
+輸入對應大碼字母	/dl
+",
         ).unwrap();
-        std::fs::write(底包.join("starmoon_sc.dict.yaml"), "---\nname: \"starmoon_sc\"\n...\n").unwrap();
+        std::fs::write(底包.join("starmoon_sc.dict.yaml"), "---
+name: \"starmoon_sc\"
+...
+").unwrap();
         std::fs::write(
             底包.join("default.custom.yaml"),
-            "patch:\n  schema_list:\n    - {schema: starmoon_sc}\n",
+            "patch:
+  schema_list:
+    - {schema: starmoon_sc}
+",
         ).unwrap();
         std::fs::write(底包.join("yuhao.essay.txt"), "星月文本").unwrap();
 
         let 算码 = 目录.join("calc");
         std::fs::create_dir_all(&算码).unwrap();
-        std::fs::write(算码.join("roots.tsv"), "女\tLk\n子\tUd\n一\tOd\n打\tFs\n字\tLl\n").unwrap();
-        std::fs::write(算码.join("zigen-moling.csv"), "字形,键位,拼音\n女,Lk,nv\n").unwrap();
+        std::fs::write(算码.join("roots.tsv"), "女	Lk
+子	Ud
+一	Od
+打	Fs
+字	Ll
+").unwrap();
+        std::fs::write(算码.join("zigen-starmoon.csv"), "字形,键位,拼音
+女,Lk,nv
+").unwrap();
         let 拆分 = 目录.join("chaifen-all.txt");
-        std::fs::write(&拆分, "好\t女 子\t100\n一\t一\t50\n打\t打\t80\n字\t字\t70\n").unwrap();
+        std::fs::write(&拆分, "好	女 子	100
+一	一	50
+打	打	80
+字	字	70
+").unwrap();
 
         let 参 = 参数 {
             底包目录: 底包.to_string_lossy().to_string(),
             算码目录: 算码.to_string_lossy().to_string(),
             拆分文件: 拆分.to_string_lossy().to_string(),
             输出目录: 目录.join("out").to_string_lossy().to_string(),
-            标识: "moling".into(),
-            名称: "魔靈".into(),
-            源前缀: "starmoon".into(),
-            源名称: "星月".into(),
+            前缀: "starmoon".into(),
         };
         run(&参).unwrap();
 
         let 输出 = 目录.join("out");
-        assert!(输出.join("moling_chaifen.dict.yaml").is_file());
-        assert!(!输出.join("starmoon_chaifen.dict.yaml").exists());
+        // 文件名一律沿用底包
+        assert!(输出.join("starmoon_chaifen.dict.yaml").is_file(), "文件名不该改");
 
-        let 拆分文 = std::fs::read_to_string(输出.join("moling_chaifen.dict.yaml")).unwrap();
+        let 拆分文 = std::fs::read_to_string(输出.join("starmoon_chaifen.dict.yaml")).unwrap();
         assert!(
-            拆分文.contains("好\t[女子,ludk,Lk-Ud,㊌hao,,CJK,597D]"),
+            拆分文.contains("好	[女子,ludk,Lk-Ud,㊌hao,,CJK,597D]"),
             "拆分表应换码并保留注音等字段: {}",
             拆分文
         );
 
-        let 全码 = std::fs::read_to_string(输出.join("yuhao/moling.full.dict.yaml")).unwrap();
-        assert!(全码.contains("好\tludk\t100"), "{}", 全码);
-        assert!(全码.contains("一\todd\t50"), "{}", 全码);
+        let 全码 = std::fs::read_to_string(输出.join("yuhao/starmoon.full.dict.yaml")).unwrap();
+        assert!(全码.contains("好	ludk	100"), "{}", 全码);
+        assert!(全码.contains("一	odd	50"), "{}", 全码);
 
+        // 底包其余内容原样：schema 名、词表裸词、essay 文本都不该被动
         let 默认 = std::fs::read_to_string(输出.join("default.custom.yaml")).unwrap();
-        assert!(默认.contains("moling_sc"), "{}", 默认);
+        assert!(默认.contains("starmoon_sc"), "{}", 默认);
+        let 文本 = std::fs::read_to_string(输出.join("yuhao.essay.txt")).unwrap();
+        assert_eq!(文本, "星月文本", "底包文本不该被替换");
 
-        let 字根 = std::fs::read_to_string(输出.join("yuhao/moling.roots.dict.yaml")).unwrap();
-        assert!(字根.contains("魔靈字根編碼提示\t/dl"), "{}", 字根);
+        // 字根表标题沿用原文，只重生成数据
+        let 字根 = std::fs::read_to_string(输出.join("yuhao/starmoon.roots.dict.yaml")).unwrap();
+        assert!(字根.contains("星月字根編碼提示	/dl"), "{}", 字根);
+        assert!(字根.contains("輸入對應大碼字母	/dl"), "{}", 字根);
+        assert!(字根.contains("	/dlL"), "应按新码重生成分组: {}", 字根);
 
-        let 词 = std::fs::read_to_string(输出.join("yuhao/moling_sc.words.dict.yaml")).unwrap();
-        assert!(词.contains("打字\tfsll"), "词码应重算: {}", 词);
+        let 词 = std::fs::read_to_string(输出.join("yuhao/starmoon_sc.words.dict.yaml")).unwrap();
+        assert!(词.contains("打字	fsll"), "词码应重算: {}", 词);
 
-        let 快 = std::fs::read_to_string(输出.join("yuhao/moling_sc.quick.dict.yaml")).unwrap();
-        assert!(快.contains("好\tl"), "快码应保留档位: {}", 快);
+        let 快 = std::fs::read_to_string(输出.join("yuhao/starmoon_sc.quick.dict.yaml")).unwrap();
+        assert!(快.contains("好	l"), "快码应保留档位: {}", 快);
 
-        let 简 = std::fs::read_to_string(输出.join("yuhao/moling_sc.short.dict.yaml")).unwrap();
-        assert!(简.contains("打字\tf"), "简码应保留档位: {}", 简);
+        let 简 = std::fs::read_to_string(输出.join("yuhao/starmoon_sc.short.dict.yaml")).unwrap();
+        assert!(简.contains("打字	f"), "简码应保留档位: {}", 简);
 
         let _ = std::fs::remove_dir_all(&目录);
     }

@@ -256,14 +256,14 @@ enum Commands {
         author: String,
     },
 
-    /// 以现成 Rime 方案包为底包，只换单字码，产出新方案包（星月 → 魔灵）
+    /// 以星月方案包为底包，只把词典里的码换掉，其余（文件名/schema/lua/词表）原样沿用
     #[command(name = "rime-convert")]
     RimeConvert {
-        /// 底包目录（Rime 用户目录，含 <前缀>_chaifen.dict.yaml 与 yuhao/）
+        /// 底包目录（starmoon-ime 根目录，含 <前缀>_chaifen.dict.yaml 与 yuhao/）
         #[arg(long)]
         base: String,
 
-        /// 算码输出目录（含 roots.tsv 与 zigen-<标识>.csv）
+        /// 算码输出目录（含 roots.tsv 与 zigen-<前缀>.csv）
         #[arg(long)]
         output: String,
 
@@ -275,21 +275,9 @@ enum Commands {
         #[arg(long, default_value = "rime-out")]
         out: String,
 
-        /// 新方案标识（文件名前缀 + schema_id）
-        #[arg(long, default_value = "moling")]
-        id: String,
-
-        /// 新方案显示名
-        #[arg(long, default_value = "魔靈")]
-        name: String,
-
-        /// 底包的方案前缀
-        #[arg(long = "from-prefix", default_value = "starmoon")]
-        from_prefix: String,
-
-        /// 底包的方案显示名（正文替换用）
-        #[arg(long = "from-name", default_value = "星月")]
-        from_name: String,
+        /// 底包的方案前缀（同时用于 zigen-<前缀>.csv）
+        #[arg(long, default_value = "starmoon")]
+        prefix: String,
     },
 
     /// 整句准确率：逐单元首候选 + 连续码流解码，两个口径一起给
@@ -522,20 +510,14 @@ fn main() {
             output,
             chaifen,
             out,
-            id,
-            name,
-            from_prefix,
-            from_name,
+            prefix,
         }) => {
             let 参 = rime_convert::参数 {
                 底包目录: base,
                 算码目录: output,
                 拆分文件: chaifen,
                 输出目录: out,
-                标识: id,
-                名称: name,
-                源前缀: from_prefix,
-                源名称: from_name,
+                前缀: prefix,
             };
             if let Err(e) = rime_convert::run(&参) {
                 eprintln!("❌ {}", e);
