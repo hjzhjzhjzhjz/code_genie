@@ -257,13 +257,13 @@ enum Commands {
     /// 整句准确率：逐单元首候选 + 连续码流解码，两个口径一起给
     #[command(name = "sentence")]
     Sentence {
-        /// 全码词典（Rime dict.yaml，字 / 码 / 权重）
+        /// 全码词典（Rime dict.yaml 或 TSV：字 / 码 / 权重）
         #[arg(long)]
         full_dict: String,
-        /// 简码词典（可选，有就多算一个「简码优先」口径）
+        /// 简码词典（可选，有就多算一个「简码优先」口径；格式同上）
         #[arg(long)]
         short_dict: Option<String>,
-        /// 词组词典（可选）
+        /// 词组词典（可选；格式同上）
         #[arg(long)]
         words_dict: Option<String>,
         /// 语料文件，一行一句；也接受整段，按非汉字切开

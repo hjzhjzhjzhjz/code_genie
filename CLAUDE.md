@@ -69,7 +69,7 @@ cargo test --release
 | `bucket_store.rs` | 全码桶存储，按 `code_space` 阈值自适应密集/稀疏后端 |
 | `export_table.rs` | 测评码表导出；`取码序列` 实现星月 encoder 状态机（`export`/`pipeline` 共用） |
 | `rime_convert.rs` | 以星月方案包为底包，只重算 chaifen/full/words/quick/short/roots 六张表的码 |
-| `sentence.rs` | 整句准确率：逐单元首候选 + 连续码流解码；可调外部 librime 解码器 |
+| `sentence.rs` | 整句准确率：逐单元首候选 + 连续码流解码；词典吃 dict.yaml 或纯 TSV；可调外部 librime 解码器 |
 | `pipeline.rs` | 逐字取码推导表（Markdown）与字根归并对比 |
 | `diagnose.rs` | 批量诊断码表目录（重码、当量、分布、选重） |
 | `assess.rs` | 调 yuhao-assess 跑测评、出对比表、生成可导入网页版的方案档案 |

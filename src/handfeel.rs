@@ -116,15 +116,6 @@ impl 指位分布 {
     pub fn 行(&self, i: usize) -> f64 {
         self.各行[i]
     }
-
-    pub fn 空格值(&self) -> f64 {
-        self.空格
-    }
-
-    /// 拇指（空格）在总击键中的占比
-    pub fn 空格占比(&self) -> f64 {
-        自己占比(self.空格, self.合计() + self.空格)
-    }
 }
 
 fn 自己占比(部分: f64, 总: f64) -> f64 {

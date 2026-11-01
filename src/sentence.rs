@@ -11,8 +11,9 @@
 //   B 连续解码（把整句的码首尾相连，让解码器自己切）
 //     用词频做 Viterbi，衡量词组能不能帮忙、以及三码字会不会把对齐带歪。
 //
-// 两者都不依赖 librime：词典就是 Rime 的 dict.yaml，权重就是字频/词频，
-// 结果可复现，也不受外部库版本影响。
+// 两者默认都不依赖 librime：词典吃 Rime 的 dict.yaml，也吃纯 TSV
+// （`完整码表.txt` / `export` 的 `全码表.txt`），权重就是字频/词频，
+// 结果可复现，也不受外部库版本影响。给了 `--decoder` 才会调外部 librime 解码器。
 // =========================================================================
 
 use std::collections::HashMap;
@@ -50,19 +51,27 @@ fn 是汉字(c: char) -> bool {
         || (0x20000..=0x2A6DF).contains(&u)
 }
 
-/// 读 Rime dict.yaml：跳过头部，读「文本 码 权重」
+/// 读词典：`文本 <TAB> 码 [<TAB> 权重]`。
+///
+/// 两种输入都吃：
+/// - Rime `dict.yaml`：头部跳过，`...` 之后才是数据；
+/// - 纯 TSV（`完整码表.txt` / `export` 的 `全码表.txt`）：没有 `...` 头行，整文件当数据。
+///
+/// 无头行时，靠「必须含 TAB 且不以 `#` 开头」把 `---` / `name:` 之类的行滤掉。
 fn 读词典(路径: &Path) -> Vec<(String, String, u64)> {
     let Ok(文本) = std::fs::read_to_string(路径) else {
         eprintln!("⚠️ 读不了词典 {}", 路径.display());
         return Vec::new();
     };
+    let 行们: Vec<&str> = 文本.lines().collect();
+    // 有 `...` 头行 → 之后才是数据；没有 → 整文件当数据
+    let 起 = match 行们.iter().position(|l| l.trim() == "...") {
+        Some(i) => i + 1,
+        None => 0,
+    };
     let mut 出 = Vec::new();
-    let mut 开始 = false;
-    for 行 in 文本.lines() {
-        if !开始 {
-            if 行.trim() == "..." {
-                开始 = true;
-            }
+    for 行 in &行们[起..] {
+        if 行.starts_with('#') {
             continue;
         }
         let 列: Vec<&str> = 行.split('\t').collect();
@@ -539,5 +548,62 @@ pub fn run(参: &参数) {
             Ok(_) => println!("结果已写入 {}", 路径.display()),
             Err(e) => eprintln!("⚠️ 写不了结果: {}", e),
         }
+    }
+}
+
+// =========================================================================
+// 🧪 词典读取（Rime dict.yaml / 纯 TSV 双格式）
+// =========================================================================
+#[cfg(test)]
+mod 词典读取测试 {
+    use super::*;
+
+    fn 写临时文件(名: &str, 内容: &str) -> PathBuf {
+        let 目录 = std::env::temp_dir().join(format!("cg-sentence-{}", std::process::id()));
+        std::fs::create_dir_all(&目录).unwrap();
+        let 路径 = 目录.join(名);
+        std::fs::write(&路径, 内容).unwrap();
+        路径
+    }
+
+    #[test]
+    fn 跳过_yaml_头行只读_dot_dot_dot_之后() {
+        let p = 写临时文件(
+            "a.dict.yaml",
+            "---\nname: test\nversion: \"1\"\n...\n的\tfyek\t40529650\n一\todd\t18584230\n",
+        );
+        let 表 = 读词典(&p);
+        assert_eq!(表.len(), 2, "只应读到 `...` 之后的两行");
+        assert_eq!(表[0], ("的".to_string(), "fyek".to_string(), 40_529_650));
+        assert_eq!(表[1].1, "odd");
+    }
+
+    #[test]
+    fn 无头行时整文件当数据() {
+        // 模拟 `完整码表.txt`：没有 `...`，带一行注释
+        let p = 写临时文件(
+            "b.txt",
+            "# 简码在前\n到\tbi\t11505436\n的\tfyek\t40529650\n",
+        );
+        let 表 = 读词典(&p);
+        assert_eq!(表.len(), 2, "无 `...` 时应把整文件当数据");
+        assert_eq!(表[0].0, "到");
+        assert_eq!(表[1].1, "fyek");
+    }
+
+    #[test]
+    fn 缺权重列时默认一() {
+        let p = 写临时文件("c.txt", "的\tfyek\n");
+        let 表 = 读词典(&p);
+        assert_eq!(表.len(), 1);
+        assert_eq!(表[0].2, 1);
+    }
+
+    #[test]
+    fn 无制表符的行被忽略() {
+        let p = 写临时文件("d.txt", "---\nname: test\n的\tfyek\t7\n");
+        let 表 = 读词典(&p);
+        assert_eq!(表.len(), 1, "`---` / `name:` 这类行必须被滤掉");
+        assert_eq!(表[0].0, "的");
     }
 }

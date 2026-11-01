@@ -15,14 +15,13 @@
 use std::collections::HashMap;
 use std::fs;
 
-/// 码位标签：A=首码、S=次码、Y=末码（对应 keymap 里键位串的第 1/2/3 个字母）
+/// 码位标签：A=首码、S=次码（对应 keymap 里键位串的第 1/2 个字母）
+///
+/// 星月（yustar）规则不取末码，故没有 Y。
 #[derive(Clone, Copy)]
 pub(crate) enum 码位 {
     A,
     S,
-    /// 星月（yustar）规则不取末码；保留以便解释表格与将来切换规则时使用
-    #[allow(dead_code)]
-    Y,
 }
 
 impl 码位 {
@@ -30,7 +29,6 @@ impl 码位 {
         match self {
             码位::A => 0,
             码位::S => 1,
-            码位::Y => 2,
         }
     }
 }

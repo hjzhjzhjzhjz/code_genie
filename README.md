@@ -36,7 +36,7 @@ cargo build --release
 | `chart` | 生成字根键位图（HTML） | `code_genie chart --keymap 字根键位表.txt` |
 | `assess` | 宇浩测评对比 + 方案档案 | `code_genie assess --dir runs --yuhao-dir yuhao-assess` |
 | `rime-convert` | 以星月方案包为底包只换码 | `code_genie rime-convert --base <星月底包> --output <算码目录> --chaifen chaifen-all.txt` |
-| `sentence` | 整句准确率（逐单元 + 连续码流） | `code_genie sentence --full-dict pkg.full.dict.yaml --corpus 语料.txt` |
+| `sentence` | 整句准确率（逐单元 + 连续码流）；词典吃 dict.yaml 或 TSV | `code_genie sentence --full-dict 完整码表.txt --corpus 语料.txt` |
 | `pipeline` | 逐字取码推导表（Markdown） | `code_genie pipeline --keymap 字根键位表.txt --chaifen chaifen-all.txt --top 5` |
 | `merge` | 字根归并对比 | `code_genie merge --keymap 字根键位表.txt --chaifen chaifen-all.txt --rules "还=人"` |
 | `diagnose` | 批量诊断码表目录 | `code_genie diagnose --dir runs` |
