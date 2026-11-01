@@ -1186,6 +1186,10 @@ pub fn simulated_annealing_resumable(
     let swap_prob_base = cfg.annealing.swap_probability;
     // 舒适区温度（绝对值）：温度自动标定后，舒适区按 `comfort_ratio × t_start` 换算
     let comfort_abs = cfg.annealing.temp_start * cfg.annealing.comfort_ratio;
+    // 低温扰动参数（此前硬编码 0.01 / 2.0 / 10，现由配置驱动）
+    let perturb_trigger_temp = comfort_abs * cfg.annealing.perturb_trigger_temp_ratio;
+    let perturb_temp_mult = cfg.annealing.perturb_temp_multiplier;
+    let perturb_pairs_limit = cfg.annealing.perturb_collision_pairs_limit;
 
     // 冲突导向算子状态（仅在启用时维护；关闭时零开销且不消耗额外随机数，保持 RNG 序列与原实现一致）
     let conflict_prob = cfg.annealing.conflict_probability;
@@ -1548,13 +1552,13 @@ pub fn simulated_annealing_resumable(
         }
 
         // 智能低温扰动
-        if perturb_interval > 0 && step > 0 && step % perturb_interval == 0 && base_temp < comfort_abs * 0.01 {
+        if perturb_interval > 0 && step > 0 && step % perturb_interval == 0 && base_temp < perturb_trigger_temp {
             let collisions = find_collision_groups(ctx, &assignment, false);
             let n_perturb = (n_groups as f64 * cfg.annealing.perturb_strength) as usize;
             
             if !collisions.is_empty() {
                 let mut perturbed_groups: HashSet<usize> = HashSet::new();
-                for (g1, g2, _) in collisions.iter().take(10) {
+                for (g1, g2, _) in collisions.iter().take(perturb_pairs_limit) {
                     perturbed_groups.insert(*g1);
                     perturbed_groups.insert(*g2);
                 }
@@ -1563,7 +1567,7 @@ pub fn simulated_annealing_resumable(
                     let allowed = &ctx.groups[gi].allowed_keys;
                     if allowed.len() > 1 {
                         let new_k = allowed[rng.gen_range(0..allowed.len())];
-                        evaluator.try_move(ctx, &mut assignment, gi, new_k, temp * 2.0, &mut rng);
+                        evaluator.try_move(ctx, &mut assignment, gi, new_k, temp * perturb_temp_mult, &mut rng);
                     }
                 }
             } else {
@@ -1576,7 +1580,7 @@ pub fn simulated_annealing_resumable(
                         let can = ctx.groups[r1].allowed_keys.contains(&kb)
                             && ctx.groups[r2].allowed_keys.contains(&ka);
                         if can {
-                            evaluator.try_swap(ctx, &mut assignment, r1, r2, temp * 2.0, &mut rng);
+                            evaluator.try_swap(ctx, &mut assignment, r1, r2, temp * perturb_temp_mult, &mut rng);
                         }
                     }
                 }

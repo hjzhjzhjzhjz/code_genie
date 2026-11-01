@@ -150,6 +150,15 @@ pub struct AnnealingConfig {
     pub min_improve_steps_ratio: f64,
     pub perturb_interval_ratio: f64,
     pub perturb_strength: f64,
+    /// 低温扰动触发阈值：`base_temp < 舒适区温度 × 本比例` 时触发。缺省 0.01。
+    #[serde(default = "default_perturb_trigger_temp_ratio")]
+    pub perturb_trigger_temp_ratio: f64,
+    /// 扰动时临时把温度乘以本倍率（更容易接受上坡）。缺省 2.0。
+    #[serde(default = "default_perturb_temp_multiplier")]
+    pub perturb_temp_multiplier: f64,
+    /// 扰动时优先采样冲突对的上限。缺省 10。
+    #[serde(default = "default_perturb_collision_pairs_limit")]
+    pub perturb_collision_pairs_limit: usize,
     pub reheat_factor: f64,
     pub max_parts: usize,
 
@@ -184,6 +193,9 @@ fn default_checkpoint_interval_ratio() -> f64 { 0.05 }
 fn default_temp_start() -> f64 { 1.0 }
 fn default_temp_end() -> f64 { 1e-6 }
 fn default_comfort_ratio() -> f64 { 0.1 }
+fn default_perturb_trigger_temp_ratio() -> f64 { 0.01 }
+fn default_perturb_temp_multiplier() -> f64 { 2.0 }
+fn default_perturb_collision_pairs_limit() -> usize { 10 }
 fn default_full_key_swap_probability() -> f64 { 0.01 }
 
 /// 全码目标配置（对应 [targets.full_code] 段）
@@ -730,6 +742,9 @@ impl Default for Config {
                 min_improve_steps_ratio: 0.1,
                 perturb_interval_ratio: 0.05,
                 perturb_strength: 0.15,
+                perturb_trigger_temp_ratio: default_perturb_trigger_temp_ratio(),
+                perturb_temp_multiplier: default_perturb_temp_multiplier(),
+                perturb_collision_pairs_limit: default_perturb_collision_pairs_limit(),
                 reheat_factor: 1.25,
                 max_parts: 3,
                 conflict_probability: 0.0,

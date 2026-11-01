@@ -198,7 +198,10 @@ fn 连续解码(
     (文本, 单元)
 }
 
-#[allow(dead_code)]
+/// 批量调外部解码器（librime CLI）：一次性把全部句子写进 stdin，按行取回解码结果。
+///
+/// 每句起一个进程代价太大，所以整批走一次；返回行数由调用方核对，
+/// 不足/超出都视为失败并回退内置 Viterbi。
 fn 起解码器(
     程序: &Path,
     共享: &Path,
@@ -303,6 +306,54 @@ pub fn run(参: &参数) {
         return;
     }
 
+    // ---- 外部解码器（可选，一次批量喂完，避免每句起一个进程）----
+    // librime CLI 吃的是**码流**（一行一条），所以先把每句编码好再整批送进去；
+    // 失败或行数不匹配则告警并回退内置 Viterbi。
+    // 切句时已保证每个字都在字码表里，故这里取码不会落空。
+    let 码流们: Vec<String> = 句们
+        .iter()
+        .map(|句| {
+            let mut s = String::new();
+            for c in 句.chars() {
+                if let Some(全) = 字码.get(&c) {
+                    s.push_str(全);
+                }
+            }
+            s
+        })
+        .collect();
+
+    let 外部解出: Option<Vec<String>> = match &参.解码器 {
+        Some(程序) => {
+            match 起解码器(
+                程序,
+                &参.共享目录,
+                &参.用户目录,
+                &参.方案,
+                &码流们,
+                参.详细,
+            ) {
+                Ok(v) if v.len() == 码流们.len() => {
+                    println!("🔌 外部解码器: {}（{} 句）", 程序.display(), v.len());
+                    Some(v)
+                }
+                Ok(v) => {
+                    eprintln!(
+                        "⚠️ 外部解码器返回 {} 行，与 {} 句不匹配，回退内置解码",
+                        v.len(),
+                        码流们.len()
+                    );
+                    None
+                }
+                Err(e) => {
+                    eprintln!("⚠️ 外部解码器启动失败（{}），回退内置解码", e);
+                    None
+                }
+            }
+        }
+        None => None,
+    };
+
     let 首 = |表: &HashMap<String, Vec<条目>>, 码: &str| -> String {
         表.get(码)
             .and_then(|v| v.first())
@@ -327,17 +378,14 @@ pub fn run(参: &参数) {
     let mut 连距离 = 0usize;
     let mut 连切分错 = 0usize;
 
-    for 句 in &句们 {
+    for (序号, 句) in 句们.iter().enumerate() {
         let mut 本句全效 = true;
         let mut 本句简效 = true;
-        let mut 码流 = String::new();
 
         for c in 句.chars() {
             let 全 = &字码[&c];
-            let _ = 全;
             单元总数 += 1;
             全击键 += 全.chars().count();
-            码流.push_str(全);
 
             let 全首选 = 首(&合表, 全);
             if 全首选 == c.to_string() {
@@ -394,9 +442,9 @@ pub fn run(参: &参数) {
         }
 
         // B
-        let (解出, _) = match &参.解码器 {
-            Some(_) => (String::new(), 0),
-            None => 连续解码(&码流, &码表),
+        let 解出: String = match &外部解出 {
+            Some(v) => v[序号].clone(),
+            None => 连续解码(&码流们[序号], &码表).0,
         };
         let a: Vec<char> = 句.chars().collect();
         let b: Vec<char> = 解出.chars().collect();
@@ -447,7 +495,10 @@ pub fn run(参: &参数) {
         率(简单元数, 单元总数)
     ));
 
-    md.push_str("\n### B 连续解码（整句码流首尾相连，按词频自己切）\n\n");
+    match &外部解出 {
+        Some(_) => md.push_str("\n### B 连续解码（外部解码器 librime）\n\n"),
+        None => md.push_str("\n### B 连续解码（整句码流首尾相连，按词频自己切）\n\n"),
+    }
     md.push_str("| 指标 | 值 |\n|---|---:|\n");
     md.push_str(&format!(
         "| 整句准确率 | **{:.2}%**（{} / {}） |\n",
