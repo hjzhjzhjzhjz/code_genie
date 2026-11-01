@@ -8,9 +8,10 @@
 [files]
 fixed = "input-fixed.txt"        # 固定字根文件
 dynamic = "input-roots.txt"      # 动态字根文件
-splits = "input-division.txt"    # 拆分表文件
-full_splits = ""                 # 全量拆分表（可选）：优化只喂常用字时，用它另出覆盖全部字的 完整码表.txt
-                                 # 例：full_splits = "chaifen-all.txt"
+splits = "input-division.txt"    # 拆分表文件（优化用，通常只含常用字）
+full_splits = ""                 # 全量拆分表（可选）：留空则自动找 chaifen-all.txt（与 splits 同目录 / 当前目录 / moling/）
+                                 # 找到就用它另出一份覆盖全部字的 完整码表.txt；显式指定则只认这里
+                                 # 例：full_splits = "moling/chaifen-all.txt"
 pair_equiv = "pair_equivalence.txt"  # 字根对当量文件
 key_dist = "key_distribution.txt"    # 用指分布文件
 
