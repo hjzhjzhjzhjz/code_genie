@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::fs;
 
-use crate::types::{char_to_key_index, KeyDistConfig, RootGroup, EQUIV_TABLE_SIZE, KEY_SPACE};
+use crate::types::{char_to_key_index, KeyDistConfig, RootGroup, EQUIV_TABLE_SIZE};
 
 /// 加载固定字根和受限字根组
 /// 

@@ -142,15 +142,13 @@ enum Backend<B: Bucket> {
 }
 
 /// 统一桶存储：对调用方屏蔽密集/稀疏后端（需求 5.5）。
-#[allow(dead_code)] // capacity/kind 字段及若干访问器仅供日志/测试与 API 完整性
 pub struct BucketStore<B: Bucket> {
     backend: Backend<B>,
-    capacity: usize,
     kind: BackendKind,
 }
 
 impl<B: Bucket> BucketStore<B> {
-    #![allow(dead_code)] // 部分访问器（backend_kind/capacity/nonempty_count/get_or_default）仅测试/日志用
+    #![allow(dead_code)] // backend_kind/nonempty_count 等访问器仅测试/日志用
     /// 按默认判据构建（需求 5.1-5.4）。
     ///
     /// `n_chars` 参与后端选择：稀疏后端的非空桶数恒 ≤ 它，故「大容量 + 少字数」应走稀疏
@@ -180,11 +178,7 @@ impl<B: Bucket> BucketStore<B> {
             BackendKind::Dense => Backend::Dense(vec![B::default(); capacity]),
             BackendKind::Sparse => Backend::Sparse(FxHashMap::default()),
         };
-        Self {
-            backend,
-            capacity,
-            kind,
-        }
+        Self { backend, kind }
     }
 
     /// 所选后端类型（日志/测试用）。
@@ -204,12 +198,6 @@ impl<B: Bucket> BucketStore<B> {
         if let Backend::Sparse(m) = &mut self.backend {
             m.reserve(n);
         }
-    }
-
-    /// 容量上界。
-    #[inline]
-    pub fn capacity(&self) -> usize {
-        self.capacity
     }
 
     /// 只读取非空桶；空桶（密集空槽或稀疏缺失键）返回 `None`（需求 2.4）。

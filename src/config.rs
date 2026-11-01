@@ -162,7 +162,6 @@ pub struct AnnealingConfig {
     #[serde(default = "default_perturb_collision_pairs_limit")]
     pub perturb_collision_pairs_limit: usize,
     pub reheat_factor: f64,
-    pub max_parts: usize,
 
     /// 冲突导向移动的执行概率（0.0~1.0），0.0 表示关闭本特性
     #[serde(default = "default_conflict_probability")]
@@ -748,7 +747,6 @@ impl Default for Config {
                 perturb_temp_multiplier: default_perturb_temp_multiplier(),
                 perturb_collision_pairs_limit: default_perturb_collision_pairs_limit(),
                 reheat_factor: 1.25,
-                max_parts: 3,
                 conflict_probability: 0.0,
                 conflict_refresh_interval: 1000,
                 conflict_sample_window: 20,
@@ -905,7 +903,6 @@ min_improve_steps_ratio = 0.1
 perturb_interval_ratio = 0.0
 perturb_strength = 0.0
 reheat_factor = 1.0
-max_parts = 3
 
 [scale]
 collision_count = 0.001
@@ -980,7 +977,6 @@ min_improve_steps_ratio = 0.1
 perturb_interval_ratio = 0.0
 perturb_strength = 0.0
 reheat_factor = 1.0
-max_parts = 3
 "#;
         let cfg: Config = toml::from_str(toml_str).expect("解析失败");
         assert!(cfg.scale.is_none(), "缺失 [scale] 段时应为 None");
@@ -1035,7 +1031,6 @@ min_improve_steps_ratio = 0.1
 perturb_interval_ratio = 0.0
 perturb_strength = 0.0
 reheat_factor = 1.0
-max_parts = 3
 "#
     }
 

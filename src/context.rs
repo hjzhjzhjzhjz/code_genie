@@ -9,7 +9,7 @@ use rustc_hash::FxHashMap;
 use crate::types::{
     build_root_full_codes, char_to_key_index, key_to_char, CharInfo, CharSimpleInfo,
     compute_level_instructions, extract_logical_roots_full, pow_base, try_resolve_rule,
-    FixedSimpleCode, KeyDistConfig, LogicalRoot, RootGroup, ScaleConfig, SimpleAssignMode,
+    FixedSimpleCode, KeyDistConfig, RootGroup, ScaleConfig, SimpleAssignMode,
     SimpleCodeConfig, WeightConfig, KEY_SPACE, EQUIV_TABLE_SIZE, GROUP_MARKER,
 };
 use crate::config::TargetsConfig;
@@ -65,12 +65,8 @@ pub struct OptContext {
     pub char_simple_infos: Vec<CharSimpleInfo>,
     /// 每个组影响的简码汉字集合
     pub group_to_simple_affected: Vec<HashSet<usize>>,
-    /// 根名的完整编码映射
-    pub root_full_codes: HashMap<String, Vec<String>>,
     /// 每个组的加权频率总和（用于 key_weighted_usage 的 O(1) 更新）
     pub group_freq_sum: Vec<f64>,
-    /// code_base 的幂次表（code_base_powers[i] = code_base^i），用于增量编码计算
-    pub code_base_powers: Vec<usize>,
     /// 目标配置（用于目标偏差评分和 _max 硬约束检查）
     pub targets_config: TargetsConfig,
 
@@ -320,12 +316,6 @@ impl OptContext {
                     group_freq_sum[gi] += freq_f;
                 }
             }
-        }
-
-        // 预计算 code_base 的幂次表
-        let mut code_base_powers = vec![1usize; max_parts + 1];
-        for i in 1..=max_parts {
-            code_base_powers[i] = code_base_powers[i - 1] * code_base;
         }
 
         // ====================================================================
@@ -689,9 +679,7 @@ impl OptContext {
             simple_config,
             char_simple_infos,
             group_to_simple_affected,
-            root_full_codes,
             group_freq_sum,
-            code_base_powers,
             targets_config,
             simple_candidate_chars,
             simple_is_candidate,

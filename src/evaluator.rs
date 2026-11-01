@@ -1957,8 +1957,6 @@ pub struct Evaluator {
 
     /// 键位加权使用统计
     pub key_weighted_usage: [f64; EQUIV_TABLE_SIZE],
-    /// 总键击次数
-    pub total_key_presses: f64,
 
     /// 总频率
     pub total_frequency: u64,
@@ -2163,7 +2161,6 @@ impl Evaluator {
             total_equiv_sq_weighted,
             equiv_frequency,
             key_weighted_usage,
-            total_key_presses,
             total_frequency: ctx.total_frequency,
             inv_total_frequency: inv_tf,
             inv_total_key_presses: inv_tkp,
@@ -2215,22 +2212,6 @@ impl Evaluator {
             }
         }
         max_f
-    }
-
-    /// 计算桶的重码频率（仅用于 SimpleEvaluator 等非热路径）
-    #[inline]
-    fn bucket_cf_static(ctx: &OptContext, chars: &[usize]) -> u64 {
-        debug_assert!(chars.len() >= 2);
-        let mut total = 0u64;
-        let mut max_f = 0u64;
-        for &ci in chars {
-            let f = ctx.char_infos[ci].frequency;
-            total += f;
-            if f > max_f {
-                max_f = f;
-            }
-        }
-        total - max_f
     }
 
     /// 更新单个汉字的编码（增量更新碰撞计数）
@@ -6455,17 +6436,6 @@ mod fixed_simple_code_tests {
     // ---------------------------------------------------------------------
     // 任务 15.1：级别归属、一致性（21.6）与长度（22.3）校验 —— 确定性单元测试
     // ---------------------------------------------------------------------
-
-    /// 用给定 space 配置与单条固定简码构建 ctx，返回接受的固定简码条数。
-    fn count_accepted(space: [bool; 3], ch_idx: usize, code: &str, n_roots: usize) -> usize {
-        // 单个汉字、n_roots 个根，频率 100
-        let specs = vec![(100u64, n_roots)];
-        let _ = ch_idx; // 仅一个字，索引恒 0
-        let ch = char::from_u32(0x4e00).unwrap();
-        let fixed = vec![(ch, code.to_string())];
-        let ctx = make_ctx_fixed(&specs, SimpleAssignMode::Efficiency, 1, 1.0, space, &fixed);
-        ctx.simple_fixed_codes.len()
-    }
 
     #[test]
     fn fixed_code_level_assignment_by_core_length() {

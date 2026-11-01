@@ -165,7 +165,6 @@ perturb_trigger_temp_ratio = 0.01  # 扰动触发阈值 = 舒适区温度 × 本
 perturb_temp_multiplier = 2.0      # 扰动时温度倍率
 perturb_collision_pairs_limit = 10 # 扰动优先采样的冲突对上限
 reheat_factor = 1.3            # 重热倍率（1.0=关闭）
-max_parts = 3                  # 最大码长
 conflict_probability = 0.25    # 冲突导向算子概率（0=关闭）
 full_key_swap_probability = 0.01   # 整键互换算子概率（0=关闭）
 checkpoint_interval_ratio = 0.05   # checkpoint 间隔（占 total_steps 比例）
