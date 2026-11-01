@@ -111,7 +111,10 @@ cargo test --release
 
 **SA 主循环** (`simulated_annealing_resumable`):
 - **自动调温**：进入主循环前按初态采样 100 次随机单组移动估 `Δ̄`，闭式给出
-  `t_start = Δ̄ / ln(1/0.98)`、`t_end = Δ̄ / ln(1/0.02)`；温度随权重/scale 自动标定，配置里不再写死
+  `t_start = Δ̄ / ln(1/0.98)`、`t_end = Δ̄ / ln(1/0.02)` —— 温度随权重/scale 自动标定，配置里不写死
+- **舒适区位置**：配置给的是 `comfort_progress`（曲线上的位置 0~1，默认 0.5 = 正中），
+  `annealing::舒适区温度()` 按 `T(p) = t_start·(t_end/t_start)^p` 换算成温度。
+  用进度而非温度比例，是因为温度随尺度变、进度不变，且「曲线走到几成」能直接看懂
 - 按 `swap_probability`（随时间线性增长）选择 swap 或 move 操作
 - 邻域算子：冲突导向（`conflict_probability`）、整键互换（`full_key_swap_probability`）、
   三路交换、键位重组、智能扰动（`perturb_*`）
@@ -151,7 +154,7 @@ key_dist = "key_distribution.txt"      # 用指分布目标
 threads = 12              # 并行线程数
 total_steps = 2000000     # 总迭代步数
 # 温度不手工配置：运行时按初态采样 |Δscore| 自动标定 t_start / t_end
-comfort_ratio = 0.1       # 舒适区温度 = comfort_ratio × t_start
+comfort_progress = 0.5   # 舒适区在降温曲线上的位置（0~1）：0.5 = 曲线正中
 comfort_width = 0.15      # 舒适区宽度（高斯 sigma）
 comfort_slowdown = 0.7    # 舒适区减速因子 (0-1)
 swap_probability = 0.35   # 交换操作概率

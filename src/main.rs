@@ -727,7 +727,12 @@ fn run_bench(cfg: &Config, iters: usize, steps: usize) {
         let dt = t.elapsed().as_secs_f64();
         match r {
             Some((t0, t1)) => {
-                println!("  [auto_temp]     {:>10.2} ms/次  → t_start={:.3e}, t_end={:.3e}", dt * 1e3, t0, t1);
+                println!(
+                    "  [auto_temp]     {:>10.2} ms/次  → t_start={:.3e}, t_end={:.3e}",
+                    dt * 1e3,
+                    t0,
+                    t1
+                );
                 Some((t0, t1))
             }
             None => {
@@ -1763,20 +1768,26 @@ fn run_optimize(
     // 桶存储后端选择日志（需求 12）：单线程、配置确认阶段输出一次。
     evaluator::log_bucket_backends(&ctx);
 
-    // === 自动调温：按初态采样 |Δscore| 标定 t_start/t_end ===
-    // 温度不写死在配置里（写死会与评分尺度错配），每次运行按当前权重/scale 现算。
+    // === 自动调温：按初态采样的带符号 Δscore 标定 t_start / t_end / 舒适区位置 ===
+    // 温度与舒适区都不写死在配置里（写死会与评分尺度错配），每次运行按当前权重/scale 现算。
     let sa_cfg = {
         let mut c = cfg.clone();
         let init = annealing::deterministic_init(&ctx, cfg);
         let mut rng = rand::thread_rng();
         match auto_temperature(&ctx, &init, &mut rng) {
             Some((t0, t1)) => {
-                println!("🌡️ 自动调温: t_start={:.6e}, t_end={:.6e}", t0, t1);
                 c.annealing.temp_start = t0;
                 c.annealing.temp_end = t1;
+                println!(
+                    "🌡️ 自动调温: t_start={:.6e}, t_end={:.6e}, 舒适区={:.6e}（曲线位置 {:.2}）",
+                    t0,
+                    t1,
+                    annealing::舒适区温度(&c),
+                    c.annealing.comfort_progress
+                );
             }
             None => eprintln!(
-                "⚠️ 自动调温采样失败（无合法移动或 Δscore 恒为 0），回退到兜底温度 {:.6e}/{:.6e}",
+                "⚠️ 自动调温采样失败（无合法移动或 Δscore 恒为 0），回退到兜底值 t_start={:.6e} / t_end={:.6e}",
                 c.annealing.temp_start, c.annealing.temp_end
             ),
         }
@@ -1811,7 +1822,8 @@ fn run_optimize(
             num_threads: cfg.annealing.threads,
             temp_start: sa_cfg.annealing.temp_start,
             temp_end: sa_cfg.annealing.temp_end,
-            comfort_temp: sa_cfg.annealing.temp_start * cfg.annealing.comfort_ratio,
+            // 舒适区温度存**绝对值**：由进度换算而来，落盘后 resume 才能原样还原
+            comfort_temp: annealing::舒适区温度(&sa_cfg),
         };
         if let Err(e) = checkpoint::save_meta(&meta, &ckpt_dir) {
             eprintln!("⚠️ 写 checkpoint 元信息失败: {}", e);
@@ -2316,10 +2328,17 @@ fn run_resume(dir: &str) {
     }
     println!("💡 提示: 按 Ctrl-C 可暂停并保存检查点");
 
-    // 复用首轮（可能自动标定的）温度：以 checkpoint meta 为权威，避免续算温度口径漂移。
+    // 复用首轮（可能自动标定的）温度与舒适区：以 checkpoint meta 为权威，避免续算口径漂移。
     let mut sa_cfg = cfg.clone();
     sa_cfg.annealing.temp_start = meta.temp_start;
     sa_cfg.annealing.temp_end = meta.temp_end;
+    // 舒适区也按 meta 的绝对温度反解回「曲线位置」：p = ln(Tc/Ts) / ln(Te/Ts)。
+    // 旧检查点若 comfort_temp 缺失/为 0，则沿用配置的 comfort_progress。
+    if meta.comfort_temp > 0.0 && meta.temp_start > meta.temp_end && meta.temp_end > 0.0 {
+        let p = (meta.comfort_temp / meta.temp_start).ln()
+            / (meta.temp_end / meta.temp_start).ln();
+        sa_cfg.annealing.comfort_progress = p.clamp(0.0, 1.0);
+    }
 
     let interval = annealing::checkpoint_interval(
         cfg.annealing.total_steps,

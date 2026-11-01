@@ -106,15 +106,17 @@ pub fn calibrate_scales(
     }
 }
 
-/// 自动标定退火温度（参考 libchai 的「调参」思想，但用闭式估计，免试跑搜索）。
+/// 自动标定退火温度（参考 libchai 的「调参」思想，用闭式估计，免试跑搜索）。
 ///
 /// 做法：在初态上采样若干「随机单组移动」，估计平均 |Δscore|，再用 Metropolis 关系
 /// `exp(-Δ/T)=p` 反解温度：
 /// - `t_start = Δ̄ / ln(1/0.98)` ≈ 49.5·Δ̄（初温接受率≈0.98，充分探索）；
 /// - `t_end   = Δ̄ / ln(1/0.02)` ≈ 0.256·Δ̄（末温接受率≈0.02，趋于贪心）。
 ///
-/// 这样温度随权重/scale 自动标定，不再写死。采样失败（无合法移动/Δ̄≈0）返回 `None`，
-/// 由调用方回退到配置温度。
+/// 舒适区**不在这里定**：它由 `annealing.comfort_progress`（曲线上的位置 0~1）
+/// 直接给出，`annealing::舒适区温度` 再按几何降温曲线换算成温度。
+///
+/// 采样失败（无合法移动/Δ̄≈0）返回 `None`，由调用方回退到配置温度。
 pub fn auto_temperature(
     ctx: &OptContext,
     init: &[u8],
@@ -144,8 +146,7 @@ pub fn auto_temperature(
         let mut trial = init.to_vec();
         trial[gi] = new;
         let mut ev = Evaluator::new_full_only(ctx, &trial);
-        let s = ev.get_score(ctx);
-        sum += (s - base).abs();
+        sum += (ev.get_score(ctx) - base).abs();
         cnt += 1;
     }
     if cnt == 0 {

@@ -23,7 +23,7 @@ threads = 12             # 并行线程数
 total_steps = 2000000    # 总迭代步数
 # 温度不再手工配置：每次运行按初态采样 |Δscore| 自动标定 t_start / t_end，
 # 使温度随权重与 scale 走（写死会与评分尺度错配）。启动时会打印实际温度。
-comfort_ratio = 0.1     # 舒适区温度 = 0.1 × t_start（t_start 运行时自动标定）
+comfort_progress = 0.5   # 舒适区在降温曲线上的位置（0~1）：0.5 = 曲线正中，探索/收敛各占一半
 comfort_width = 0.15     # 舒适区宽度
 comfort_slowdown = 0.7   # 舒适区减速因子
 swap_probability = 0.35  # 交换操作概率

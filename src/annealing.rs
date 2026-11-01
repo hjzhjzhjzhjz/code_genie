@@ -989,6 +989,21 @@ pub fn simulated_annealing(
     (r.assignment, r.score, r.metrics, r.simple_metrics)
 }
 
+/// 舒适区温度（绝对值）：配置里给的是「降温曲线上的位置」`comfort_progress`（0~1），
+/// 这里按几何降温曲线换算成温度 `T(p) = t_start · (t_end/t_start)^p`。
+///
+/// 用进度而不是温度比例表达，是因为温度本身随评分尺度变（自动标定），
+/// 而「减速带落在曲线的第几成」是尺度无关、且能直接看懂/直接调的。
+pub(crate) fn 舒适区温度(cfg: &Config) -> f64 {
+    let ts = cfg.annealing.temp_start;
+    let te = cfg.annealing.temp_end;
+    if !(ts > 0.0) || !(te > 0.0) {
+        return ts;
+    }
+    let p = cfg.annealing.comfort_progress.clamp(0.0, 1.0);
+    ts * (te / ts).powf(p)
+}
+
 /// 可断点续算的模拟退火主循环。
 ///
 /// - `stop_flag`：Ctrl-C 共享停止标志，置位时线程写出最新 checkpoint 并提前返回（`interrupted=true`）。
@@ -1119,7 +1134,7 @@ pub fn simulated_annealing_resumable(
     let schedule = TemperatureSchedule::build(
         cfg.annealing.temp_start,
         cfg.annealing.temp_end,
-        cfg.annealing.temp_start * cfg.annealing.comfort_ratio,
+        舒适区温度(cfg),
         cfg.annealing.comfort_width,
         cfg.annealing.comfort_slowdown,
     );
@@ -1132,9 +1147,9 @@ pub fn simulated_annealing_resumable(
         if simple_enabled {
             let ts = cfg.annealing.temp_start;
             let te = cfg.annealing.temp_end;
-            let ct = cfg.annealing.temp_start * cfg.annealing.comfort_ratio;
+            let ct = 舒适区温度(cfg);
             let cw = cfg.annealing.comfort_width;
-            // 舒适区进度 comfort_progress = ln((comfort_ratio·t_start)/t_start)/ln(t_end/t_start)
+            // 舒适区进度 comfort_progress 由配置直接给出（0~1）
             let comfort_progress = if ts <= te || ct >= ts {
                 0.0
             } else if ct <= te {
@@ -1157,7 +1172,7 @@ pub fn simulated_annealing_resumable(
                 }
             }
 
-            // (2) 激活点过晚：p_start 越过舒适区中心（基温 < comfort_ratio×t_start），简码优化空间有限（需求 27.5）。
+            // (2) 激活点过晚：p_start 越过舒适区中心（基温 < 舒适区温度），简码优化空间有限（需求 27.5）。
             if p_start > comfort_progress {
                 let lo = (comfort_progress - cw).max(0.0);
                 let rec = (comfort_progress - cw / 2.0).max(0.0);
@@ -1184,8 +1199,8 @@ pub fn simulated_annealing_resumable(
     let perturb_interval = cfg.perturb_interval();
 
     let swap_prob_base = cfg.annealing.swap_probability;
-    // 舒适区温度（绝对值）：温度自动标定后，舒适区按 `comfort_ratio × t_start` 换算
-    let comfort_abs = cfg.annealing.temp_start * cfg.annealing.comfort_ratio;
+    // 舒适区温度（绝对值）：由 `comfort_progress` 按降温曲线换算
+    let comfort_abs = 舒适区温度(cfg);
     // 低温扰动参数（此前硬编码 0.01 / 2.0 / 10，现由配置驱动）
     let perturb_trigger_temp = comfort_abs * cfg.annealing.perturb_trigger_temp_ratio;
     let perturb_temp_mult = cfg.annealing.perturb_temp_multiplier;

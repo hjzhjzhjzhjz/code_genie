@@ -70,7 +70,7 @@ full_splits = "moling/chaifen-all.txt" # 全量拆分表（手动指定；留空
 threads = 12
 total_steps = 2000000
 # 温度不手工配置：运行时按初态 |Δscore| 自动标定 t_start / t_end
-comfort_ratio = 0.1        # 舒适区温度 = 0.1 × t_start
+comfort_progress = 0.5   # 舒适区在降温曲线上的位置（0~1）：0.5 = 曲线正中
 comfort_width = 0.15       # 舒适区宽度
 comfort_slowdown = 0.7     # 舒适区减速因子
 swap_probability = 0.35

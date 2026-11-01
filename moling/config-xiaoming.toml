@@ -18,7 +18,7 @@ key_dist = "key_distribution-xiaoming.txt"    # 用指分布文件
 [annealing]
 threads = 8              # 并行线程数（摸底轮）
 total_steps = 20000000   # 总迭代步数（与第 13 轮相同，只把静重目标放到 110）
-comfort_ratio = 0.1     # 舒适区温度 = 0.1 × t_start（t_start 运行时自动标定）
+comfort_progress = 0.5   # 舒适区在降温曲线上的位置（0~1）：0.5 = 曲线正中，探索/收敛各占一半
 comfort_width = 0.18     # 舒适区宽度
 comfort_slowdown = 0.55  # 舒适区减速因子
 swap_probability = 0.60  # 交换操作概率（速度取决于键对，提高交换占比）

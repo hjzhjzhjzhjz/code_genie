@@ -140,10 +140,12 @@ pub struct AnnealingConfig {
     pub temp_start: f64,
     #[serde(default = "default_temp_end")]
     pub temp_end: f64,
-    /// 舒适区温度 = `comfort_ratio × t_start`。
-    /// 温度由运行时自动标定，所以舒适区用**比例**表达才不随评分尺度漂移。缺省 0.1。
-    #[serde(default = "default_comfort_ratio")]
-    pub comfort_ratio: f64,
+    /// 舒适区在**降温曲线上的位置**（0~1，0=刚起步、1=临近结束）。
+    /// 减速带（高斯）就以这里为中心，默认 0.5 = 曲线正中（探索/收敛各占一半）。
+    /// 用进度而非温度表达：温度随评分尺度变，进度不会；也从「温度比例」这种
+    /// 反直觉的量改成了「曲线走到几成」这种能直接看懂、能直接调的量。
+    #[serde(default = "default_comfort_progress")]
+    pub comfort_progress: f64,
     pub comfort_width: f64,
     pub comfort_slowdown: f64,
     pub swap_probability: f64,
@@ -192,7 +194,7 @@ fn default_conflict_weight_by_freq() -> bool { false }
 fn default_checkpoint_interval_ratio() -> f64 { 0.05 }
 fn default_temp_start() -> f64 { 1.0 }
 fn default_temp_end() -> f64 { 1e-6 }
-fn default_comfort_ratio() -> f64 { 0.1 }
+fn default_comfort_progress() -> f64 { 0.5 }
 fn default_perturb_trigger_temp_ratio() -> f64 { 0.01 }
 fn default_perturb_temp_multiplier() -> f64 { 2.0 }
 fn default_perturb_collision_pairs_limit() -> usize { 10 }
@@ -735,7 +737,7 @@ impl Default for Config {
                 total_steps: 10_000,
                 temp_start: 1.0,
                 temp_end: 0.000001,
-                comfort_ratio: default_comfort_ratio(),
+                comfort_progress: default_comfort_progress(),
                 comfort_width: 0.15,
                 comfort_slowdown: 0.8,
                 swap_probability: 0.3,
@@ -895,7 +897,7 @@ threads = 4
 total_steps = 1000
 temp_start = 1.0
 temp_end = 0.000001
-comfort_ratio = 0.1
+comfort_progress = 0.5
 comfort_width = 0.15
 comfort_slowdown = 0.8
 swap_probability = 0.3
@@ -970,7 +972,7 @@ threads = 1
 total_steps = 100
 temp_start = 1.0
 temp_end = 0.001
-comfort_ratio = 0.1
+comfort_progress = 0.5
 comfort_width = 0.1
 comfort_slowdown = 0.8
 swap_probability = 0.3
@@ -1025,7 +1027,7 @@ threads = 1
 total_steps = 100
 temp_start = 1.0
 temp_end = 0.001
-comfort_ratio = 0.1
+comfort_progress = 0.5
 comfort_width = 0.1
 comfort_slowdown = 0.8
 swap_probability = 0.3
