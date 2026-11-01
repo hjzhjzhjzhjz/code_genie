@@ -1,0 +1,85 @@
+name: 测试与静态检查
+
+# 每次推送/PR 都跑格式、Clippy、单元与属性测试。
+# 与 build.yml（只出二进制）互补：这里不产出产物，只保证「改完不回归」。
+
+on:
+  push:
+    branches: [moling, main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: 格式 / Clippy / 测试
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: 检出
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: 安装 Rust（含 rustfmt、clippy）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: 缓存 cargo 依赖与 target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+
+      - name: 格式检查
+        id: fmt
+        run: |
+          set -o pipefail
+          if ! cargo fmt --all --check 2>&1 | tee fmt.log; then
+            echo "::error::代码未格式化，请本地执行 cargo fmt --all 后提交"
+            head -n 80 fmt.log
+            exit 1
+          fi
+
+      - name: Clippy（警告即错误）
+        id: clippy
+        run: |
+          set -o pipefail
+          if ! cargo clippy --all-targets -- -D warnings 2>&1 | tee clippy.log; then
+            echo "::error::Clippy 有告警或错误"
+            grep -E -A 12 '^(error|warning)' clippy.log | head -n 120
+            exit 1
+          fi
+
+      - name: 单元测试与属性测试
+        id: test
+        run: |
+          set -o pipefail
+          if ! cargo test --all-targets 2>&1 | tee test.log; then
+            echo "=== 失败用例 ==="
+            grep -E '^(test .* FAILED|---- .* stdout ----|thread .* panicked)' -A 12 test.log | head -n 160
+            exit 1
+          fi
+          grep -E '^test result' test.log
+
+      - name: 写入 Job Summary
+        if: always()
+        run: |
+          {
+            echo "### 检查结果"
+            echo ""
+            echo "| 检查项 | 结果 |"
+            echo "| --- | --- |"
+            echo "| 格式（cargo fmt --check） | ${{ steps.fmt.outcome }} |"
+            echo "| Clippy（-D warnings） | ${{ steps.clippy.outcome }} |"
+            echo "| 测试（cargo test） | ${{ steps.test.outcome }} |"
+            echo ""
+            echo '```'
+            grep -E '^test result' test.log 2>/dev/null || echo "（未跑到测试阶段）"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
