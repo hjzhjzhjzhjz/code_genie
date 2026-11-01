@@ -199,7 +199,7 @@ jobs:
               "  export     导出测评用码表（字 TAB 码）",
               "  chart      字根键位图（HTML）",
               "  assess     宇浩测评对比（yuhao-assess 已含在包内）",
-              "  rime       生成 Rime 方案包（星云）",
+              "  rime-convert  以星月方案包为底包只换码",
               "  pipeline   拆分流水线展示",
               "  merge      字根归并对比",
               "  diagnose   码表诊断（ceping-data 在包内）",

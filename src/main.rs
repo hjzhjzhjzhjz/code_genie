@@ -17,7 +17,6 @@ mod assess;
 mod diagnose;
 mod handfeel;
 mod pipeline;
-mod rime;
 mod rime_convert;
 mod sentence;
 mod bucket_store;
@@ -225,35 +224,6 @@ enum Commands {
         /// 方案档案里的版本号（留空用当天日期）
         #[arg(long, default_value = "")]
         version: String,
-    },
-
-    /// 生成可加载的 Rime 方案包（schema + dict）
-    #[command(name = "rime")]
-    Rime {
-        /// 字根键位表
-        #[arg(long)]
-        keymap: String,
-        /// 纯拆分表
-        #[arg(long)]
-        chaifen: String,
-        /// 简码表（可选）
-        #[arg(long)]
-        simple: Option<String>,
-        /// 词组频表（可选，给了就生成词组词典）
-        #[arg(long)]
-        words: Option<String>,
-        /// 输出目录
-        #[arg(long, default_value = "rime")]
-        out: String,
-        /// 方案标识，同时是文件名前缀
-        #[arg(long, default_value = "moling")]
-        id: String,
-        /// 方案显示名
-        #[arg(long, default_value = "魔灵")]
-        name: String,
-        /// 作者
-        #[arg(long, default_value = "CodeGenie")]
-        author: String,
     },
 
     /// 以星月方案包为底包，只把词典里的码换掉，其余（文件名/schema/lua/词表）原样沿用
@@ -489,26 +459,6 @@ fn main() {
             mapping,
             output,
         }) => root_chart::run(&keymap, mapping.as_deref(), &output),
-        Some(Commands::Rime {
-            keymap,
-            chaifen,
-            simple,
-            words,
-            out,
-            id,
-            name,
-            author,
-        }) => rime::run(
-            &keymap,
-            &chaifen,
-            simple.as_deref(),
-            words.as_deref(),
-            &out,
-            &id,
-            &name,
-            &author,
-        ),
-
         Some(Commands::RimeConvert {
             base,
             output,

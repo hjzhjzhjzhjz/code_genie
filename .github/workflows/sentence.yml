@@ -3,15 +3,20 @@ name: 整句测评
 on:
   workflow_dispatch:
     inputs:
-      keymap:
-        description: 键位映射文件（仓库内路径）
-        required: false
-        default: runs/s4-export/output-keymap.txt
+      full_dict:
+        description: 全码词典（Rime dict.yaml；用 rime-convert 产出后填路径）
+        required: true
+        default: rime-pkg/yuhao/starmoon.full.dict.yaml
         type: string
-      simple:
-        description: 简码表（仓库内路径，可留空）
+      short_dict:
+        description: 简码词典（可留空）
         required: false
-        default: runs/s4-export/output-simple-codes.txt
+        default: rime-pkg/yuhao/starmoon_sc.short.dict.yaml
+        type: string
+      words_dict:
+        description: 词组词典（可留空）
+        required: false
+        default: rime-pkg/yuhao/starmoon_sc.words.dict.yaml
         type: string
       limit:
         description: 最多测多少句（0 = 全部）
@@ -55,35 +60,37 @@ jobs:
             exit 1
           fi
 
-      - name: 生成方案包
+      - name: 检查词典
         env:
-          KEYMAP: ${{ inputs.keymap }}
-          SIMPLE: ${{ inputs.simple }}
+          FULL: ${{ inputs.full_dict }}
+          SHORT: ${{ inputs.short_dict }}
+          WORDS: ${{ inputs.words_dict }}
         run: |
           set -e
-          ./target/release/code_genie rime \
-            --keymap "$KEYMAP" --chaifen moling/chaifen-all.txt \
-            --simple "$SIMPLE" --words ceping-data/词表.txt \
-            --out rime-pkg --id xingyun --name 星云
-          echo "--- 词典规模 ---"
-          for f in rime-pkg/xingyun.full.dict.yaml rime-pkg/xingyun.short.dict.yaml rime-pkg/xingyun.words.dict.yaml; do
+          for f in "$FULL" "$SHORT" "$WORDS"; do
+            if [ -z "$f" ]; then
+              continue
+            fi
+            if [ ! -f "$f" ]; then
+              echo "::error::词典不存在: $f（先用 rime-convert 生成方案包）"
+              exit 1
+            fi
             echo "$f: $(grep -c $'\t' "$f") 条"
           done
 
       - name: 跑整句测评
         env:
+          FULL: ${{ inputs.full_dict }}
+          SHORT: ${{ inputs.short_dict }}
+          WORDS: ${{ inputs.words_dict }}
           LIMIT: ${{ inputs.limit }}
           MAXLEN: ${{ inputs.max_len }}
         run: |
           set -o pipefail
-          ./target/release/code_genie sentence \
-            --full-dict rime-pkg/xingyun.full.dict.yaml \
-            --short-dict rime-pkg/xingyun.short.dict.yaml \
-            --words-dict rime-pkg/xingyun.words.dict.yaml \
-            --corpus yuhao-text/literature.txt \
-            --limit "$LIMIT" --max-len "$MAXLEN" \
-            --dump 整句中间 \
-            --out 整句.md 2>&1 | tee sentence.log
+          ARGS="--full-dict $FULL --corpus yuhao-text/literature.txt --limit $LIMIT --max-len $MAXLEN --dump 整句中间 --out 整句.md"
+          if [ -n "$SHORT" ]; then ARGS="$ARGS --short-dict $SHORT"; fi
+          if [ -n "$WORDS" ]; then ARGS="$ARGS --words-dict $WORDS"; fi
+          ./target/release/code_genie sentence $ARGS 2>&1 | tee sentence.log
           echo "--- 摘要 ---"
           cat 整句.md >> "$GITHUB_STEP_SUMMARY" || true
 
