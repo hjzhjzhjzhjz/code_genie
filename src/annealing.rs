@@ -1282,7 +1282,7 @@ pub fn simulated_annealing_resumable(
 
     // checkpoint 写出闭包：组装当前线程检查点并归档旧版后原子写（需求 1/13）。
     // 写失败仅告警、不中断退火（需求 10.2）。`step` 为当前步（即下次从此步续算）。
-    let mut write_ckpt = |step: usize,
+    let write_ckpt = |step: usize,
                           assignment: &[u8],
                           best_assignment: &[u8],
                           best_full_score: f64,

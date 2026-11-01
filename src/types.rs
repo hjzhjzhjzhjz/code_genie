@@ -221,7 +221,6 @@ pub struct MetricScores {
     pub distribution: f64,
     pub total_full: f64,
     pub total_simple: f64,
-    pub total: f64,
 }
 
 /// 简码各子指标的分数分量（用于日志输出，需求 28.5/28.6）。
@@ -289,7 +288,11 @@ impl SimpleCodeLevel {
         !self.commit_keys.is_empty()
     }
 
-    /// 测试/兼容辅助：由上屏键序列构造级别并预计算偏好表。
+    /// 测试辅助：由上屏键序列构造级别并预计算偏好表。
+    ///
+    /// 生产路径经 `config.rs` 的解析函数构造 `SimpleCodeLevel`，不用本函数；
+    /// 保留供 `evaluator.rs` / `output.rs` 的测试构造含上屏键的级别。
+    #[allow(dead_code)]
     pub fn with_commit_keys(
         level: usize,
         code_num: usize,
@@ -308,7 +311,8 @@ impl SimpleCodeLevel {
         }
     }
 
-    /// 测试/兼容辅助：由旧 `space_commit` 布尔构造级别（true→`["_"]`、false→空）。
+    /// 测试辅助：由旧 `space_commit` 布尔构造级别（true→`["_"]`、false→空）。
+    #[allow(dead_code)]
     pub fn with_space_commit(
         level: usize,
         code_num: usize,
@@ -342,8 +346,10 @@ pub struct FixedSimpleCode {
     /// 所属简码级别索引；`None` 表示无法归属任何级别（仍输出、仍排除候选，但不占 commit slot）。
     pub li: Option<usize>,
     /// 核心简码键位（不含末位上屏键）
+    #[allow(dead_code)] // 仅测试读取；生产只用 code_str
     pub keys: Vec<u8>,
     /// 末位上屏键（`Some(k)`：字母键或 `KEY_SPACE`；`None`：无上屏键 / 自动上屏）。
+    #[allow(dead_code)] // 仅测试读取；生产只用 code_str
     pub commit_key: Option<u8>,
     /// 输出用的简码字符串（含末位上屏键字符，空格为 `_`）
     pub code_str: String,

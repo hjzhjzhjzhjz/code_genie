@@ -682,7 +682,7 @@ mod space_commit_output_tests {
     use crate::config::TargetsConfig;
     use crate::context::OptContext;
     use crate::types::{
-        KeyDistConfig, RootGroup, ScaleConfig, SimpleCodeConfig, SimpleCodeLevel, SimpleCodeStep,
+        KeyDistConfig, RootGroup, ScaleConfig, SimpleCodeConfig, SimpleCodeStep,
         WeightConfig, EQUIV_TABLE_SIZE,
     };
     use proptest::prelude::*;

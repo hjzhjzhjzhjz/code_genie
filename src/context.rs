@@ -108,6 +108,7 @@ pub struct OptContext {
     // 固定简码（需求 21）：退火前一次性预计算的静态字段（仅在启用简码时填充，全程不变）
     // ====================================================================
     /// 固定简码字位图，按 ci 索引：为真表示该字使用固定简码、不参与退火的简码分配。
+    #[allow(dead_code)] // 仅测试读取（生产只用构造期局部变量）
     pub simple_fixed_assigned: Vec<bool>,
     /// 固定简码桶占用（需求 21.7，方案 A）：稀疏占用**计数**表。
     /// `simple_fixed_occupancy[li]` 为 `核心桶编码 → 该桶各被占用「上屏键」的占用计数列表 (key, count)`。
@@ -132,6 +133,9 @@ pub struct OptContext {
 
 impl OptContext {
     /// 创建新的优化上下文
+    ///
+    /// 生产路径走 [`OptContext::new_with_fixed_and_termination`]；本入口供测试直接构造。
+    #[allow(dead_code)]
     pub fn new(
         splits: &[(char, Vec<String>, u64)],
         fixed_roots: &HashMap<String, u8>,
@@ -160,6 +164,9 @@ impl OptContext {
     }
 
     /// 创建优化上下文（含固定简码映射，默认全码终止键为 `_`）。
+    ///
+    /// 测试专用（生产走 `new_with_fixed_and_termination`）。
+    #[allow(dead_code)]
     pub fn new_with_fixed(
         splits: &[(char, Vec<String>, u64)],
         fixed_roots: &HashMap<String, u8>,
@@ -778,7 +785,10 @@ impl OptContext {
         Some(code)
     }
 
-    /// 获取简码键位列表
+    /// 获取简码键位列表（每次分配 `Vec`；热路径用 [`OptContext::get_simple_keys_into`]）。
+    ///
+    /// 保留作为「无分配版本」的对照 oracle（测试用）。
+    #[allow(dead_code)]
     pub fn get_simple_keys(&self, ci: usize, level_idx: usize, assignment: &[u8]) -> Option<Vec<u8>> {
         let si = &self.char_simple_infos[ci];
         let instr = si.level_instructions.get(level_idx)?.as_ref()?;

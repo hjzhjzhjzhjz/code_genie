@@ -303,7 +303,6 @@ fn 码长(码: &str) -> usize {
 
 #[derive(Clone)]
 struct 单字行 {
-    字: char,
     频: f64,
     码: String,
     码长: usize,
@@ -383,7 +382,7 @@ fn 建单字行(
     let mut 已用二码: HashSet<String> = HashSet::new();
     let mut 出 = Vec::with_capacity(字频.len());
 
-    for (i, (字, 频)) in 字频.iter().enumerate() {
+    for (i, (_字, 频)) in 字频.iter().enumerate() {
         let 序 = i + 1;
         let (码, 重) = match 选中.get(&序) {
             Some((m, h)) => (m.clone(), *h),
@@ -418,7 +417,6 @@ fn 建单字行(
         };
 
         出.push(单字行 {
-            字: *字,
             频: *频,
             码: 码.clone(),
             码长: 实长,
@@ -509,9 +507,7 @@ fn 单字比重(行: &[单字行], 止: usize) -> [f64; 17] {
 
 #[derive(Clone)]
 struct 词组行 {
-    词: String,
     频: Option<f64>,
-    码: String,
     当量: f64,
     键长: usize,
     手感: [i64; 7],
@@ -597,9 +593,7 @@ fn 建词组行(
 
         if 码.contains('%') {
             出.push(词组行 {
-                词: 词.clone(),
                 频: None,
-                码: String::new(),
                 当量: 0.0,
                 键长: 0,
                 手感: [0; 7],
@@ -618,9 +612,7 @@ fn 建词组行(
         let 列: Vec<char> = 本码.chars().collect();
 
         出.push(词组行 {
-            词: 词.clone(),
             频: Some(*频),
-            码: 本码.clone(),
             当量: 当量.合计(&列) as f64 / 10.0,
             键长: 列.len(),
             手感: 七项(&本码),
@@ -686,7 +678,6 @@ struct 方案结果 {
     单字比重6000: [f64; 17],
     有码字数: usize,
     词段: Vec<[f64; 10]>,
-    词小计: [f64; 10],
     词总计: [f64; 10],
     词比重: [f64; 8],
     词选重占比: f64,
@@ -763,7 +754,6 @@ fn 算方案(名: &str, 码表: &Path, 数据: &Path) -> Option<方案结果> {
         单字比重6000: 单字比重(&单字, 6000),
         有码字数: 选中.len(),
         词段,
-        词小计: 词分段(&词行, 1, 10000),
         词总计: 词分段(&词行, 1, 60000),
         词选重占比: {
             let 有效: Vec<&词组行> = 词行.iter().filter(|r| r.频.is_some()).collect();

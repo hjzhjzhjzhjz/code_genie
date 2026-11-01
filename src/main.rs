@@ -1515,14 +1515,6 @@ fn run_optimize(
     println!("  - 总字频: {}", total_freq);
     println!("  - 最大码长: {}", max_parts_in_data);
 
-    // 警告：最大码长超过配置
-    if max_parts_in_data > cfg.annealing.max_parts {
-        println!(
-            "⚠️ 拆分表中最大码长({})超过 max_parts({}), 请调大配置",
-            max_parts_in_data, cfg.annealing.max_parts
-        );
-    }
-
     // ==================== 校验 ====================
     if !validate::check_validation(&splits, &fixed_roots, &dynamic_groups) {
         std::process::exit(1);
@@ -2517,9 +2509,16 @@ mod seed_path_tests {
         let paths = resolve_seed_paths(Some(&base.to_string_lossy()), None).unwrap();
         assert_eq!(paths.len(), 3, "应只收集 3 个含 keymap 的 thread 目录");
         // 按 NN 升序：00, 02, 10
-        assert!(paths[0].ends_with("thread-00/字根键位表.txt"));
-        assert!(paths[1].ends_with("thread-02/字根键位表.txt"));
-        assert!(paths[2].ends_with("thread-10/字根键位表.txt"));
+        // 用 Path::ends_with 按**路径组件**比较（Windows 分隔符是 `\`，字符串 ends_with 会失败）
+        let 断言尾部 = |实际: &str, 期望: &str| {
+            assert!(
+                std::path::Path::new(实际).ends_with(std::path::Path::new(期望)),
+                "路径 {实际} 应以 {期望} 结尾"
+            );
+        };
+        断言尾部(&paths[0], "thread-00/字根键位表.txt");
+        断言尾部(&paths[1], "thread-02/字根键位表.txt");
+        断言尾部(&paths[2], "thread-10/字根键位表.txt");
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -2626,7 +2625,12 @@ mod scale_proptest {
             cfg.scale = Some(toml);
 
             let (got, 来源) = resolve_scale_config(&cfg, calibrated);
-            prop_assert!(来源 == "手动配置" || 来源 == "自动校准");
+            // 三条路径：cfg.scale 为 None → 自动校准；全码+简码字段齐 → 手动配置；
+            // 部分字段为 None → 部分手动覆盖（以校准值为底、逐字段覆盖）。
+            prop_assert!(
+                来源 == "手动配置" || 来源 == "自动校准" || 来源 == "部分手动覆盖",
+                "未知来源: {}", 来源
+            );
 
             // 逐字段：Some → 取倒数(手动值)；None → 校准值
             let 期望 = |手动值: Option<f64>, 校准值: f64| 手动值.map(取倒数).unwrap_or(校准值);

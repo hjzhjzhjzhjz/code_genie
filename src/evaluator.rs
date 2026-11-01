@@ -50,8 +50,6 @@ impl crate::bucket_store::Bucket for SimpleBucket {
 
 /// 简码级别跟踪器（增量化）
 struct SimpleLevelTracker {
-    /// 该级别的编码数
-    code_num: usize,
     /// 简码桶向量容量 = ctx.simple_level_capacity[li]
     capacity: usize,
     /// 简码桶存储：按 code_base^L 阈值自适应密集/稀疏后端（需求 4.3/5）。
@@ -288,11 +286,10 @@ impl SimpleEvaluator {
                     .unwrap_or(1)
                     .max(1);
                 SimpleLevelTracker {
-                    // 配置的「每有效简码字数上限」（需求 21.7，方案 A）。不再「扩到 K」：
                     // 每桶退火可出简名额由 `ctx.simple_annealing_slots(li, code)` 按
                     // 「每有效简码至多 code_num 字」在选取时计算（无上屏键 = code_num−占用；
-                    // 有上屏键 = Σ_{有效上屏键} max(0, code_num−占用)）。
-                    code_num: ctx.simple_config.levels[li].code_num,
+                    // 有上屏键 = Σ_{有效上屏键} max(0, code_num−占用)），
+                    // code_num 直接从 `ctx.simple_config.levels[li]` 取，不在跟踪器里冗余存一份。
                     capacity: cap,
                     buckets: BucketStore::new(cap, n_chars),
                     current_simple_code: vec![-1i64; n_chars],
@@ -791,6 +788,9 @@ impl SimpleEvaluator {
     }
 
     /// 完整重建简码评估（供周期对账与结束校验调用）
+    ///
+    /// 生产路径的周期对账走 `Evaluator::new` 重建，不经本入口；保留供测试做全量 oracle。
+    #[allow(dead_code)]
     pub fn full_rebuild(
         &mut self,
         ctx: &OptContext,
@@ -1958,8 +1958,6 @@ pub struct Evaluator {
     /// 键位加权使用统计
     pub key_weighted_usage: [f64; EQUIV_TABLE_SIZE],
 
-    /// 总频率
-    pub total_frequency: u64,
     /// 总频率倒数
     pub inv_total_frequency: f64,
     /// 总键击次数倒数
@@ -2161,7 +2159,6 @@ impl Evaluator {
             total_equiv_sq_weighted,
             equiv_frequency,
             key_weighted_usage,
-            total_frequency: ctx.total_frequency,
             inv_total_frequency: inv_tf,
             inv_total_key_presses: inv_tkp,
             cached_score: 0.0,
@@ -2743,12 +2740,6 @@ impl Evaluator {
             0.0
         };
 
-        let total = if ctx.enable_simple_code {
-            ctx.weights.weight_full_code * total_full + ctx.weights.weight_simple_code * total_simple
-        } else {
-            total_full
-        };
-
         MetricScores {
             collision_count: s_collision_count,
             collision_rate: s_collision_rate,
@@ -2757,7 +2748,6 @@ impl Evaluator {
             distribution: s_distribution,
             total_full,
             total_simple,
-            total,
         }
     }
 
@@ -2824,6 +2814,9 @@ impl Evaluator {
     }
 
     /// 重建简码评估
+    ///
+    /// 生产路径已全面改为增量维护（`apply_simple_for_move` + 周期对账），本入口仅测试使用。
+    #[allow(dead_code)]
     pub fn rebuild_simple(&mut self, ctx: &OptContext, assignment: &[u8]) {
         // 观测计数：记录一次经主评估器入口触发的全量重建。
         self.full_rebuild_calls += 1;
@@ -3478,9 +3471,8 @@ mod first_candidate_tests {
     fn test_simple_metric_scores_sum_consistency() {
         let allowed: [u8; 4] = [0, 1, 2, 3];
         let ctx = make_ctx(&[9u64, 7, 5, 3, 2, 1], &allowed, true);
-        let n = 6usize;
         let assignment = vec![0u8, 1, 2, 3, 0, 1];
-        let mut ev = Evaluator::new(&ctx, &assignment);
+        let ev = Evaluator::new(&ctx, &assignment);
         assert!(ev.simple_eval.is_some(), "简码启用时应有简码评估器");
 
         let sub = ev.get_simple_metric_scores(&ctx);
@@ -3677,7 +3669,6 @@ mod full_collision_independence_tests {
 // Requirements: 3.1, 3.3
 #[cfg(test)]
 mod dealloc_free_tests {
-    use super::*;
     use crate::config::TargetsConfig;
     use crate::context::OptContext;
     use crate::types::{
@@ -4431,11 +4422,15 @@ mod incremental_full_consistency_tests {
             }
             // 稀疏全量重建（对最终分配从零构建）作为同后端 oracle。
             let ev_sparse_full = Evaluator::new(&ctx, &asg_sparse);
-            crate::bucket_store::set_test_threshold_override(None);
 
-            // 密集全量重建（默认阈值）作为基线 oracle。
+            // 密集全量重建作为基线 oracle：**显式强制密集后端**。
+            // 不能依赖「默认判据 → Dense」——默认判据是「容量 vs n_chars×4」，
+            // 而测试上下文的 code_space（code_base^max_parts，通常上万）远大于 4×n_chars，
+            // 会被正确判成 Sparse（这正是稀疏化的目的）。
             let asg_final = asg_sparse.clone();
+            crate::bucket_store::set_test_threshold_override(Some(usize::MAX));
             let ev_dense_full = Evaluator::new(&ctx, &asg_final);
+            crate::bucket_store::set_test_threshold_override(None);
 
             // 后端确为稀疏 / 密集（防回归）。
             prop_assert_eq!(ev_sparse.full_buckets.backend_kind(), crate::bucket_store::BackendKind::Sparse);
@@ -4447,8 +4442,8 @@ mod incremental_full_consistency_tests {
             assert_simple_eq(&ctx, &ev_sparse, &ev_dense_full, "sparse-inc vs dense-full")?;
 
             // 全码指标也须一致（重码数 / 重码率 / 当量）。
-            let mut ev_sparse_mut = ev_sparse;
-            let mut ev_dense_mut = ev_dense_full;
+            let ev_sparse_mut = ev_sparse;
+            let ev_dense_mut = ev_dense_full;
             let ms = ev_sparse_mut.get_metrics(&ctx);
             let md = ev_dense_mut.get_metrics(&ctx);
             prop_assert_eq!(ms.collision_count, md.collision_count, "全码重码数 稀疏≠密集");
@@ -7568,7 +7563,7 @@ mod targets_proptest {
                 + 目标偏差(sm.collision_count as f64, t_cc, s_cc, ctx.weights.simple_weight_collision_count, lw)
                 + 目标偏差(sm.collision_rate, t_cr, s_cr, ctx.weights.simple_weight_collision_rate, lw);
 
-            let got = ev.get_simple_score(&ctx);
+            let got = ev.simple_score_component(&ctx);
             prop_assert!(近似(got, want), "简码得分 got={} want={}", got, want);
         }
 
@@ -7604,7 +7599,7 @@ mod targets_proptest {
                 + ctx.weights.simple_weight_collision_count * sm.collision_count as f64 * s_cc
                 + ctx.weights.simple_weight_collision_rate * sm.collision_rate * s_cr;
 
-            let got = ev.get_simple_score(&ctx);
+            let got = ev.simple_score_component(&ctx);
             prop_assert!(近似(got, want), "关闭 targets 后应等于线性公式 got={} want={}", got, want);
         }
 
