@@ -39,7 +39,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// 字根 → 键位串（如 `白` → `Fk`），取自算码输出的字根键位表
-type 字根表 = HashMap<String, String>;
+pub(crate) type 字根表 = HashMap<String, String>;
 /// 字 → 拆分根序列，取自 `chaifen-all.txt`
 type 拆分表 = HashMap<String, Vec<String>>;
 
@@ -354,7 +354,7 @@ fn 次(k: &str) -> char {
 }
 
 /// 单字全码（严格按 yustar encoder 状态机），返回小写 3~4 码
-fn 单字码(根们: &[String], 字根: &字根表) -> Result<String, String> {
+pub(crate) fn 单字码(根们: &[String], 字根: &字根表) -> Result<String, String> {
     if 根们.is_empty() {
         return Ok(String::new());
     }
