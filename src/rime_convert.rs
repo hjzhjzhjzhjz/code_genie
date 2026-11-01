@@ -17,11 +17,15 @@
 // 其余一律不动：`<前缀>_sc.dict.yaml` 主词典、`*.schema.yaml`、`lua/yuhao/*`、
 // `yuhao.*` 符号表、`default.custom.yaml`。
 //
-// 单字编码规则（星月口径，用底包 123372 条真实数据全量反推并闭环验证）：
-//   1 根 : A + S + Y
-//   2 根 : A1 A2 S2 S1
-//   ≥3 根: A1 A2 … An + S_末，截断到 4 码
-// 其中 A=键位串首字母、S=第 2 个字母（不足两字母则取首字母）、Y=末字母。
+// 单字编码规则：严格按星陈（yustar）方案 `encoder` 状态机
+// （https://github.com/hanzi-chai/hanzi-chai.github.io/blob/main/examples/yustar.yaml）
+//   s1(A1) → c0: 根2存在? ┬ 否 → s3(S1) → s6(S1)               ⇒ 1 根: A1 S1 S1
+//                        └ 是 → s2(A2) → c1: 根3存在? ┬ 否 → s4(S2) → s9(S1)  ⇒ 2 根: A1 A2 S2 S1
+//                                                    └ 是 → s5(A3) → c2: 根4存在? ┬ 否 → s8(S3)          ⇒ 3 根: A1 A2 A3 S3
+//                                                                                └ 是 → s7(A_last)     ⇒ ≥4 根: A1 A2 A3 A_last
+// 其中 A=键位串第 0 个字母（大码）、S=第 1 个字母（小码，缺失时回退大码），
+// max_length=4。底包 123372 条真实数据闭环验证：123367 条一致，
+// 余 3 条是底包自身存了大写码（AJHx/KKBU/YAJH），属底包数据瑕疵。
 //
 // 词码规则与星月 `encoder.rules` 一致：
 //   2 字 AaAbBaBb / 3 字 AaBaCaCb / 4+ 字 AaBaCaZa
@@ -243,11 +247,7 @@ fn 次(k: &str) -> char {
         .to_ascii_lowercase()
 }
 
-fn 末(k: &str) -> char {
-    k.chars().last().unwrap_or('?').to_ascii_lowercase()
-}
-
-/// 单字全码（星月规则），返回小写 3~4 码
+/// 单字全码（严格按 yustar encoder 状态机），返回小写 3~4 码
 fn 单字码(根们: &[String], 字根: &字根表) -> Result<String, String> {
     if 根们.is_empty() {
         return Ok(String::new());
@@ -259,10 +259,16 @@ fn 单字码(根们: &[String], 字根: &字根表) -> Result<String, String> {
             _ => return Err(format!("未知字根「{}」", r)),
         }
     }
-    Ok(match 键们.len() {
+    // 严格按 yustar.yaml 的 encoder 状态机走（s0→s1→c0→…），四条路径：
+    //   1 根 : A1 S1 S1            （s1 → c0(负) → s3 → s6）
+    //   2 根 : A1 A2 S2 S1         （s1 → c0(正) → s2 → c1(负) → s4 → s9）
+    //   3 根 : A1 A2 A3 S3         （s1 → s2 → c1(正) → s5 → c2(负) → s8）
+    //   ≥4 根: A1 A2 A3 A_last     （s1 → s2 → s5 → c2(正) → s7，取末根大码）
+    let n = 键们.len();
+    Ok(match n {
         1 => {
             let k = 键们[0];
-            format!("{}{}{}", 首(k), 次(k), 末(k))
+            format!("{}{}{}", 首(k), 次(k), 次(k))
         }
         2 => format!(
             "{}{}{}{}",
@@ -271,14 +277,20 @@ fn 单字码(根们: &[String], 字根: &字根表) -> Result<String, String> {
             次(键们[1]),
             次(键们[0])
         ),
-        _ => {
-            let mut s = String::new();
-            for k in &键们 {
-                s.push(首(k));
-            }
-            s.push(次(键们[键们.len() - 1]));
-            s.chars().take(4).collect()
-        }
+        3 => format!(
+            "{}{}{}{}",
+            首(键们[0]),
+            首(键们[1]),
+            首(键们[2]),
+            次(键们[2])
+        ),
+        _ => format!(
+            "{}{}{}{}",
+            首(键们[0]),
+            首(键们[1]),
+            首(键们[2]),
+            首(键们[n - 1])
+        ),
     })
 }
 
@@ -814,6 +826,34 @@ mod tests {
             单字码(&["讠".into(), "丷".into(), "口".into(), "儿".into()], &m).unwrap(),
             "yfih"
         );
+    }
+
+    #[test]
+    fn 五根字取首三码加末根大码() {
+        // yustar 状态机 c2 走 s7（rootIndex -1），取**末根**大码，不是第 4 根
+        let mut m = 字根表::new();
+        for (k, v) in [
+            ("甲", "Ab"), ("乙", "Cd"), ("丙", "Ef"), ("丁", "Gh"), ("戊", "Ij"),
+        ] {
+            m.insert(k.to_string(), v.to_string());
+        }
+        assert_eq!(
+            单字码(
+                &["甲".into(), "乙".into(), "丙".into(), "丁".into(), "戊".into()],
+                &m
+            )
+            .unwrap(),
+            "acei",
+            "应为 A1A2A3+A_last = a c e i"
+        );
+    }
+
+    #[test]
+    fn 单根字取两次小码() {
+        // 状态机 s3 → s6 都取 index 1，即 A+S+S，不是 A+S+Y
+        let mut m = 字根表::new();
+        m.insert("三".to_string(), "Axy".to_string()); // 三字母键位串
+        assert_eq!(单字码(&["三".into()], &m).unwrap(), "axx");
     }
 
     #[test]
