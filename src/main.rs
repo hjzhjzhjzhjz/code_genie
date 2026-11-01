@@ -18,6 +18,7 @@ mod diagnose;
 mod handfeel;
 mod pipeline;
 mod rime;
+mod rime_convert;
 mod sentence;
 mod bucket_store;
 mod calibrate;
@@ -255,6 +256,42 @@ enum Commands {
         author: String,
     },
 
+    /// 以现成 Rime 方案包为底包，只换单字码，产出新方案包（星月 → 魔灵）
+    #[command(name = "rime-convert")]
+    RimeConvert {
+        /// 底包目录（Rime 用户目录，含 <前缀>_chaifen.dict.yaml 与 yuhao/）
+        #[arg(long)]
+        base: String,
+
+        /// 算码输出目录（含 roots.tsv 与 zigen-<标识>.csv）
+        #[arg(long)]
+        output: String,
+
+        /// 拆分表（chaifen-all.txt：字<TAB>根 根 …<TAB>频次）
+        #[arg(long, default_value = "chaifen-all.txt")]
+        chaifen: String,
+
+        /// 输出目录
+        #[arg(long, default_value = "rime-out")]
+        out: String,
+
+        /// 新方案标识（文件名前缀 + schema_id）
+        #[arg(long, default_value = "moling")]
+        id: String,
+
+        /// 新方案显示名
+        #[arg(long, default_value = "魔靈")]
+        name: String,
+
+        /// 底包的方案前缀
+        #[arg(long = "from-prefix", default_value = "starmoon")]
+        from_prefix: String,
+
+        /// 底包的方案显示名（正文替换用）
+        #[arg(long = "from-name", default_value = "星月")]
+        from_name: String,
+    },
+
     /// 整句准确率：逐单元首候选 + 连续码流解码，两个口径一起给
     #[command(name = "sentence")]
     Sentence {
@@ -479,6 +516,32 @@ fn main() {
             &name,
             &author,
         ),
+
+        Some(Commands::RimeConvert {
+            base,
+            output,
+            chaifen,
+            out,
+            id,
+            name,
+            from_prefix,
+            from_name,
+        }) => {
+            let 参 = rime_convert::参数 {
+                底包目录: base,
+                算码目录: output,
+                拆分文件: chaifen,
+                输出目录: out,
+                标识: id,
+                名称: name,
+                源前缀: from_prefix,
+                源名称: from_name,
+            };
+            if let Err(e) = rime_convert::run(&参) {
+                eprintln!("❌ {}", e);
+                std::process::exit(1);
+            }
+        }
 
         Some(Commands::Sentence {
             full_dict,
