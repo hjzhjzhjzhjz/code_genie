@@ -1951,42 +1951,22 @@ fn run_optimize(
     }
 }
 
-/// 定位「全量拆分表」：`files.full_splits` 显式配置优先，未配置时自动找。
+/// 取「全量拆分表」路径：**只认 `files.full_splits` 的手动配置**，不做任何自动猜测。
 ///
-/// 优化为了速度只喂常用字（`files.splits`），但码表要覆盖全部字。候选顺序：
-/// 1. `files.full_splits`（配置了就用它，不再猜）
-/// 2. 与 `files.splits` 同目录下的 `chaifen-all.txt` / `chaifen_tw-all.txt` / `input-division-all.txt`
-/// 3. 当前目录下同名文件
-/// 4. `moling/` 下同名文件
-fn 定位全量拆分(cfg: &Config) -> Option<String> {
-    let 候选名 = ["chaifen-all.txt", "chaifen_tw-all.txt", "input-division-all.txt"];
-    let mut 候选: Vec<std::path::PathBuf> = Vec::new();
-
-    if !cfg.files.full_splits.is_empty() {
-        候选.push(std::path::PathBuf::from(&cfg.files.full_splits));
+/// 优化为了速度只喂常用字（`files.splits`），而码表要覆盖全部字（如 12 万字）。
+/// 想生成 `完整码表.txt` 就在配置里显式写：
+/// ```toml
+/// [files]
+/// full_splits = "moling/chaifen-all.txt"
+/// ```
+/// 留空表示不生成。
+fn 全量拆分路径(cfg: &Config) -> Option<String> {
+    let p = cfg.files.full_splits.trim();
+    if p.is_empty() {
+        None
     } else {
-        let mut 目录们: Vec<std::path::PathBuf> = Vec::new();
-        if let Some(d) = std::path::Path::new(&cfg.files.splits).parent() {
-            if !d.as_os_str().is_empty() {
-                目录们.push(d.to_path_buf());
-            }
-        }
-        目录们.push(std::path::PathBuf::from("."));
-        目录们.push(std::path::PathBuf::from("moling"));
-        for d in &目录们 {
-            for 名 in 候选名 {
-                let p = d.join(名);
-                if !候选.contains(&p) {
-                    候选.push(p);
-                }
-            }
-        }
+        Some(p.to_string())
     }
-
-    候选
-        .into_iter()
-        .find(|p| p.is_file())
-        .map(|p| p.to_string_lossy().to_string())
 }
 
 /// 汇总各线程结果、打印最优、保存全部产物；optimize 与 resume 共用（需求 7.8）。
@@ -2074,50 +2054,49 @@ fn finalize_and_save(
         &root_usage,
     );
 
-    // 全量码表：算完直接用全量拆分表再编码一遍，覆盖全部字（如 12 万字）。
-    // 优先 files.full_splits；没配置就自动找 chaifen-all.txt 之类的全量拆分表。
-    let 出了完整码表 = match 定位全量拆分(cfg) {
+    // 全量码表：算完用「手动指定的全量拆分表」再编码一遍，覆盖全部字（如 12 万字）。
+    // 只在 [files] full_splits 显式配置时生成，不做自动猜测。
+    let 出了完整码表 = match 全量拆分路径(cfg) {
         Some(p) => {
-            let 全量 = crate::export_table::加载拆分表(&p);
-            if 全量.len() > ctx.raw_splits.len() {
-                let (全条, 简条, 缺根) =
-                    output::save_full_code_table(ctx, &best_assignment, &全量, output_dir);
-                println!(
-                    "\n📄 完整码表: {} 条（全码 {} / 简码 {}，缺字根 {}），来源 {}",
-                    全条 + 简条,
-                    全条,
-                    简条,
-                    缺根,
+            if !std::path::Path::new(&p).is_file() {
+                eprintln!(
+                    "❌ files.full_splits 指向的文件不存在: {}，跳过完整码表",
                     p
                 );
-                if 缺根 > 0 {
-                    println!(
-                        "   ⚠️ 有 {} 个字因字根缺键位被跳过（键位表没覆盖全量拆分的字根）",
-                        缺根
-                    );
-                }
-                true
-            } else {
-                println!(
-                    "\n📄 完整码表: 全量拆分表 {} 只有 {} 字，不大于当前拆分表（{} 字），跳过",
-                    p,
-                    全量.len(),
-                    ctx.raw_splits.len()
-                );
                 false
+            } else {
+                let 全量 = crate::export_table::加载拆分表(&p);
+                if 全量.len() > ctx.raw_splits.len() {
+                    let (全条, 简条, 缺根) =
+                        output::save_full_code_table(ctx, &best_assignment, &全量, output_dir);
+                    println!(
+                        "\n📄 完整码表: {} 条（全码 {} / 简码 {}，缺字根 {}），来源 {}",
+                        全条 + 简条,
+                        全条,
+                        简条,
+                        缺根,
+                        p
+                    );
+                    if 缺根 > 0 {
+                        println!(
+                            "   ⚠️ 有 {} 个字因字根缺键位被跳过（键位表没覆盖全量拆分的字根）",
+                            缺根
+                        );
+                    }
+                    true
+                } else {
+                    println!(
+                        "\n📄 完整码表: 全量拆分表 {} 只有 {} 字，不大于当前拆分表（{} 字），跳过",
+                        p,
+                        全量.len(),
+                        ctx.raw_splits.len()
+                    );
+                    false
+                }
             }
         }
         None => {
-            if !cfg.files.full_splits.is_empty() {
-                eprintln!(
-                    "⚠️ files.full_splits 指向的文件不存在: {}，跳过完整码表",
-                    cfg.files.full_splits
-                );
-            } else {
-                println!(
-                    "\n📄 完整码表: 没找到全量拆分表（chaifen-all.txt），跳过；可用 [files] full_splits 指定"
-                );
-            }
+            println!("\n📄 完整码表: 未配置 [files] full_splits，跳过");
             false
         }
     };

@@ -203,7 +203,7 @@ jobs:
               sys.exit(f"找不到基础配置: {base}")
           lines = src.read_text(encoding="utf-8").splitlines()
 
-          FILE_KEYS = ("fixed", "dynamic", "splits", "pair_equiv", "key_dist")
+          FILE_KEYS = ("fixed", "dynamic", "splits", "full_splits", "pair_equiv", "key_dist")
           section, hit_steps, hit_threads, out = None, False, False, []
           for line in lines:
               stripped = line.strip()
@@ -222,7 +222,8 @@ jobs:
 
               if section == "files" and files_dir not in ("", "."):
                   m = re.match(r'^(\s*(' + "|".join(FILE_KEYS) + r')\s*=\s*")([^"]*)(")', line)
-                  if m:
+                  # 空值不重写：full_splits = "" 表示「不生成完整码表」，不能被改成 "moling/"
+                  if m and m.group(3):
                       name = os.path.basename(m.group(3).replace("\\", "/"))
                       line = f"{m.group(1)}{files_dir}/{name}{m.group(4)}"
 
