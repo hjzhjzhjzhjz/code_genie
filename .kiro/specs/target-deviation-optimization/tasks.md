@@ -136,7 +136,7 @@
       - `test_simple_code_disabled_skips_max`：`enable_simple_code=false` 时简码 `_max` 不生效
     - _Requirements: 1.1, 1.2, 2.1, 2.2, 2.3, 6.4_
 
-  - [ ]* 7.2 编写属性测试：Property 1 — `resolve_scale_config` 覆盖语义
+  - [x]* 7.2 编写属性测试：Property 1 — `resolve_scale_config` 覆盖语义
     - 在 `Cargo.toml` 的 `[dev-dependencies]` 中新增 `proptest = "1"`
     - 在 `src/main.rs` 或独立测试文件中新增属性测试：
       对任意 `ScaleConfigToml` 和任意 calibrated `ScaleConfig`，
@@ -144,7 +144,7 @@
     - **Property 1: resolve_scale_config 覆盖语义**
     - **Validates: Requirements 1.3, 1.4**
 
-  - [ ]* 7.3 编写属性测试：Property 2 — 全码目标偏差公式正确性
+  - [x]* 7.3 编写属性测试：Property 2 — 全码目标偏差公式正确性
     - 对任意非负的 `v`、`target`、`scale`、`weight`、`low_weight`，
       验证 `compute_full_score` 中每个指标的得分分量等于：
       `weight * ((max(0, v - target) * scale).powi(2) + low_weight * (v * scale))`
@@ -152,32 +152,32 @@
     - **Property 2: 全码目标偏差公式正确性**
     - **Validates: Requirements 4.1, 4.4, 4.5**
 
-  - [ ]* 7.4 编写属性测试：Property 3 — 全码 `enabled=false` 时向后兼容
+  - [x]* 7.4 编写属性测试：Property 3 — 全码 `enabled=false` 时向后兼容
     - 对任意编码方案，当 `full_code.enabled = false` 时，
       `compute_full_score` 的结果与原始线性公式完全一致
     - **Property 3: 全码 enabled=false 时向后兼容**
     - **Validates: Requirements 4.2**
 
-  - [ ]* 7.5 编写属性测试：Property 4 — 简码目标偏差公式正确性（含频率覆盖损失方向）
+  - [x]* 7.5 编写属性测试：Property 4 — 简码目标偏差公式正确性（含频率覆盖损失方向）
     - 对任意简码指标值，当 `simple_code.enabled = true` 时，
       验证频率覆盖指标以 `v = 1 - coverage`、`target_v = 1 - t.freq` 计算，
       其余指标直接使用原始值，每个指标得分分量等于目标偏差公式计算值
     - **Property 4: 简码目标偏差公式正确性（含频率覆盖损失方向）**
     - **Validates: Requirements 5.1, 5.4**
 
-  - [ ]* 7.6 编写属性测试：Property 5 — 简码 `enabled=false` 时向后兼容
+  - [x]* 7.6 编写属性测试：Property 5 — 简码 `enabled=false` 时向后兼容
     - 对任意简码方案，当 `simple_code.enabled = false` 时，
       `compute_simple_score` 的结果与原始线性公式完全一致
     - **Property 5: 简码 enabled=false 时向后兼容**
     - **Validates: Requirements 5.2**
 
-  - [ ]* 7.7 编写属性测试：Property 6 — 非零 `_max` 约束必须拒绝超限方案
+  - [x]* 7.7 编写属性测试：Property 6 — 非零 `_max` 约束必须拒绝超限方案
     - 构造使某全码指标（如 `total_collisions`）超过对应 `_max` 的场景，
       验证 `try_move`/`try_swap` 返回 `false` 且 `assignment` 恢复为变动前的值
     - **Property 6: 非零 _max 约束必须拒绝超限方案**
     - **Validates: Requirements 6.1, 6.2, 6.3**
 
-  - [ ]* 7.8 编写属性测试：Property 7 — 所有 `_max = 0.0` 时不因硬约束拒绝方案
+  - [x]* 7.8 编写属性测试：Property 7 — 所有 `_max = 0.0` 时不因硬约束拒绝方案
     - 当 `TargetsConfig` 中所有 `_max` 字段均为 `0.0` 时，
       验证 `try_move`/`try_swap` 不因 `_max` 检查而返回 `false`
     - **Property 7: 所有 _max=0.0 时不因硬约束拒绝方案**

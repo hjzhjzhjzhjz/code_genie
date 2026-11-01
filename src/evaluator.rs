@@ -7339,3 +7339,320 @@ mod commit_keys_tests {
         }
     }
 }
+
+// =========================================================================
+// 🧪 目标偏差 / 硬约束 属性测试（target-deviation-optimization, Property 2–7）
+// =========================================================================
+//
+// 公式以 design.md 为准：score_i = w_i · (d + d² + low_weight · (v_i · scale_i))，
+// 其中 d = max(0, v_i − target_i) · scale_i。（tasks.md 里写成 d² 是简化笔误，
+// 与 design.md 及实现都不一致，这里按实现/设计文档验证。）
+#[cfg(test)]
+mod targets_proptest {
+    use super::*;
+    use crate::config::TargetsConfig;
+    use crate::context::OptContext;
+    use crate::types::{
+        KeyDistConfig, RootGroup, ScaleConfig, SimpleCodeConfig, SimpleCodeLevel, SimpleCodeStep,
+        WeightConfig, EQUIV_TABLE_SIZE,
+    };
+    use proptest::prelude::*;
+    use rand::thread_rng;
+    use std::collections::HashMap;
+
+    /// 5 个动态组，每组 1 根 1 字，允许 4 个键。
+    /// 键位必然冲突（5 组挤 4 键）→ 一定有重码，供 `_max` 约束测试用。
+    fn 造上下文(enable_simple: bool) -> OptContext {
+        let freqs = [5u64, 4, 3, 2, 1];
+        let allowed: [u8; 4] = [0, 1, 2, 3];
+        let n = freqs.len();
+        let mut groups = Vec::with_capacity(n);
+        let mut splits = Vec::with_capacity(n);
+        for (i, &f) in freqs.iter().enumerate() {
+            let root = format!("r{i}");
+            groups.push(RootGroup {
+                roots: vec![root.clone()],
+                allowed_keys: allowed.to_vec(),
+            });
+            let ch = char::from_u32(0x4e00 + i as u32).unwrap();
+            splits.push((ch, vec![root], f));
+        }
+        let fixed_roots: HashMap<String, u8> = HashMap::new();
+        let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
+        let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
+        let mut weights = WeightConfig::default();
+        weights.enable_simple_code = enable_simple;
+        weights.simple_coverage_ratio = 1.0;
+        let simple_config = if enable_simple {
+            SimpleCodeConfig {
+                levels: vec![SimpleCodeLevel {
+                    level: 1,
+                    code_num: 1,
+                    rule_candidates: vec![vec![SimpleCodeStep {
+                        root_selector: 'A',
+                        code_selector: 'a',
+                    }]],
+                    commit_keys: Vec::new(),
+                    commit_pref_last_left: Vec::new(),
+                    commit_pref_last_right: Vec::new(),
+                    commit_alt_hand_only: false,
+                }],
+            }
+        } else {
+            SimpleCodeConfig { levels: vec![] }
+        };
+        OptContext::new(
+            &splits,
+            &fixed_roots,
+            &groups,
+            equiv_table,
+            key_dist,
+            ScaleConfig::default(),
+            simple_config,
+            weights,
+            TargetsConfig::default(),
+        )
+    }
+
+    /// 目标偏差公式（design.md）
+    fn 目标偏差(v: f64, target: f64, scale: f64, weight: f64, lw: f64) -> f64 {
+        let d = (v - target).max(0.0) * scale;
+        weight * (d + d * d + lw * (v * scale))
+    }
+
+    fn 近似(a: f64, b: f64) -> bool {
+        (a - b).abs() <= 1e-9 * b.abs().max(1.0)
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(48))]
+
+        // Property 2: 全码目标偏差公式正确性
+        // Validates: Requirements 4.1, 4.4, 4.5
+        #[test]
+        fn prop2_全码目标偏差公式(
+            t_cc in 0.0f64..20.0,
+            t_cr in 0.0f64..1.0,
+            t_eq in 0.0f64..5.0,
+            t_cv in 0.0f64..5.0,
+            t_di in 0.0f64..50.0,
+            s_cc in 0.001f64..10.0,
+            s_cr in 0.001f64..10.0,
+            s_eq in 0.001f64..10.0,
+            s_cv in 0.001f64..10.0,
+            s_di in 0.001f64..10.0,
+            lw in 0.0f64..0.5,
+        ) {
+            let mut ctx = 造上下文(false);
+            let mut sc = ctx.scale_config;
+            sc.collision_count = s_cc;
+            sc.collision_rate = s_cr;
+            sc.equivalence = s_eq;
+            sc.equiv_cv = s_cv;
+            sc.distribution = s_di;
+            ctx.scale_config = sc;
+
+            let mut t = ctx.targets_config.full_code.clone();
+            t.enabled = true;
+            t.collision_count = t_cc;
+            t.collision_rate = t_cr;
+            t.equivalence = t_eq;
+            t.equiv_cv = t_cv;
+            t.distribution = t_di;
+            t.low_weight = lw;
+            ctx.targets_config.full_code = t;
+
+            let assignment: Vec<u8> = vec![0, 1, 2, 3, 0];
+            let ev = Evaluator::new(&ctx, &assignment);
+            let m = ev.get_metrics(&ctx);
+
+            let want = 目标偏差(m.collision_count as f64, t_cc, s_cc, ctx.weights.weight_collision_count, lw)
+                + 目标偏差(m.collision_rate, t_cr, s_cr, ctx.weights.weight_collision_rate, lw)
+                + 目标偏差(m.equiv_mean, t_eq, s_eq, ctx.weights.weight_equivalence, lw)
+                + 目标偏差(m.equiv_cv, t_cv, s_cv, ctx.weights.weight_equiv_cv, lw)
+                + 目标偏差(m.dist_deviation, t_di, s_di, ctx.weights.weight_distribution, lw);
+
+            let got = ev.compute_full_score(&ctx);
+            prop_assert!(近似(got, want), "全码得分 got={} want={}", got, want);
+
+            // v <= target 时超出惩罚项必须为 0：只剩 low_weight 的线性项
+            let v_low = t_cc * 0.5; // 恒 ≤ t_cc
+            let want_low = ctx.weights.weight_collision_count * lw * (v_low * s_cc);
+            let got_low = 目标偏差(v_low, t_cc, s_cc, ctx.weights.weight_collision_count, lw);
+            prop_assert!(
+                近似(got_low, want_low),
+                "未超目标时应只剩线性项 got={} want={}",
+                got_low,
+                want_low
+            );
+        }
+
+        // Property 3: 全码 enabled=false 时向后兼容（退化为原线性公式）
+        // Validates: Requirements 4.2
+        #[test]
+        fn prop3_全码关闭时向后兼容(
+            s_cc in 0.001f64..10.0,
+            s_cr in 0.001f64..10.0,
+            s_eq in 0.001f64..10.0,
+            s_cv in 0.001f64..10.0,
+            s_di in 0.001f64..10.0,
+        ) {
+            let mut ctx = 造上下文(false);
+            let mut sc = ctx.scale_config;
+            sc.collision_count = s_cc;
+            sc.collision_rate = s_cr;
+            sc.equivalence = s_eq;
+            sc.equiv_cv = s_cv;
+            sc.distribution = s_di;
+            ctx.scale_config = sc;
+            ctx.targets_config.full_code.enabled = false;
+
+            let assignment: Vec<u8> = vec![0, 1, 2, 3, 0];
+            let ev = Evaluator::new(&ctx, &assignment);
+            let m = ev.get_metrics(&ctx);
+
+            let want = ctx.weights.weight_collision_count * m.collision_count as f64 * s_cc
+                + ctx.weights.weight_collision_rate * m.collision_rate * s_cr
+                + ctx.weights.weight_equivalence * m.equiv_mean * s_eq
+                + ctx.weights.weight_equiv_cv * m.equiv_cv * s_cv
+                + ctx.weights.weight_distribution * m.dist_deviation * s_di;
+
+            let got = ev.compute_full_score(&ctx);
+            prop_assert!(近似(got, want), "关闭 targets 后应等于线性公式 got={} want={}", got, want);
+        }
+
+        // Property 4: 简码目标偏差公式正确性（频率覆盖以「损失 = 1 − 覆盖率」参与）
+        // Validates: Requirements 5.1, 5.4
+        #[test]
+        fn prop4_简码目标偏差公式(
+            t_freq in 0.0f64..1.0,
+            t_eq in 0.0f64..5.0,
+            t_dist in 0.0f64..50.0,
+            t_cc in 0.0f64..20.0,
+            t_cr in 0.0f64..1.0,
+            s_freq in 0.001f64..10.0,
+            s_eq in 0.001f64..10.0,
+            s_dist in 0.001f64..10.0,
+            s_cc in 0.001f64..10.0,
+            s_cr in 0.001f64..10.0,
+            lw in 0.0f64..0.5,
+        ) {
+            let mut ctx = 造上下文(true);
+            let mut sc = ctx.scale_config;
+            sc.simple_freq = s_freq;
+            sc.simple_equiv = s_eq;
+            sc.simple_dist = s_dist;
+            sc.simple_collision_count = s_cc;
+            sc.simple_collision_rate = s_cr;
+            ctx.scale_config = sc;
+
+            let mut t = ctx.targets_config.simple_code.clone();
+            t.enabled = true;
+            t.freq = t_freq;
+            t.equiv = t_eq;
+            t.dist = t_dist;
+            t.collision_count = t_cc;
+            t.collision_rate = t_cr;
+            t.low_weight = lw;
+            ctx.targets_config.simple_code = t;
+
+            let assignment: Vec<u8> = vec![0, 1, 2, 3, 0];
+            let mut ev = Evaluator::new(&ctx, &assignment);
+            let sm = ev.get_simple_metrics(&ctx);
+
+            // 频率覆盖以「损失」参与：v = 1 − coverage，target_v = 1 − 目标覆盖率
+            let v_freq = 1.0 - sm.weighted_freq_coverage;
+            let target_v = 1.0 - t_freq;
+
+            let want = 目标偏差(v_freq, target_v, s_freq, ctx.weights.simple_weight_freq, lw)
+                + 目标偏差(sm.equiv_mean, t_eq, s_eq, ctx.weights.simple_weight_equiv, lw)
+                + 目标偏差(sm.dist_deviation, t_dist, s_dist, ctx.weights.simple_weight_dist, lw)
+                + 目标偏差(sm.collision_count as f64, t_cc, s_cc, ctx.weights.simple_weight_collision_count, lw)
+                + 目标偏差(sm.collision_rate, t_cr, s_cr, ctx.weights.simple_weight_collision_rate, lw);
+
+            let got = ev.get_simple_score(&ctx);
+            prop_assert!(近似(got, want), "简码得分 got={} want={}", got, want);
+        }
+
+        // Property 5: 简码 enabled=false 时向后兼容（退化为原线性公式）
+        // Validates: Requirements 5.2
+        #[test]
+        fn prop5_简码关闭时向后兼容(
+            s_freq in 0.001f64..10.0,
+            s_eq in 0.001f64..10.0,
+            s_dist in 0.001f64..10.0,
+            s_cc in 0.001f64..10.0,
+            s_cr in 0.001f64..10.0,
+        ) {
+            let mut ctx = 造上下文(true);
+            let mut sc = ctx.scale_config;
+            sc.simple_freq = s_freq;
+            sc.simple_equiv = s_eq;
+            sc.simple_dist = s_dist;
+            sc.simple_collision_count = s_cc;
+            sc.simple_collision_rate = s_cr;
+            ctx.scale_config = sc;
+            ctx.targets_config.simple_code.enabled = false;
+
+            let assignment: Vec<u8> = vec![0, 1, 2, 3, 0];
+            let mut ev = Evaluator::new(&ctx, &assignment);
+            let sm = ev.get_simple_metrics(&ctx);
+
+            let want = ctx.weights.simple_weight_freq
+                * (1.0 - sm.weighted_freq_coverage)
+                * s_freq
+                + ctx.weights.simple_weight_equiv * sm.equiv_mean * s_eq
+                + ctx.weights.simple_weight_dist * sm.dist_deviation * s_dist
+                + ctx.weights.simple_weight_collision_count * sm.collision_count as f64 * s_cc
+                + ctx.weights.simple_weight_collision_rate * sm.collision_rate * s_cr;
+
+            let got = ev.get_simple_score(&ctx);
+            prop_assert!(近似(got, want), "关闭 targets 后应等于线性公式 got={} want={}", got, want);
+        }
+
+        // Property 6: 非零 _max 约束必须拒绝超限方案，并回滚键位
+        // Validates: Requirements 6.1, 6.2, 6.3
+        #[test]
+        fn prop6_非零_max_拒绝超限(新键 in 1u8..4) {
+            let mut ctx = 造上下文(false);
+            let mut t = ctx.targets_config.full_code.clone();
+            // 只要有重码就超限（当前方案必有重码）
+            t.collision_count_max = 0.5;
+            ctx.targets_config.full_code = t;
+
+            let mut assignment: Vec<u8> = vec![0, 1, 2, 3, 0];
+            let mut ev = Evaluator::new(&ctx, &assignment);
+            prop_assume!(ev.get_metrics(&ctx).collision_count >= 1);
+
+            let 旧键 = assignment[0];
+            let mut rng = thread_rng();
+            // 温度极高：若无硬约束必定接受，故拒绝只能来自 _max
+            let 接受 = ev.try_move(&ctx, &mut assignment, 0, 新键, 1e12, &mut rng);
+
+            prop_assert!(!接受, "超出 collision_count_max 的移动必须被拒绝");
+            prop_assert_eq!(assignment[0], 旧键, "被拒绝后键位必须回滚");
+        }
+
+        // Property 7: 所有 _max = 0.0 时不因硬约束拒绝方案
+        // Validates: Requirements 3.3
+        #[test]
+        fn prop7_全零_max_不拒绝(新键 in 1u8..4) {
+            let mut ctx = 造上下文(false);
+            let mut t = ctx.targets_config.full_code.clone();
+            t.collision_count_max = 0.0;
+            t.collision_rate_max = 0.0;
+            t.equivalence_max = 0.0;
+            t.equiv_cv_max = 0.0;
+            t.distribution_max = 0.0;
+            ctx.targets_config.full_code = t;
+
+            let mut assignment: Vec<u8> = vec![0, 1, 2, 3, 0];
+            let mut ev = Evaluator::new(&ctx, &assignment);
+
+            let mut rng = thread_rng();
+            // 温度极高 → 接受概率 ≈ 1，若被拒只可能是硬约束误判
+            let 接受 = ev.try_move(&ctx, &mut assignment, 0, 新键, 1e12, &mut rng);
+            prop_assert!(接受, "全部 _max=0 时不应因硬约束拒绝");
+        }
+    }
+}

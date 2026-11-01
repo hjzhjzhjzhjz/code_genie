@@ -2541,3 +2541,126 @@ mod seed_path_tests {
         }
     }
 }
+
+// =========================================================================
+// 🧪 尺度覆盖语义 属性测试（target-deviation-optimization, Property 1）
+// =========================================================================
+#[cfg(test)]
+mod scale_proptest {
+    use super::*;
+    use crate::config::ScaleConfigToml;
+    use crate::types::ScaleConfig;
+    use proptest::prelude::*;
+
+    /// 与 `resolve_scale_config` 内部的 `to_scale` 同口径：取倒数，0 值保护
+    fn 取倒数(v: f64) -> f64 {
+        if v > 0.0 {
+            1.0 / v
+        } else {
+            1.0
+        }
+    }
+
+    fn 近似(a: f64, b: f64) -> bool {
+        (a - b).abs() <= 1e-12 * b.abs().max(1.0)
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(64))]
+
+        // Property 1: resolve_scale_config 覆盖语义
+        // 任意手动配置 × 任意校准值：Some 字段 = 手动值取倒数，None 字段 = 校准值
+        // Validates: Requirements 1.3, 1.4
+        #[test]
+        fn prop1_尺度覆盖语义(
+            手动 in proptest::collection::vec(proptest::option::of(0.0f64..1e3), 10),
+            校准 in proptest::collection::vec(1e-6f64..1e3, 10),
+            simple_enabled in any::<bool>(),
+        ) {
+            let toml = ScaleConfigToml {
+                collision_count: 手动[0],
+                collision_rate: 手动[1],
+                equivalence: 手动[2],
+                equiv_cv: 手动[3],
+                distribution: 手动[4],
+                simple_freq: 手动[5],
+                simple_equiv: 手动[6],
+                simple_dist: 手动[7],
+                simple_collision_count: 手动[8],
+                simple_collision_rate: 手动[9],
+            };
+            let calibrated = ScaleConfig {
+                collision_count: 校准[0],
+                collision_rate: 校准[1],
+                equivalence: 校准[2],
+                equiv_cv: 校准[3],
+                distribution: 校准[4],
+                simple_freq: 校准[5],
+                simple_equiv: 校准[6],
+                simple_dist: 校准[7],
+                simple_collision_count: 校准[8],
+                simple_collision_rate: 校准[9],
+            };
+
+            let mut cfg = Config::default();
+            cfg.weights.simple_code.enabled = simple_enabled;
+            cfg.scale = Some(toml);
+
+            let (got, 来源) = resolve_scale_config(&cfg, calibrated);
+            prop_assert!(来源 == "手动配置" || 来源 == "自动校准");
+
+            // 逐字段：Some → 取倒数(手动值)；None → 校准值
+            let 期望 = |手动值: Option<f64>, 校准值: f64| 手动值.map(取倒数).unwrap_or(校准值);
+
+            prop_assert!(近似(got.collision_count, 期望(手动[0], 校准[0])),
+                "collision_count got={} want={}", got.collision_count, 期望(手动[0], 校准[0]));
+            prop_assert!(近似(got.collision_rate, 期望(手动[1], 校准[1])),
+                "collision_rate got={} want={}", got.collision_rate, 期望(手动[1], 校准[1]));
+            prop_assert!(近似(got.equivalence, 期望(手动[2], 校准[2])),
+                "equivalence got={} want={}", got.equivalence, 期望(手动[2], 校准[2]));
+            prop_assert!(近似(got.equiv_cv, 期望(手动[3], 校准[3])),
+                "equiv_cv got={} want={}", got.equiv_cv, 期望(手动[3], 校准[3]));
+            prop_assert!(近似(got.distribution, 期望(手动[4], 校准[4])),
+                "distribution got={} want={}", got.distribution, 期望(手动[4], 校准[4]));
+            prop_assert!(近似(got.simple_freq, 期望(手动[5], 校准[5])),
+                "simple_freq got={} want={}", got.simple_freq, 期望(手动[5], 校准[5]));
+            prop_assert!(近似(got.simple_equiv, 期望(手动[6], 校准[6])),
+                "simple_equiv got={} want={}", got.simple_equiv, 期望(手动[6], 校准[6]));
+            prop_assert!(近似(got.simple_dist, 期望(手动[7], 校准[7])),
+                "simple_dist got={} want={}", got.simple_dist, 期望(手动[7], 校准[7]));
+            prop_assert!(近似(got.simple_collision_count, 期望(手动[8], 校准[8])),
+                "simple_collision_count got={} want={}", got.simple_collision_count, 期望(手动[8], 校准[8]));
+            prop_assert!(近似(got.simple_collision_rate, 期望(手动[9], 校准[9])),
+                "simple_collision_rate got={} want={}", got.simple_collision_rate, 期望(手动[9], 校准[9]));
+        }
+
+        // Property 1 的边界：完全不给 [scale] 段时必须原样返回校准值
+        #[test]
+        fn prop1b_无手动配置时原样返回校准值(
+            校准 in proptest::collection::vec(1e-6f64..1e3, 10),
+            simple_enabled in any::<bool>(),
+        ) {
+            let calibrated = ScaleConfig {
+                collision_count: 校准[0],
+                collision_rate: 校准[1],
+                equivalence: 校准[2],
+                equiv_cv: 校准[3],
+                distribution: 校准[4],
+                simple_freq: 校准[5],
+                simple_equiv: 校准[6],
+                simple_dist: 校准[7],
+                simple_collision_count: 校准[8],
+                simple_collision_rate: 校准[9],
+            };
+            let mut cfg = Config::default();
+            cfg.weights.simple_code.enabled = simple_enabled;
+            cfg.scale = None;
+
+            let (got, 来源) = resolve_scale_config(&cfg, calibrated);
+            prop_assert_eq!(来源, "自动校准");
+            prop_assert!(近似(got.collision_count, 校准[0]));
+            prop_assert!(近似(got.distribution, 校准[4]));
+            prop_assert!(近似(got.simple_collision_rate, 校准[9]));
+        }
+    }
+}
