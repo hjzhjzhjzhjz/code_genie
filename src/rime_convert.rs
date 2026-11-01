@@ -873,6 +873,29 @@ mod tests {
     }
 
     #[test]
+    fn 词码四字以上取首三码加末字首码() {
+        let mut 字码 = HashMap::new();
+        for (k, v) in [
+            ("甲", "abcd"),
+            ("乙", "efgh"),
+            ("丙", "ijkl"),
+            ("丁", "mnop"),
+            ("戊", "qrst"),
+            ("己", "uvwx"),
+        ] {
+            字码.insert(k.to_string(), v.to_string());
+        }
+        // AaBaCaZa：首字首码 + 2字首码 + 3字首码 + 末字首码
+        assert_eq!(词码("甲乙丙丁", &字码).unwrap(), "aeim");
+        assert_eq!(词码("甲乙丙丁戊", &字码).unwrap(), "aeiq", "末字取戊");
+        assert_eq!(词码("甲乙丙丁戊己", &字码).unwrap(), "aeiu", "末字取己");
+        // 单字不成词
+        assert!(词码("甲", &字码).is_none());
+        // 有字不在字码表里则整词放弃
+        assert!(词码("甲X", &字码).is_none());
+    }
+
+    #[test]
     fn 拆分式最长匹配() {
         let 清单 = vec![
             "白".to_string(),
