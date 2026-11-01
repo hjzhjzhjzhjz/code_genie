@@ -14,36 +14,36 @@ use rayon::prelude::*;
 
 mod annealing;
 mod assess;
-mod diagnose;
-mod handfeel;
-mod pipeline;
-mod rime_convert;
-mod sentence;
 mod bucket_store;
 mod calibrate;
 mod checkpoint;
 mod config;
 mod context;
+mod diagnose;
 mod evaluator;
 mod export_table;
 mod fsutil;
+mod handfeel;
 mod loader;
 mod output;
+mod pipeline;
+mod rime_convert;
 mod root_chart;
 mod schedule;
+mod sentence;
 mod simple;
 mod types;
 mod validate;
 
 use crate::annealing::{simulated_annealing_resumable, SaResult};
-use crate::checkpoint::ThreadCheckpoint;
 use crate::calibrate::{auto_temperature, calibrate_scales};
+use crate::checkpoint::ThreadCheckpoint;
 use crate::config::{Config, TargetsConfig};
 use crate::context::OptContext;
 use crate::evaluator::Evaluator;
 use crate::output::{save_results, save_summary, save_thread_results};
 use crate::types::{
-    key_to_char, ScaleConfig, SimpleCodeConfig, SimpleMetrics, EQUIV_TABLE_SIZE, KeyDistConfig,
+    key_to_char, KeyDistConfig, ScaleConfig, SimpleCodeConfig, SimpleMetrics, EQUIV_TABLE_SIZE,
 };
 
 // =========================================================================
@@ -607,7 +607,11 @@ fn run_bench(cfg: &Config, iters: usize, steps: usize) {
 
     // 加载输入并构建上下文（perf 与 scale 数值无关，用默认 scale/targets）
     let (fixed_roots, constrained) = must(loader::load_fixed(&cfg.files.fixed));
-    let dynamic_groups = must(loader::load_dynamic(&cfg.files.dynamic, &constrained, &cfg.keys.allowed));
+    let dynamic_groups = must(loader::load_dynamic(
+        &cfg.files.dynamic,
+        &constrained,
+        &cfg.keys.allowed,
+    ));
     let splits = must(loader::load_splits(&cfg.files.splits));
     let equiv_table = or_warn_default(loader::load_pair_equivalence(&cfg.files.pair_equiv));
     let key_dist_config = or_warn_default(loader::load_key_distribution(&cfg.files.key_dist));
@@ -651,7 +655,11 @@ fn run_bench(cfg: &Config, iters: usize, steps: usize) {
         }
         let dt = t.elapsed().as_secs_f64();
         std::hint::black_box(acc);
-        println!("  [eval]          {:>10.2} μs/次  ({:>12.0} 次/秒)", dt * 1e6 / iters as f64, iters as f64 / dt);
+        println!(
+            "  [eval]          {:>10.2} μs/次  ({:>12.0} 次/秒)",
+            dt * 1e6 / iters as f64,
+            iters as f64 / dt
+        );
     }
 
     // 2) try_move
@@ -671,7 +679,11 @@ fn run_bench(cfg: &Config, iters: usize, steps: usize) {
         }
         let dt = t.elapsed().as_secs_f64();
         std::hint::black_box(acc);
-        println!("  [try_move]      {:>10.2} μs/次  ({:>12.0} 次/秒)", dt * 1e6 / iters as f64, iters as f64 / dt);
+        println!(
+            "  [try_move]      {:>10.2} μs/次  ({:>12.0} 次/秒)",
+            dt * 1e6 / iters as f64,
+            iters as f64 / dt
+        );
     }
 
     if n >= 2 {
@@ -698,7 +710,11 @@ fn run_bench(cfg: &Config, iters: usize, steps: usize) {
             }
             let dt = t.elapsed().as_secs_f64();
             std::hint::black_box(acc);
-            println!("  [try_swap]      {:>10.2} μs/次  ({:>12.0} 次/秒)", dt * 1e6 / iters as f64, iters as f64 / dt);
+            println!(
+                "  [try_swap]      {:>10.2} μs/次  ({:>12.0} 次/秒)",
+                dt * 1e6 / iters as f64,
+                iters as f64 / dt
+            );
         }
 
         // 4) try_full_key_swap（新增大邻域算子）
@@ -715,7 +731,11 @@ fn run_bench(cfg: &Config, iters: usize, steps: usize) {
             }
             let dt = t.elapsed().as_secs_f64();
             std::hint::black_box(acc);
-            println!("  [full_key_swap] {:>10.2} μs/次  ({:>12.0} 次/秒)", dt * 1e6 / iters as f64, iters as f64 / dt);
+            println!(
+                "  [full_key_swap] {:>10.2} μs/次  ({:>12.0} 次/秒)",
+                dt * 1e6 / iters as f64,
+                iters as f64 / dt
+            );
         }
     }
 
@@ -932,18 +952,9 @@ fn run_evaluate(
         "  「全码」重码率:          {:.6}%",
         metrics.collision_rate * 100.0
     );
-    println!(
-        "  「全码」加权键均当量:    {:.4}",
-        metrics.equiv_mean
-    );
-    println!(
-        "  「全码」当量变异系数(CV): {:.4}",
-        metrics.equiv_cv
-    );
-    println!(
-        "  「全码」用指分布偏差(L2): {:.4}",
-        metrics.dist_deviation
-    );
+    println!("  「全码」加权键均当量:    {:.4}", metrics.equiv_mean);
+    println!("  「全码」当量变异系数(CV): {:.4}", metrics.equiv_cv);
+    println!("  「全码」用指分布偏差(L2): {:.4}", metrics.dist_deviation);
 
     if !ctx.simple_config.levels.is_empty() {
         println!("  ─────────────────────────────────────");
@@ -1015,14 +1026,8 @@ fn build_evaluate_report(
         "# 重码率: {:.6}%\n",
         metrics.collision_rate * 100.0
     ));
-    out.push_str(&format!(
-        "# 加权键均当量: {:.4}\n",
-        metrics.equiv_mean
-    ));
-    out.push_str(&format!(
-        "# 当量变异系数(CV): {:.4}\n",
-        metrics.equiv_cv
-    ));
+    out.push_str(&format!("# 加权键均当量: {:.4}\n", metrics.equiv_mean));
+    out.push_str(&format!("# 当量变异系数(CV): {:.4}\n", metrics.equiv_cv));
     out.push_str(&format!(
         "# 用指分布偏差(L2): {:.4}\n",
         metrics.dist_deviation
@@ -1110,10 +1115,7 @@ fn build_evaluate_report(
     out.push_str("# 当量分布\n");
     out.push_str("# ═══════════════════════════════════════\n");
     out.push_str(&format!("# 平均当量: {:.4}\n", metrics.equiv_mean));
-    out.push_str(&format!(
-        "# 变异系数(CV): {:.4}\n",
-        metrics.equiv_cv
-    ));
+    out.push_str(&format!("# 变异系数(CV): {:.4}\n", metrics.equiv_cv));
     out.push_str(&format!(
         "# 标准差: {:.4}\n",
         metrics.equiv_cv * metrics.equiv_mean
@@ -1252,13 +1254,12 @@ fn resolve_scale_config(cfg: &Config, calibrated: ScaleConfig) -> (ScaleConfig, 
                 && toml.distribution.is_some();
 
             // 简码字段：仅在 simple_code.enabled = true 时才要求设置
-            let simple_code_set = !simple_enabled || (
-                toml.simple_freq.is_some()
+            let simple_code_set = !simple_enabled
+                || (toml.simple_freq.is_some()
                     && toml.simple_equiv.is_some()
                     && toml.simple_dist.is_some()
                     && toml.simple_collision_count.is_some()
-                    && toml.simple_collision_rate.is_some()
-            );
+                    && toml.simple_collision_rate.is_some());
 
             let all_set = full_code_set && simple_code_set;
 
@@ -1275,16 +1276,31 @@ fn resolve_scale_config(cfg: &Config, calibrated: ScaleConfig) -> (ScaleConfig, 
                     toml.distribution,
                 ) {
                     let sc = ScaleConfig {
-                        collision_count:        to_scale(cc),
-                        collision_rate:         to_scale(cr),
-                        equivalence:            to_scale(eq),
-                        equiv_cv:               to_scale(cv),
-                        distribution:           to_scale(di),
-                        simple_freq:            toml.simple_freq.map(to_scale).unwrap_or(calibrated.simple_freq),
-                        simple_equiv:           toml.simple_equiv.map(to_scale).unwrap_or(calibrated.simple_equiv),
-                        simple_dist:            toml.simple_dist.map(to_scale).unwrap_or(calibrated.simple_dist),
-                        simple_collision_count: toml.simple_collision_count.map(to_scale).unwrap_or(calibrated.simple_collision_count),
-                        simple_collision_rate:  toml.simple_collision_rate.map(to_scale).unwrap_or(calibrated.simple_collision_rate),
+                        collision_count: to_scale(cc),
+                        collision_rate: to_scale(cr),
+                        equivalence: to_scale(eq),
+                        equiv_cv: to_scale(cv),
+                        distribution: to_scale(di),
+                        simple_freq: toml
+                            .simple_freq
+                            .map(to_scale)
+                            .unwrap_or(calibrated.simple_freq),
+                        simple_equiv: toml
+                            .simple_equiv
+                            .map(to_scale)
+                            .unwrap_or(calibrated.simple_equiv),
+                        simple_dist: toml
+                            .simple_dist
+                            .map(to_scale)
+                            .unwrap_or(calibrated.simple_dist),
+                        simple_collision_count: toml
+                            .simple_collision_count
+                            .map(to_scale)
+                            .unwrap_or(calibrated.simple_collision_count),
+                        simple_collision_rate: toml
+                            .simple_collision_rate
+                            .map(to_scale)
+                            .unwrap_or(calibrated.simple_collision_rate),
                     };
                     (sc, "手动配置")
                 } else {
@@ -1294,16 +1310,36 @@ fn resolve_scale_config(cfg: &Config, calibrated: ScaleConfig) -> (ScaleConfig, 
             } else {
                 // 部分覆盖：以 calibrated 为基础，用手动值（取倒数后）覆盖
                 let mut sc = calibrated;
-                if let Some(v) = toml.collision_count        { sc.collision_count = to_scale(v); }
-                if let Some(v) = toml.collision_rate         { sc.collision_rate = to_scale(v); }
-                if let Some(v) = toml.equivalence            { sc.equivalence = to_scale(v); }
-                if let Some(v) = toml.equiv_cv               { sc.equiv_cv = to_scale(v); }
-                if let Some(v) = toml.distribution           { sc.distribution = to_scale(v); }
-                if let Some(v) = toml.simple_freq            { sc.simple_freq = to_scale(v); }
-                if let Some(v) = toml.simple_equiv           { sc.simple_equiv = to_scale(v); }
-                if let Some(v) = toml.simple_dist            { sc.simple_dist = to_scale(v); }
-                if let Some(v) = toml.simple_collision_count { sc.simple_collision_count = to_scale(v); }
-                if let Some(v) = toml.simple_collision_rate  { sc.simple_collision_rate = to_scale(v); }
+                if let Some(v) = toml.collision_count {
+                    sc.collision_count = to_scale(v);
+                }
+                if let Some(v) = toml.collision_rate {
+                    sc.collision_rate = to_scale(v);
+                }
+                if let Some(v) = toml.equivalence {
+                    sc.equivalence = to_scale(v);
+                }
+                if let Some(v) = toml.equiv_cv {
+                    sc.equiv_cv = to_scale(v);
+                }
+                if let Some(v) = toml.distribution {
+                    sc.distribution = to_scale(v);
+                }
+                if let Some(v) = toml.simple_freq {
+                    sc.simple_freq = to_scale(v);
+                }
+                if let Some(v) = toml.simple_equiv {
+                    sc.simple_equiv = to_scale(v);
+                }
+                if let Some(v) = toml.simple_dist {
+                    sc.simple_dist = to_scale(v);
+                }
+                if let Some(v) = toml.simple_collision_count {
+                    sc.simple_collision_count = to_scale(v);
+                }
+                if let Some(v) = toml.simple_collision_rate {
+                    sc.simple_collision_rate = to_scale(v);
+                }
                 (sc, "部分手动覆盖")
             }
         }
@@ -1328,9 +1364,7 @@ fn resolve_seed_paths(
     seed_keymap: Option<&str>,
 ) -> Result<Vec<String>, String> {
     match (seed_dir, seed_keymap) {
-        (Some(_), Some(_)) => {
-            Err("--seed-dir 与 --seed-keymap 互斥，不能同时指定".to_string())
-        }
+        (Some(_), Some(_)) => Err("--seed-dir 与 --seed-keymap 互斥，不能同时指定".to_string()),
         (None, None) => Ok(Vec::new()),
         (None, Some(file)) => {
             if !std::path::Path::new(file).is_file() {
@@ -1345,8 +1379,8 @@ fn resolve_seed_paths(
             }
             // 收集 (NN, keymap_path)，按 NN 升序
             let mut found: Vec<(u32, String)> = Vec::new();
-            let entries = std::fs::read_dir(dir_path)
-                .map_err(|e| format!("无法读取目录 {}: {}", dir, e))?;
+            let entries =
+                std::fs::read_dir(dir_path).map_err(|e| format!("无法读取目录 {}: {}", dir, e))?;
             for entry in entries.flatten() {
                 if !entry.path().is_dir() {
                     continue;
@@ -1418,9 +1452,7 @@ fn run_optimize(
         "线程数: {}, 总步数: {}",
         cfg.annealing.threads, cfg.annealing.total_steps
     );
-    println!(
-        "温度: 自动标定（按初态采样 |Δscore|，运行时打印实际 t_start/t_end）"
-    );
+    println!("温度: 自动标定（按初态采样 |Δscore|，运行时打印实际 t_start/t_end）");
     println!("全局允许键位: {}", cfg.keys.allowed);
     println!(
         "全码权重: 重码数={:.2}, 重码率={:.2}, 当量={:.2}, CV={:.2}, 分布={:.2}",
@@ -1470,7 +1502,11 @@ fn run_optimize(
 
     // ==================== 加载数据 ====================
     let (fixed_roots, constrained) = must(loader::load_fixed(&cfg.files.fixed));
-    let dynamic_groups = must(loader::load_dynamic(&cfg.files.dynamic, &constrained, &cfg.keys.allowed));
+    let dynamic_groups = must(loader::load_dynamic(
+        &cfg.files.dynamic,
+        &constrained,
+        &cfg.keys.allowed,
+    ));
     let splits = must(loader::load_splits(&cfg.files.splits));
 
     // 加载简码配置
@@ -1545,23 +1581,26 @@ fn run_optimize(
     // 校准后复用 temp_ctx 作为正式 ctx，仅就地更新评分用的 scale/targets（二者不参与
     // 构建期预计算，仅评分路径读取）。all_manual（手动 scale 跳过校准）无 temp_ctx，
     // 正式 ctx 仍需单独构建一次。
-    let (scale_config, scale_source, calib_ctx): (types::ScaleConfig, &'static str, Option<OptContext>) =
-        if let Some(sp) = scale_arg.as_deref() {
-            let text = std::fs::read_to_string(sp).unwrap_or_else(|e| {
-                eprintln!("❌ 读不了尺度文件 {}: {}", sp, e);
-                std::process::exit(1);
-            });
-            let sc: types::ScaleConfig = serde_json::from_str(&text).unwrap_or_else(|e| {
-                eprintln!("❌ 尺度文件解析失败: {}", e);
-                std::process::exit(1);
-            });
-            println!("\n📐 复用尺度文件 {}（跳过校准，多轮口径一致）", sp);
-            (sc, "复用尺度文件", None)
-        } else if all_manual {
-            println!("\n📐 ScaleConfig 已全部手动配置，跳过自动校准...");
-            let (sc, src) = resolve_scale_config(cfg, types::ScaleConfig::default());
-            (sc, src, None)
-        } else {
+    let (scale_config, scale_source, calib_ctx): (
+        types::ScaleConfig,
+        &'static str,
+        Option<OptContext>,
+    ) = if let Some(sp) = scale_arg.as_deref() {
+        let text = std::fs::read_to_string(sp).unwrap_or_else(|e| {
+            eprintln!("❌ 读不了尺度文件 {}: {}", sp, e);
+            std::process::exit(1);
+        });
+        let sc: types::ScaleConfig = serde_json::from_str(&text).unwrap_or_else(|e| {
+            eprintln!("❌ 尺度文件解析失败: {}", e);
+            std::process::exit(1);
+        });
+        println!("\n📐 复用尺度文件 {}（跳过校准，多轮口径一致）", sp);
+        (sc, "复用尺度文件", None)
+    } else if all_manual {
+        println!("\n📐 ScaleConfig 已全部手动配置，跳过自动校准...");
+        let (sc, src) = resolve_scale_config(cfg, types::ScaleConfig::default());
+        (sc, src, None)
+    } else {
         println!("\n📐 正在进行初始尺度校准...");
         // C8：当量/分布仅校准路径需要，就地加载（all_manual / 复用尺度路径不再重复读）。
         let equiv_table = or_warn_default(loader::load_pair_equivalence(&cfg.files.pair_equiv));
@@ -1578,7 +1617,7 @@ fn run_optimize(
             weights,
             TargetsConfig::default(),
             &cfg.get_fixed_simple_codes(),
-        &cfg.keys.termination_keys,
+            &cfg.keys.termination_keys,
         );
 
         let initial_assignment = annealing::smart_init(&temp_ctx, cfg);
@@ -1719,8 +1758,14 @@ fn run_optimize(
         println!("    SimpleFreq:     {:.6}", scale_config.simple_freq);
         println!("    SimpleEquiv:    {:.6}", scale_config.simple_equiv);
         println!("    SimpleDist:     {:.6}", scale_config.simple_dist);
-        println!("    SimpleCollCnt:  {:.6}", scale_config.simple_collision_count);
-        println!("    SimpleCollRate: {:.6}", scale_config.simple_collision_rate);
+        println!(
+            "    SimpleCollCnt:  {:.6}",
+            scale_config.simple_collision_count
+        );
+        println!(
+            "    SimpleCollRate: {:.6}",
+            scale_config.simple_collision_rate
+        );
     }
 
     // ==================== 正式优化 ====================
@@ -1736,8 +1781,10 @@ fn run_optimize(
         }
         // all_manual：跳过了校准、无可复用上下文，正式 ctx 单独构建一次。
         None => {
-            let equiv_table_2 = or_warn_default(loader::load_pair_equivalence(&cfg.files.pair_equiv));
-            let key_dist_config_2 = or_warn_default(loader::load_key_distribution(&cfg.files.key_dist));
+            let equiv_table_2 =
+                or_warn_default(loader::load_pair_equivalence(&cfg.files.pair_equiv));
+            let key_dist_config_2 =
+                or_warn_default(loader::load_key_distribution(&cfg.files.key_dist));
             OptContext::new_with_fixed_and_termination(
                 &splits,
                 &fixed_roots,
@@ -1962,23 +2009,62 @@ fn finalize_and_save(
     if cfg.weights.simple_code.enabled {
         let full_comp = ctx.weights.weight_full_code * best_scores.total_full;
         let simple_comp = ctx.weights.weight_simple_code * best_scores.total_simple;
-        println!("   综合得分: {:.4} (全码:{:.4} 简码:{:.4})", best_score, full_comp, simple_comp);
+        println!(
+            "   综合得分: {:.4} (全码:{:.4} 简码:{:.4})",
+            best_score, full_comp, simple_comp
+        );
     } else {
         println!("   综合得分: {:.4}", best_score);
     }
-    println!("   「全码」重码数: {}  (分: {:.4})", m.collision_count, best_scores.collision_count);
-    println!("   「全码」重码率: {:.6}%  (分: {:.4})", m.collision_rate * 100.0, best_scores.collision_rate);
-    println!("   「全码」加权键均当量: {:.4}  (分: {:.4})", m.equiv_mean, best_scores.equivalence);
-    println!("   「全码」当量变异系数(CV): {:.4}  (分: {:.4})", m.equiv_cv, best_scores.equiv_cv);
-    println!("   「全码」用指分布偏差(L2): {:.4}  (分: {:.4})", m.dist_deviation, best_scores.distribution);
+    println!(
+        "   「全码」重码数: {}  (分: {:.4})",
+        m.collision_count, best_scores.collision_count
+    );
+    println!(
+        "   「全码」重码率: {:.6}%  (分: {:.4})",
+        m.collision_rate * 100.0,
+        best_scores.collision_rate
+    );
+    println!(
+        "   「全码」加权键均当量: {:.4}  (分: {:.4})",
+        m.equiv_mean, best_scores.equivalence
+    );
+    println!(
+        "   「全码」当量变异系数(CV): {:.4}  (分: {:.4})",
+        m.equiv_cv, best_scores.equiv_cv
+    );
+    println!(
+        "   「全码」用指分布偏差(L2): {:.4}  (分: {:.4})",
+        m.dist_deviation, best_scores.distribution
+    );
     if cfg.weights.simple_code.enabled {
         println!("---------------------------------");
-        println!("   「简码」总分: {:.4}  (范围: output 输出全集)", simple_sub.total);
-        println!("   「简码」重码数: {}  (分: {:.4})", sm.collision_count, simple_sub.collision_count);
-        println!("   「简码」重码率: {:.6}%  (分: {:.4})", sm.collision_rate * 100.0, simple_sub.collision_rate);
-        println!("   「简码」覆盖率: {:.4}%  (分: {:.4})", sm.weighted_freq_coverage * 100.0, simple_sub.freq);
-        println!("   「简码」加权当量: {:.4}  (分: {:.4})", sm.equiv_mean, simple_sub.equiv);
-        println!("   「简码」分布偏差: {:.4}  (分: {:.4})", sm.dist_deviation, simple_sub.dist);
+        println!(
+            "   「简码」总分: {:.4}  (范围: output 输出全集)",
+            simple_sub.total
+        );
+        println!(
+            "   「简码」重码数: {}  (分: {:.4})",
+            sm.collision_count, simple_sub.collision_count
+        );
+        println!(
+            "   「简码」重码率: {:.6}%  (分: {:.4})",
+            sm.collision_rate * 100.0,
+            simple_sub.collision_rate
+        );
+        println!(
+            "   「简码」覆盖率: {:.4}%  (分: {:.4})",
+            sm.weighted_freq_coverage * 100.0,
+            simple_sub.freq
+        );
+        println!(
+            "   「简码」加权当量: {:.4}  (分: {:.4})",
+            sm.equiv_mean, simple_sub.equiv
+        );
+        println!(
+            "   「简码」分布偏差: {:.4}  (分: {:.4})",
+            sm.dist_deviation, simple_sub.dist
+        );
     }
     println!("⏱️ 总耗时: {:?}", elapsed);
     println!("=================================");
@@ -2013,10 +2099,7 @@ fn finalize_and_save(
     let 出了完整码表 = match 全量拆分路径(cfg) {
         Some(p) => {
             if !std::path::Path::new(&p).is_file() {
-                eprintln!(
-                    "❌ files.full_splits 指向的文件不存在: {}，跳过完整码表",
-                    p
-                );
+                eprintln!("❌ files.full_splits 指向的文件不存在: {}，跳过完整码表", p);
                 false
             } else {
                 let 全量 = crate::export_table::加载拆分表(&p);
@@ -2258,7 +2341,11 @@ fn run_resume(dir: &str) {
 
     // 3) 重建优化上下文（复用 meta.scale_config，跳过 calibrate，需求 6.3）。
     let (fixed_roots, constrained) = must(loader::load_fixed(&cfg.files.fixed));
-    let dynamic_groups = must(loader::load_dynamic(&cfg.files.dynamic, &constrained, &cfg.keys.allowed));
+    let dynamic_groups = must(loader::load_dynamic(
+        &cfg.files.dynamic,
+        &constrained,
+        &cfg.keys.allowed,
+    ));
     let splits = must(loader::load_splits(&cfg.files.splits));
     let equiv_table = or_warn_default(loader::load_pair_equivalence(&cfg.files.pair_equiv));
     let key_dist_config = or_warn_default(loader::load_key_distribution(&cfg.files.key_dist));
@@ -2327,8 +2414,7 @@ fn run_resume(dir: &str) {
     // 舒适区也按 meta 的绝对温度反解回「曲线位置」：p = ln(Tc/Ts) / ln(Te/Ts)。
     // 旧检查点若 comfort_temp 缺失/为 0，则沿用配置的 comfort_progress。
     if meta.comfort_temp > 0.0 && meta.temp_start > meta.temp_end && meta.temp_end > 0.0 {
-        let p = (meta.comfort_temp / meta.temp_start).ln()
-            / (meta.temp_end / meta.temp_start).ln();
+        let p = (meta.comfort_temp / meta.temp_start).ln() / (meta.temp_end / meta.temp_start).ln();
         sa_cfg.annealing.comfort_progress = p.clamp(0.0, 1.0);
     }
 
@@ -2388,8 +2474,14 @@ mod backup_tests {
         cfg.files.fixed = src.join("input-fixed.txt").to_string_lossy().to_string();
         cfg.files.dynamic = src.join("input-roots.txt").to_string_lossy().to_string();
         cfg.files.splits = src.join("input-division.txt").to_string_lossy().to_string();
-        cfg.files.pair_equiv = src.join("pair_equivalence.txt").to_string_lossy().to_string();
-        cfg.files.key_dist = src.join("key_distribution.txt").to_string_lossy().to_string();
+        cfg.files.pair_equiv = src
+            .join("pair_equivalence.txt")
+            .to_string_lossy()
+            .to_string();
+        cfg.files.key_dist = src
+            .join("key_distribution.txt")
+            .to_string_lossy()
+            .to_string();
         let config_path = src.join("config.toml").to_string_lossy().to_string();
 
         backup_inputs(&cfg, &config_path, &out.to_string_lossy());
@@ -2399,7 +2491,11 @@ mod backup_tests {
         for (name, content) in files {
             let dst = inputs.join(name);
             assert!(dst.exists(), "缺少备份文件: {}", dst.display());
-            assert_eq!(std::fs::read_to_string(&dst).unwrap(), content, "{name} 内容不一致");
+            assert_eq!(
+                std::fs::read_to_string(&dst).unwrap(),
+                content,
+                "{name} 内容不一致"
+            );
         }
 
         let _ = std::fs::remove_dir_all(&base);
@@ -2427,8 +2523,14 @@ mod backup_tests {
         cfg.files.fixed = src.join("input-fixed.txt").to_string_lossy().to_string();
         cfg.files.dynamic = src.join("input-roots.txt").to_string_lossy().to_string();
         cfg.files.splits = src.join("input-division.txt").to_string_lossy().to_string();
-        cfg.files.pair_equiv = src.join("pair_equivalence.txt").to_string_lossy().to_string();
-        cfg.files.key_dist = src.join("key_distribution.txt").to_string_lossy().to_string();
+        cfg.files.pair_equiv = src
+            .join("pair_equivalence.txt")
+            .to_string_lossy()
+            .to_string();
+        cfg.files.key_dist = src
+            .join("key_distribution.txt")
+            .to_string_lossy()
+            .to_string();
         let config_path = src.join(custom_config).to_string_lossy().to_string();
 
         backup_inputs(&cfg, &config_path, &out.to_string_lossy());
@@ -2437,9 +2539,15 @@ mod backup_tests {
         // 固定备份为 config.toml，内容与源文件一致
         let dst = inputs.join("config.toml");
         assert!(dst.exists(), "备份的 config 文件应命名为 config.toml");
-        assert_eq!(std::fs::read_to_string(&dst).unwrap(), "custom-config-content");
+        assert_eq!(
+            std::fs::read_to_string(&dst).unwrap(),
+            "custom-config-content"
+        );
         // 原始文件名不应出现在 inputs/ 下
-        assert!(!inputs.join(custom_config).exists(), "不应以原始文件名备份 config");
+        assert!(
+            !inputs.join(custom_config).exists(),
+            "不应以原始文件名备份 config"
+        );
 
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -2474,7 +2582,10 @@ mod seed_path_tests {
     #[test]
     fn none_returns_empty() {
         // 均未指定 → 空 Vec（不播种，需求 3.2）
-        assert_eq!(resolve_seed_paths(None, None).unwrap(), Vec::<String>::new());
+        assert_eq!(
+            resolve_seed_paths(None, None).unwrap(),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

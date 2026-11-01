@@ -53,8 +53,7 @@ fn assert_line_has_comment(raw: &str, key: &str) {
             .unwrap_or(false)
     });
 
-    let def_line = def_line
-        .unwrap_or_else(|| panic!("未在配置文件中找到配置项 `{key}` 的定义行"));
+    let def_line = def_line.unwrap_or_else(|| panic!("未在配置文件中找到配置项 `{key}` 的定义行"));
 
     assert!(
         def_line.contains('#'),
@@ -79,9 +78,7 @@ fn check_config_file(relative: &str, check_value: bool) {
         .get("weights")
         .and_then(|w| w.get("simple_code"))
         .and_then(|s| s.as_table())
-        .unwrap_or_else(|| {
-            panic!("配置文件 {} 缺少 [weights.simple_code] 段", path.display())
-        });
+        .unwrap_or_else(|| panic!("配置文件 {} 缺少 [weights.simple_code] 段", path.display()));
 
     for (key, expected) in EXPECTED_ITEMS {
         // 1) 存在性
@@ -93,27 +90,27 @@ fn check_config_file(relative: &str, check_value: bool) {
         if check_value {
             match expected {
                 Expected::Float(exp) => {
-                    let got = value
-                        .as_float()
-                        .unwrap_or_else(|| panic!("[{relative}] 配置项 `{key}` 不是浮点数: {value:?}"));
+                    let got = value.as_float().unwrap_or_else(|| {
+                        panic!("[{relative}] 配置项 `{key}` 不是浮点数: {value:?}")
+                    });
                     assert_eq!(
                         got, *exp,
                         "[{relative}] 配置项 `{key}` 默认值与代码内置默认不一致"
                     );
                 }
                 Expected::Str(exp) => {
-                    let got = value
-                        .as_str()
-                        .unwrap_or_else(|| panic!("[{relative}] 配置项 `{key}` 不是字符串: {value:?}"));
+                    let got = value.as_str().unwrap_or_else(|| {
+                        panic!("[{relative}] 配置项 `{key}` 不是字符串: {value:?}")
+                    });
                     assert_eq!(
                         got, *exp,
                         "[{relative}] 配置项 `{key}` 默认值与代码内置默认不一致"
                     );
                 }
                 Expected::Int(exp) => {
-                    let got = value
-                        .as_integer()
-                        .unwrap_or_else(|| panic!("[{relative}] 配置项 `{key}` 不是整数: {value:?}"));
+                    let got = value.as_integer().unwrap_or_else(|| {
+                        panic!("[{relative}] 配置项 `{key}` 不是整数: {value:?}")
+                    });
                     assert_eq!(
                         got, *exp,
                         "[{relative}] 配置项 `{key}` 默认值与代码内置默认不一致"
@@ -156,10 +153,13 @@ fn check_checkpoint_interval_ratio(relative: &str, check_value: bool) {
         .get("checkpoint_interval_ratio")
         .unwrap_or_else(|| panic!("[{relative}] [annealing] 缺少 `checkpoint_interval_ratio`"));
     if check_value {
-        let got = value
-            .as_float()
-            .unwrap_or_else(|| panic!("[{relative}] `checkpoint_interval_ratio` 不是浮点数: {value:?}"));
-        assert_eq!(got, 0.05, "[{relative}] `checkpoint_interval_ratio` 默认值应为 0.05");
+        let got = value.as_float().unwrap_or_else(|| {
+            panic!("[{relative}] `checkpoint_interval_ratio` 不是浮点数: {value:?}")
+        });
+        assert_eq!(
+            got, 0.05,
+            "[{relative}] `checkpoint_interval_ratio` 默认值应为 0.05"
+        );
     }
     assert_line_has_comment(&raw, "checkpoint_interval_ratio");
 }

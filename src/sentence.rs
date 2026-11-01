@@ -83,7 +83,10 @@ fn 读词典(路径: &Path) -> Vec<(String, String, u64)> {
         if 文本.is_empty() || 码.is_empty() {
             continue;
         }
-        let 权重 = 列.get(2).and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(1);
+        let 权重 = 列
+            .get(2)
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .unwrap_or(1);
         出.push((文本.to_string(), 码.to_string(), 权重));
     }
     出
@@ -132,10 +135,7 @@ fn 编辑距离(a: &[char], b: &[char]) -> usize {
 }
 
 /// Viterbi：在码流上找一条总权重最大的切分
-fn 连续解码(
-    码流: &str,
-    码表: &HashMap<String, Vec<条目>>,
-) -> (String, usize) {
+fn 连续解码(码流: &str, 码表: &HashMap<String, Vec<条目>>) -> (String, usize) {
     let 字节 = 码流.as_bytes();
     let n = 字节.len();
     let 无穷 = f64::NEG_INFINITY;
@@ -157,10 +157,7 @@ fn 连续解码(
             let Some(候选们) = 码表.get(片) else {
                 continue;
             };
-            let 最重 = 候选们
-                .iter()
-                .map(|e| e.权重 as f64)
-                .fold(0.0_f64, f64::max);
+            let 最重 = 候选们.iter().map(|e| e.权重 as f64).fold(0.0_f64, f64::max);
             if 最重 <= 0.0 {
                 continue;
             }
@@ -226,7 +223,11 @@ fn 起解码器(
         .arg(用户)
         .arg("--schema")
         .arg(方案)
-        .args(if 详细 { vec!["--verbose"] } else { Vec::new() })
+        .args(if 详细 {
+            vec!["--verbose"]
+        } else {
+            Vec::new()
+        })
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -334,14 +335,8 @@ pub fn run(参: &参数) {
 
     let 外部解出: Option<Vec<String>> = match &参.解码器 {
         Some(程序) => {
-            match 起解码器(
-                程序,
-                &参.共享目录,
-                &参.用户目录,
-                &参.方案,
-                &码流们,
-                参.详细,
-            ) {
+            match 起解码器(程序, &参.共享目录, &参.用户目录, &参.方案, &码流们, 参.详细)
+            {
                 Ok(v) if v.len() == 码流们.len() => {
                     println!("🔌 外部解码器: {}（{} 句）", 程序.display(), v.len());
                     Some(v)
@@ -417,11 +412,7 @@ pub fn run(参: &参数) {
                     } else {
                         本句简效 = false;
                         if 错例.len() < 8 {
-                            错例.push((
-                                c.to_string(),
-                                简.clone(),
-                                format!("{}（简码）", 简首选),
-                            ));
+                            错例.push((c.to_string(), 简.clone(), format!("{}（简码）", 简首选)));
                         }
                     }
                 }
@@ -527,12 +518,7 @@ pub fn run(参: &参数) {
         if *句数 == 0 || n == 0 {
             continue;
         }
-        md.push_str(&format!(
-            "| {} | {} | {:.2}% |\n",
-            n,
-            *句数,
-            率(*全, *句数)
-        ));
+        md.push_str(&format!("| {} | {} | {:.2}% |\n", n, *句数, 率(*全, *句数)));
     }
 
     if !错例.is_empty() {

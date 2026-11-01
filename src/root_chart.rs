@@ -33,14 +33,23 @@ fn 生成字根表(keymap_path: &str) -> Vec<(String, String)> {
         }
         let 名 = 列[0];
         let 码 = 列[1];
-        let 首字母 = 码.chars().next().map(|c| c.to_ascii_lowercase()).unwrap_or(' ');
+        let 首字母 = 码
+            .chars()
+            .next()
+            .map(|c| c.to_ascii_lowercase())
+            .unwrap_or(' ');
 
         // 形如 干.0 / 干.A / 干.1 / 干.S / 干.Y / 干.U
         if let Some((基名, 标志)) = 名.rsplit_once('.') {
             let 是后缀 = 标志.len() == 1
-                && matches!(标志.chars().next().unwrap(), '0' | '1' | 'U' | 'A' | 'S' | 'Y');
+                && matches!(
+                    标志.chars().next().unwrap(),
+                    '0' | '1' | 'U' | 'A' | 'S' | 'Y'
+                );
             if 是后缀 {
-                let 项 = 大小码.entry(基名.to_string()).or_insert_with(|| (String::new(), String::new()));
+                let 项 = 大小码
+                    .entry(基名.to_string())
+                    .or_insert_with(|| (String::new(), String::new()));
                 if 标志 == "0" || 标志 == "A" {
                     if 项.0.is_empty() && 首字母 != ' ' {
                         项.0 = 首字母.to_string();
@@ -114,7 +123,11 @@ pub fn run(keymap_path: &str, mapping_path: Option<&str>, output_path: &str) {
 
     let mut 行: Vec<(String, String, String, String)> = Vec::new();
     for (名, 码) in &字根 {
-        let 首: String = 码.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+        let 首: String = 码
+            .chars()
+            .next()
+            .map(|c| c.to_uppercase().to_string())
+            .unwrap_or_default();
         if 首.is_empty() {
             continue;
         }
@@ -127,7 +140,9 @@ pub fn run(keymap_path: &str, mapping_path: Option<&str>, output_path: &str) {
     }
 
     // 先按按键、再按编码、最后按显示字排序
-    行.sort_by(|a, b| (a.0.clone(), a.1.clone(), a.2.clone()).cmp(&(b.0.clone(), b.1.clone(), b.2.clone())));
+    行.sort_by(|a, b| {
+        (a.0.clone(), a.1.clone(), a.2.clone()).cmp(&(b.0.clone(), b.1.clone(), b.2.clone()))
+    });
 
     let mut 编码集 = std::collections::HashSet::new();
     let mut 片段: Vec<String> = Vec::with_capacity(行.len());

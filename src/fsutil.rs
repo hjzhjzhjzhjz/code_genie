@@ -37,7 +37,10 @@ pub fn archive_if_exists(path: &Path) {
 }
 
 /// 安全写入：目标已存在时先归档旧文件（警告），再写入新内容。
-pub fn write_with_backup<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) -> std::io::Result<()> {
+pub fn write_with_backup<P: AsRef<Path>, C: AsRef<[u8]>>(
+    path: P,
+    contents: C,
+) -> std::io::Result<()> {
     let path = path.as_ref();
     archive_if_exists(path);
     std::fs::write(path, contents)

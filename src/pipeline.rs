@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 
 use crate::export_table::{
-    加载拆分表, 加载简码表, 加载键位表, 生成表, 取码序列, 码位,
+    加载拆分表, 加载简码表, 加载键位表, 取码序列, 生成表, 码位
 };
 use crate::handfeel;
 
@@ -77,10 +77,8 @@ pub fn 流水线(
     // 要看的字：显式指定优先，否则按频次取前 top 个
     let mut 要查: Vec<&str> = 字们.split_whitespace().collect();
     if 要查.is_empty() && top > 0 {
-        let mut 排序: Vec<(&str, u64)> = 拆分
-            .iter()
-            .map(|(字, _, 频)| (字.as_str(), *频))
-            .collect();
+        let mut 排序: Vec<(&str, u64)> =
+            拆分.iter().map(|(字, _, 频)| (字.as_str(), *频)).collect();
         排序.sort_by(|a, b| b.1.cmp(&a.1));
         要查 = 排序.into_iter().take(top).map(|(c, _)| c).collect();
     }
@@ -187,8 +185,16 @@ pub fn 流水线(
 // -------------------------------------------------------------------------
 
 enum 规则 {
-    整体 { 从: String, 到: String },
-    码位 { 从: String, 从位: usize, 到: String, 到位: usize },
+    整体 {
+        从: String,
+        到: String,
+    },
+    码位 {
+        从: String,
+        从位: usize,
+        到: String,
+        到位: usize,
+    },
 }
 
 fn 解析规则(文: &str) -> Result<规则, String> {
@@ -250,12 +256,10 @@ fn 应用规则(键位: &mut HashMap<String, Vec<char>>, 规则文: &str) -> Vec
                 键位.insert(从, 目标);
             }
             规则::码位 {
-                从,
-                从位,
-                到,
-                到位,
+                从, 从位, 到, 到位
             } => {
-                let Some(目标键) = 键位.get(&到).and_then(|v| v.get(到位 - 1)).copied() else {
+                let Some(目标键) = 键位.get(&到).and_then(|v| v.get(到位 - 1)).copied()
+                else {
                     报错.push(format!("「{}」没有第 {} 个键位", 到, 到位));
                     continue;
                 };
@@ -296,7 +300,9 @@ pub fn 归并(
     }
 
     let mut 摘要 = String::from("## 字根归并对比\n\n");
-    摘要.push_str("只改键位，不重新拆分。阶重口径同宇浩侧：零阶精确 Σ(n−1)，一阶以上 Σ n²/2 ÷ 键数^阶。\n\n");
+    摘要.push_str(
+        "只改键位，不重新拆分。阶重口径同宇浩侧：零阶精确 Σ(n−1)，一阶以上 Σ n²/2 ÷ 键数^阶。\n\n",
+    );
     摘要.push_str("| 变体 | 规则 | 全码选重 | 让全后 | 简码选重 | 0阶 | 1阶 | 2阶 | 3阶 |\n");
     摘要.push_str("|---|---|---:|---:|---:|---:|---:|---:|---:|\n");
 

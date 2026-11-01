@@ -6,13 +6,13 @@ use std::collections::{HashMap, HashSet};
 
 use rustc_hash::FxHashMap;
 
-use crate::types::{
-    build_root_full_codes, char_to_key_index, key_to_char, CharInfo, CharSimpleInfo,
-    compute_level_instructions, extract_logical_roots_full, pow_base, try_resolve_rule,
-    FixedSimpleCode, KeyDistConfig, RootGroup, ScaleConfig, SimpleAssignMode,
-    SimpleCodeConfig, WeightConfig, KEY_SPACE, EQUIV_TABLE_SIZE, GROUP_MARKER,
-};
 use crate::config::TargetsConfig;
+use crate::types::{
+    build_root_full_codes, char_to_key_index, compute_level_instructions,
+    extract_logical_roots_full, key_to_char, pow_base, try_resolve_rule, CharInfo, CharSimpleInfo,
+    FixedSimpleCode, KeyDistConfig, RootGroup, ScaleConfig, SimpleAssignMode, SimpleCodeConfig,
+    WeightConfig, EQUIV_TABLE_SIZE, GROUP_MARKER, KEY_SPACE,
+};
 
 /// 无上屏键级别的固定简码占用哨兵键（非法键索引，键空间为 0..EQUIV_TABLE_SIZE=0..31）。
 /// 用于在 `simple_fixed_occupancy` 中记录核心简码自身的占用计数（需求 21.7）。
@@ -424,7 +424,11 @@ impl OptContext {
                         .get(li)
                         .and_then(|o| o.as_ref())
                         .map_or(0, |v| v.len()) as i64;
-                    let commit = if simple_config.levels[li].has_commit() { 1 } else { 0 };
+                    let commit = if simple_config.levels[li].has_commit() {
+                        1
+                    } else {
+                        0
+                    };
                     let effective_simple_len = step_count + commit;
                     simple_base_saving[ci][li] = full_len - effective_simple_len;
                     // 资格判定：核心码长（step_count）严格短于全码，与是否有上屏键无关。
@@ -459,9 +463,7 @@ impl OptContext {
                 // 仅在确有固定简码时才为各级分配空映射（无固定简码时保持空 Vec，
                 // simple_fixed_occ_* 访问器对空/缺失统一回退 0）——稀疏存储，省去高级别
                 // code_base^L 容量的密集占用表分配。
-                simple_fixed_occupancy = (0..n_levels)
-                    .map(|_| FxHashMap::default())
-                    .collect();
+                simple_fixed_occupancy = (0..n_levels).map(|_| FxHashMap::default()).collect();
 
                 // 汉字 → ci 映射（取首个匹配；同字多条仅首条有效）
                 let mut char_to_ci: HashMap<char, usize> = HashMap::new();
@@ -751,10 +753,7 @@ impl OptContext {
             prev_key = cur_key;
         }
 
-        if n < self.max_parts
-            && prev_key != KEY_SPACE
-            && !self.termination_key_mask[prev_key]
-        {
+        if n < self.max_parts && prev_key != KEY_SPACE && !self.termination_key_mask[prev_key] {
             total += self.equiv_table[prev_key][KEY_SPACE];
             pair_count += 1;
         }
@@ -768,7 +767,12 @@ impl OptContext {
 
     /// 计算简码
     #[inline]
-    pub fn calc_simple_code(&self, ci: usize, level_idx: usize, assignment: &[u8]) -> Option<usize> {
+    pub fn calc_simple_code(
+        &self,
+        ci: usize,
+        level_idx: usize,
+        assignment: &[u8],
+    ) -> Option<usize> {
         let si = &self.char_simple_infos[ci];
         let instr = si.level_instructions.get(level_idx)?.as_ref()?;
 
@@ -789,7 +793,12 @@ impl OptContext {
     ///
     /// 保留作为「无分配版本」的对照 oracle（测试用）。
     #[allow(dead_code)]
-    pub fn get_simple_keys(&self, ci: usize, level_idx: usize, assignment: &[u8]) -> Option<Vec<u8>> {
+    pub fn get_simple_keys(
+        &self,
+        ci: usize,
+        level_idx: usize,
+        assignment: &[u8],
+    ) -> Option<Vec<u8>> {
         let si = &self.char_simple_infos[ci];
         let instr = si.level_instructions.get(level_idx)?.as_ref()?;
 
@@ -818,7 +827,11 @@ impl OptContext {
     ) -> bool {
         buf.clear();
         let si = &self.char_simple_infos[ci];
-        let instr = match si.level_instructions.get(level_idx).and_then(|o| o.as_ref()) {
+        let instr = match si
+            .level_instructions
+            .get(level_idx)
+            .and_then(|o| o.as_ref())
+        {
             Some(v) => v,
             None => return false,
         };
@@ -1047,8 +1060,8 @@ impl OptContext {
 #[cfg(test)]
 mod candidate_set_tests {
     use super::*;
-    use crate::types::{RootGroup, ScaleConfig, SimpleCodeConfig, WeightConfig, EQUIV_TABLE_SIZE};
     use crate::evaluator::Evaluator;
+    use crate::types::{RootGroup, ScaleConfig, SimpleCodeConfig, WeightConfig, EQUIV_TABLE_SIZE};
     use proptest::prelude::*;
     use rand::{thread_rng, Rng};
 
@@ -1134,7 +1147,10 @@ mod candidate_set_tests {
         let mut splits = Vec::with_capacity(n);
         for (i, &f) in freqs.iter().enumerate() {
             let root = format!("r{i}");
-            groups.push(RootGroup { roots: vec![root.clone()], allowed_keys: vec![0, 1, 2] });
+            groups.push(RootGroup {
+                roots: vec![root.clone()],
+                allowed_keys: vec![0, 1, 2],
+            });
             let ch = char::from_u32(0x4e00 + i as u32).unwrap();
             splits.push((ch, vec![root], f));
         }
@@ -1146,13 +1162,23 @@ mod candidate_set_tests {
         weights.simple_coverage_ratio = 1.0; // output = 全集
         weights.simple_active_coverage = 0.5; // active = 覆盖率 0.5 的前缀（更小）
         let ctx = OptContext::new(
-            &splits, &fixed_roots, &groups, equiv_table, key_dist,
-            ScaleConfig::default(), SimpleCodeConfig { levels: vec![] }, weights,
+            &splits,
+            &fixed_roots,
+            &groups,
+            equiv_table,
+            key_dist,
+            ScaleConfig::default(),
+            SimpleCodeConfig { levels: vec![] },
+            weights,
             TargetsConfig::default(),
         );
 
         // output = 全部 8 字（ratio=1.0）。
-        assert_eq!(ctx.simple_output_candidate_chars.len(), n, "output 应为全集");
+        assert_eq!(
+            ctx.simple_output_candidate_chars.len(),
+            n,
+            "output 应为全集"
+        );
         // active 为严格子集（覆盖率 0.5 < 1.0）。
         assert!(
             ctx.simple_candidate_chars.len() < ctx.simple_output_candidate_chars.len(),
@@ -1316,7 +1342,10 @@ mod affected_intersection_tests {
                 root_selector: 'A',
                 code_selector: 'a',
             }]],
-            commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+            commit_keys: Vec::new(),
+            commit_pref_last_left: Vec::new(),
+            commit_pref_last_right: Vec::new(),
+            commit_alt_hand_only: false,
         };
         OptContext::new(
             &splits,
@@ -1455,19 +1484,28 @@ mod base_saving_tests {
                 level: 1,
                 code_num: 1,
                 rule_candidates: vec![vec![step('A')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
             SimpleCodeLevel {
                 level: 2,
                 code_num: 1,
                 rule_candidates: vec![vec![step('A'), step('B')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
             SimpleCodeLevel {
                 level: 3,
                 code_num: 1,
                 rule_candidates: vec![vec![step('A'), step('B'), step('C')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
         ];
 

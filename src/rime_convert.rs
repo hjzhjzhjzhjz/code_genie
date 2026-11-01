@@ -153,14 +153,24 @@ pub fn run(参: &参数) -> Result<(usize, usize), String> {
         "(7) {}: {} 条（{}）",
         文件名(&完整路径),
         完整.0,
-        完整.1.iter().map(|(n, c)| format!("{} {}", n, c)).collect::<Vec<_>>().join(" / ")
+        完整
+            .1
+            .iter()
+            .map(|(n, c)| format!("{} {}", n, c))
+            .collect::<Vec<_>>()
+            .join(" / ")
     );
 
     // ---------- 8. 字根提示 ----------
     let 字根路径 = 输出.join("yuhao").join(format!("{}.roots.dict.yaml", 前缀));
     let 图 = 算码.join(format!("zigen-{}.csv", 前缀));
     let 字根条 = 写字根表(&字根路径, &图, &字根)?;
-    println!("(8) {}: {} 条字根提示（来源 {}）", 文件名(&字根路径), 字根条, 文件名(&图));
+    println!(
+        "(8) {}: {} 条字根提示（来源 {}）",
+        文件名(&字根路径),
+        字根条,
+        文件名(&图)
+    );
 
     println!("\n✅ 已生成：{}", 输出.display());
     println!("   除码以外与底包完全一致；拷进 Rime 用户目录重新部署即可");
@@ -453,7 +463,11 @@ fn 定位键位表(算码: &Path, 指定: Option<&str>) -> Result<PathBuf, Strin
 fn ucfirst(s: &str) -> String {
     let mut cs = s.chars();
     match cs.next() {
-        Some(c) => format!("{}{}", c.to_ascii_uppercase(), cs.as_str().to_ascii_lowercase()),
+        Some(c) => format!(
+            "{}{}",
+            c.to_ascii_uppercase(),
+            cs.as_str().to_ascii_lowercase()
+        ),
         None => String::new(),
     }
 }
@@ -486,7 +500,10 @@ fn 读字根键位(路径: &Path) -> Result<字根表, String> {
             if !名.is_empty() && 位.chars().count() == 1 {
                 let c = 位.chars().next().unwrap().to_ascii_uppercase();
                 if matches!(c, 'A' | 'S' | 'Y' | 'U') {
-                    位表.entry(名.to_string()).or_default().insert(c, 键.to_string());
+                    位表
+                        .entry(名.to_string())
+                        .or_default()
+                        .insert(c, 键.to_string());
                     continue;
                 }
             }
@@ -636,8 +653,16 @@ fn 重写拆分表(
             .collect::<Vec<_>>()
             .join("-");
         let 式 = 根们.concat();
-        let 余 = if 段.len() > 3 { 段[3..].join(",") } else { String::new() };
-        let 尾 = if 余.is_empty() { String::new() } else { format!(",{}", 余) };
+        let 余 = if 段.len() > 3 {
+            段[3..].join(",")
+        } else {
+            String::new()
+        };
+        let 尾 = if 余.is_empty() {
+            String::new()
+        } else {
+            format!(",{}", 余)
+        };
         输出.push(format!("{}\t[{},{},{}{}]", 字, 式, 码, 分组, 尾));
         已解析.insert(字.to_string(), 根们);
         改 += 1;
@@ -895,9 +920,16 @@ mod tests {
     fn 造字根() -> 字根表 {
         let mut m = 字根表::new();
         for (k, v) in [
-            ("白", "Fk"), ("勹", "Yr"), ("丶", "Ek"), ("一", "Od"),
-            ("女", "Lk"), ("子", "Ud"), ("讠", "Yd"), ("丷", "Fs"),
-            ("口", "Ie"), ("儿", "Hr"),
+            ("白", "Fk"),
+            ("勹", "Yr"),
+            ("丶", "Ek"),
+            ("一", "Od"),
+            ("女", "Lk"),
+            ("子", "Ud"),
+            ("讠", "Yd"),
+            ("丷", "Fs"),
+            ("口", "Ie"),
+            ("儿", "Hr"),
         ] {
             m.insert(k.to_string(), v.to_string());
         }
@@ -939,13 +971,23 @@ mod tests {
         // yustar 状态机 c2 走 s7（rootIndex -1），取**末根**大码，不是第 4 根
         let mut m = 字根表::new();
         for (k, v) in [
-            ("甲", "Ab"), ("乙", "Cd"), ("丙", "Ef"), ("丁", "Gh"), ("戊", "Ij"),
+            ("甲", "Ab"),
+            ("乙", "Cd"),
+            ("丙", "Ef"),
+            ("丁", "Gh"),
+            ("戊", "Ij"),
         ] {
             m.insert(k.to_string(), v.to_string());
         }
         assert_eq!(
             单字码(
-                &["甲".into(), "乙".into(), "丙".into(), "丁".into(), "戊".into()],
+                &[
+                    "甲".into(),
+                    "乙".into(),
+                    "丙".into(),
+                    "丁".into(),
+                    "戊".into()
+                ],
                 &m
             )
             .unwrap(),
@@ -971,7 +1013,12 @@ mod tests {
     #[test]
     fn 词码三种长度() {
         let mut 字码 = HashMap::new();
-        for (k, v) in [("打", "fsll"), ("字", "llab"), ("的", "doie"), ("确", "qwer")] {
+        for (k, v) in [
+            ("打", "fsll"),
+            ("字", "llab"),
+            ("的", "doie"),
+            ("确", "qwer"),
+        ] {
             字码.insert(k.to_string(), v.to_string());
         }
         assert_eq!(词码("打字", &字码).unwrap(), "fsll");
@@ -1016,10 +1063,7 @@ mod tests {
 
     #[test]
     fn 标记提取() {
-        assert_eq!(
-            取标记("星月字根編碼提示\t/dl\n").as_deref(),
-            Some("dl")
-        );
+        assert_eq!(取标记("星月字根編碼提示\t/dl\n").as_deref(), Some("dl"));
         assert_eq!(取标记("no marker").as_deref(), None);
     }
 
@@ -1050,7 +1094,11 @@ mod tests {
         .unwrap();
         let 表 = 读字根键位(&路径).unwrap();
         assert_eq!(表.get("白").map(|s| s.as_str()), Some("Fke"));
-        assert_eq!(表.get("艹").map(|s| s.as_str()), Some("Xqw"), "飞键应取 U+S+Y");
+        assert_eq!(
+            表.get("艹").map(|s| s.as_str()),
+            Some("Xqw"),
+            "飞键应取 U+S+Y"
+        );
         let _ = std::fs::remove_dir_all(&目录);
     }
 

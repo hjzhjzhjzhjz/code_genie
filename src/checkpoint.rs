@@ -250,7 +250,8 @@ mod tests {
             && a.best_metrics.equiv_mean == b.best_metrics.equiv_mean
             && a.best_metrics.equiv_cv == b.best_metrics.equiv_cv
             && a.best_metrics.dist_deviation == b.best_metrics.dist_deviation
-            && a.best_simple_metrics.weighted_freq_coverage == b.best_simple_metrics.weighted_freq_coverage
+            && a.best_simple_metrics.weighted_freq_coverage
+                == b.best_simple_metrics.weighted_freq_coverage
             && a.best_simple_metrics.collision_count == b.best_simple_metrics.collision_count
             && a.temp_multiplier == b.temp_multiplier
             && a.steps_since_improve == b.steps_since_improve
@@ -338,7 +339,10 @@ mod tests {
         assert_eq!(back.temp_start, meta.temp_start);
 
         // 版本不符 → 报错
-        let bad = CheckpointMeta { version: CHECKPOINT_VERSION + 1, ..meta.clone() };
+        let bad = CheckpointMeta {
+            version: CHECKPOINT_VERSION + 1,
+            ..meta.clone()
+        };
         save_atomic(&bad, &meta_path(&dir)).unwrap();
         assert!(load_meta(&dir).is_err());
         let _ = std::fs::remove_dir_all(&dir);

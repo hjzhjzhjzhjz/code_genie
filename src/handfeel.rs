@@ -15,7 +15,15 @@ use serde_json::Value;
 
 /// 手指编号：0–3 左手小/无名/中指/食指，4–7 右手食指/中指/无名/小指，8 拇指
 pub const 指名: [&str; 9] = [
-    "左小指", "左无名", "左中指", "左食指", "右食指", "右中指", "右无名", "右小指", "拇指",
+    "左小指",
+    "左无名",
+    "左中指",
+    "左食指",
+    "右食指",
+    "右中指",
+    "右无名",
+    "右小指",
+    "拇指",
 ];
 
 pub const 行名: [&str; 3] = ["上排", "中排", "下排"];
@@ -216,7 +224,11 @@ pub fn 算连击(码表: &Path, 词表: &Path) -> Result<连击, String> {
             单字 {
                 首: 指[0],
                 尾: *指.last().unwrap(),
-                同指比: if 总 > 0 { 同 as f64 / 总 as f64 } else { 0.0 },
+                同指比: if 总 > 0 {
+                    同 as f64 / 总 as f64
+                } else {
+                    0.0
+                },
             },
         );
     }
@@ -274,7 +286,10 @@ pub fn 算连击(码表: &Path, 词表: &Path) -> Result<连击, String> {
 /// 自动找词表：优先测评器数据目录，其次仓库内置
 pub fn 找词表(yuhao目录: &Path) -> Option<std::path::PathBuf> {
     let 候选 = [
-        yuhao目录.join("public").join("data").join("wordAbsoluteFrequencySC.json"),
+        yuhao目录
+            .join("public")
+            .join("data")
+            .join("wordAbsoluteFrequencySC.json"),
         std::path::PathBuf::from("yuhao-data").join("wordAbsoluteFrequencySC.json"),
     ];
     for 路 in 候选 {

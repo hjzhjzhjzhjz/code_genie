@@ -8,10 +8,11 @@ use std::cmp::Ordering;
 
 use rustc_hash::FxHashMap;
 
-use crate::context::OptContext;
 use crate::bucket_store::{BucketStore, FullBucket};
+use crate::context::OptContext;
 use crate::types::{
-    KeyDistConfig, MetricScores, Metrics, SimpleAssignMode, SimpleMetricScores, SimpleMetrics, EQUIV_TABLE_SIZE,
+    KeyDistConfig, MetricScores, Metrics, SimpleAssignMode, SimpleMetricScores, SimpleMetrics,
+    EQUIV_TABLE_SIZE,
 };
 
 // =========================================================================
@@ -404,7 +405,10 @@ impl SimpleEvaluator {
         }
         for ci in 0..ctx.simple_is_topn.len() {
             if ctx.simple_is_topn[ci] {
-                *self.protect_count.entry(self.last_full_codes[ci]).or_insert(0) += 1;
+                *self
+                    .protect_count
+                    .entry(self.last_full_codes[ci])
+                    .or_insert(0) += 1;
             }
         }
     }
@@ -621,7 +625,10 @@ impl SimpleEvaluator {
                     ctx,
                     is_first_candidate,
                     li,
-                    &mut self.levels[li].buckets.get_mut_or_insert(code as u32).members,
+                    &mut self.levels[li]
+                        .buckets
+                        .get_mut_or_insert(code as u32)
+                        .members,
                 );
                 let sel: Vec<(usize, usize)> = self.levels[li]
                     .buckets
@@ -701,12 +708,17 @@ impl SimpleEvaluator {
     }
 
     /// 全量重算简码重码并填满每桶贡献缓存（供后续增量差量维护）。仅遍历非空全码桶（需求 7.2）。
-    fn recompute_collisions_full(&mut self, ctx: &OptContext, full_buckets: &BucketStore<FullBucket>) {
+    fn recompute_collisions_full(
+        &mut self,
+        ctx: &OptContext,
+        full_buckets: &BucketStore<FullBucket>,
+    ) {
         self.bucket_collision_contrib.clear();
         let mut total_count = 0usize;
         let mut total_freq = 0u64;
         full_buckets.for_each_nonempty(|code, b| {
-            let contrib = Self::bucket_collision_contrib_of(ctx, &b.members, &self.all_assigned_flags);
+            let contrib =
+                Self::bucket_collision_contrib_of(ctx, &b.members, &self.all_assigned_flags);
             // 仅存非零贡献，保持稀疏有界（需求 4.2）。
             if contrib.0 > 0 || contrib.1 > 0 {
                 self.bucket_collision_contrib.insert(code, contrib);
@@ -729,12 +741,7 @@ impl SimpleEvaluator {
     /// - Efficiency 模式：`key = freq × (base_saving[ci][li] + sel_len)`，
     ///   `sel_len` 由 `is_first_candidate[ci]` 取 0（首选字）或 1（非首选字）。
     #[inline]
-    fn bucket_sort_key(
-        ctx: &OptContext,
-        is_first_candidate: &[bool],
-        li: usize,
-        ci: usize,
-    ) -> i64 {
+    fn bucket_sort_key(ctx: &OptContext, is_first_candidate: &[bool], li: usize, ci: usize) -> i64 {
         let freq = ctx.char_infos[ci].frequency as i64;
         match ctx.simple_assign_mode {
             SimpleAssignMode::Frequency => freq,
@@ -776,12 +783,7 @@ impl SimpleEvaluator {
     /// 收尾构成严格全序，排序结果确定可复现。供 `rebuild_internal` 与后续
     /// 增量 `apply_move` 复用。
     #[inline]
-    fn sort_bucket(
-        ctx: &OptContext,
-        is_first_candidate: &[bool],
-        li: usize,
-        members: &mut [u32],
-    ) {
+    fn sort_bucket(ctx: &OptContext, is_first_candidate: &[bool], li: usize, members: &mut [u32]) {
         members.sort_unstable_by(|&a, &b| {
             Self::cmp_in_bucket(ctx, is_first_candidate, li, a as usize, b as usize)
         });
@@ -872,7 +874,10 @@ impl SimpleEvaluator {
         self.protect_dirty_buf.clear();
         self.snapshot.protect_undo.clear();
 
-        if affected_candidates.is_empty() && full_affected_chars.is_empty() && resort_seeds.is_empty() {
+        if affected_candidates.is_empty()
+            && full_affected_chars.is_empty()
+            && resort_seeds.is_empty()
+        {
             return;
         }
 
@@ -1101,7 +1106,14 @@ impl SimpleEvaluator {
     /// 选中 `ci` 于级别 `li`：翻转 `selected`/`all_assigned_flags`（带撤销/起始登记），
     /// 并按当前 `assignment` 累加级别聚合贡献，同时缓存其当量/键位贡献（供后续精确扣除）。
     #[inline]
-    fn select_char(&mut self, ctx: &OptContext, assignment: &[u8], li: usize, ci: usize, commit_key: Option<u8>) {
+    fn select_char(
+        &mut self,
+        ctx: &OptContext,
+        assignment: &[u8],
+        li: usize,
+        ci: usize,
+        commit_key: Option<u8>,
+    ) {
         let freq = ctx.char_infos[ci].frequency;
         let freq_f = freq as f64;
 
@@ -1205,7 +1217,14 @@ impl SimpleEvaluator {
     /// （仍保持选中）时更新聚合。`covered_freq` / `equiv_freq_sum` 仅依赖字频（不变），不触碰。
     /// 对编码未变的字，重算值与缓存值相等，净效果为零，安全且精确（无漂移）。
     #[inline]
-    fn refresh_char(&mut self, ctx: &OptContext, assignment: &[u8], li: usize, ci: usize, commit_key: Option<u8>) {
+    fn refresh_char(
+        &mut self,
+        ctx: &OptContext,
+        assignment: &[u8],
+        li: usize,
+        ci: usize,
+        commit_key: Option<u8>,
+    ) {
         let freq = ctx.char_infos[ci].frequency;
         let freq_f = freq as f64;
 
@@ -1309,8 +1328,7 @@ impl SimpleEvaluator {
         // 按 `cmp_in_bucket` 排序键最优的 code_num 个（严格全序 ⟹ 该集合唯一确定）。
         // 仅 `0 < code_num < len` 时需分划：code_num==0（无人出简）或 code_num>=len（全员出简）
         // 时选中集合与桶内顺序无关，跳过。
-        let len = self
-            .levels[li]
+        let len = self.levels[li]
             .buckets
             .get(code as u32)
             .map_or(0, |b| b.members.len());
@@ -1321,7 +1339,11 @@ impl SimpleEvaluator {
         }
         // 局部选择前 code_num（C 优化）：用部分选择取代整桶全排序。
         if code_num > 0 && code_num < len {
-            let members = &mut self.levels[li].buckets.get_mut(code as u32).unwrap().members;
+            let members = &mut self.levels[li]
+                .buckets
+                .get_mut(code as u32)
+                .unwrap()
+                .members;
             members.select_nth_unstable_by(code_num - 1, |&a, &b| {
                 Self::cmp_in_bucket(ctx, is_first_candidate, li, a as usize, b as usize)
             });
@@ -1672,7 +1694,7 @@ impl SimpleEvaluator {
             // freq（频率覆盖损失 = 1 - coverage）
             {
                 let v = 1.0 - sm.weighted_freq_coverage;
-                let target_v = 1.0 - t.freq;   // 目标损失 = 1 - 目标覆盖率
+                let target_v = 1.0 - t.freq; // 目标损失 = 1 - 目标覆盖率
                 let s = ctx.scale_config.simple_freq;
                 let d = (v - target_v).max(0.0) * s;
                 score += ctx.weights.simple_weight_freq * (d + d * d + lw * (v * s));
@@ -1830,7 +1852,12 @@ pub(crate) fn log_bucket_backends(ctx: &OptContext) {
         "📦 桶存储后端选择 (code_base={}, max_parts={}, code_space={}, n_chars={}, 容量绝对上限={}):",
         ctx.code_base, ctx.max_parts, ctx.code_space, n_chars, SPARSE_THRESHOLD
     );
-    log_one_backend("全码桶", ctx.code_space, std::mem::size_of::<FullBucket>(), n_chars);
+    log_one_backend(
+        "全码桶",
+        ctx.code_space,
+        std::mem::size_of::<FullBucket>(),
+        n_chars,
+    );
     // 简码级别桶：仅在启用简码时输出（需求 12.7）。
     if ctx.enable_simple_code {
         for (li, &cap) in ctx.simple_level_capacity.iter().enumerate() {
@@ -1854,7 +1881,12 @@ fn log_one_backend(label: &str, capacity: usize, elem_size: usize, n_chars: usiz
 /// 与生产路径同判据（[`choose_backend_for`]）：同时看容量上界与 `n_chars`，
 /// 而不是只看容量——否则「4 码定长方案」会因 `code_space = 32^4` 落在阈值内被判 Dense，
 /// 实际却只用掉 1% 的槽位。
-pub(crate) fn backend_log_line(label: &str, capacity: usize, elem_size: usize, n_chars: usize) -> String {
+pub(crate) fn backend_log_line(
+    label: &str,
+    capacity: usize,
+    elem_size: usize,
+    n_chars: usize,
+) -> String {
     use crate::bucket_store::{
         choose_backend_for, BackendKind, DENSE_MIN_CAPACITY, SPARSE_ENTRY_FACTOR, SPARSE_THRESHOLD,
     };
@@ -2019,7 +2051,12 @@ impl Evaluator {
 
     /// 评估器构造实现。`build_simple` 为 false 时跳过急切 `SimpleEvaluator` 构建（需求 24）。
     /// `simple_output_scope` 为 true 时简码评估器以输出全集范围构建（仅最终上报/输出）。
-    fn new_impl(ctx: &OptContext, assignment: &[u8], build_simple: bool, simple_output_scope: bool) -> Self {
+    fn new_impl(
+        ctx: &OptContext,
+        assignment: &[u8],
+        build_simple: bool,
+        simple_output_scope: bool,
+    ) -> Self {
         let n = ctx.char_infos.len();
         let cs = ctx.code_space;
         let mut full_buckets: BucketStore<FullBucket> = BucketStore::new(cs, n);
@@ -2126,7 +2163,13 @@ impl Evaluator {
         };
 
         let simple_eval = if need_simple {
-            Some(SimpleEvaluator::new(ctx, assignment, &full_buckets, &is_first_candidate, simple_output_scope))
+            Some(SimpleEvaluator::new(
+                ctx,
+                assignment,
+                &full_buckets,
+                &is_first_candidate,
+                simple_output_scope,
+            ))
         } else {
             None
         };
@@ -2260,7 +2303,11 @@ impl Evaluator {
                 let old_len = ob.members.len();
                 // 旧桶的碰撞贡献（移除前）
                 let old_bucket_cc = old_len.saturating_sub(1);
-                let old_bucket_cf = if old_len >= 2 { ob.freq_sum - ob.max_freq } else { 0 };
+                let old_bucket_cf = if old_len >= 2 {
+                    ob.freq_sum - ob.max_freq
+                } else {
+                    0
+                };
 
                 // swap_remove: 用最后一个元素替换被移除的元素
                 let last_idx = old_len - 1;
@@ -2294,8 +2341,18 @@ impl Evaluator {
 
                 let new_old_len = ob.members.len();
                 let new_old_cc = new_old_len.saturating_sub(1);
-                let new_old_cf = if new_old_len >= 2 { ob.freq_sum - ob.max_freq } else { 0 };
-                (old_bucket_cc, old_bucket_cf, new_old_cc, new_old_cf, old_first_set)
+                let new_old_cf = if new_old_len >= 2 {
+                    ob.freq_sum - ob.max_freq
+                } else {
+                    0
+                };
+                (
+                    old_bucket_cc,
+                    old_bucket_cf,
+                    new_old_cc,
+                    new_old_cf,
+                    old_first_set,
+                )
             });
         // 旧桶若新首选翻转：标记 is_first_candidate 与 resort 种子。
         if let Some(first) = old_first_set {
@@ -2313,7 +2370,11 @@ impl Evaluator {
             let nb = self.full_buckets.get_mut_or_insert(new_code_u);
             let new_len = nb.members.len();
             let new_bucket_cc = new_len.saturating_sub(1);
-            let new_bucket_cf = if new_len >= 2 { nb.freq_sum - nb.max_freq } else { 0 };
+            let new_bucket_cf = if new_len >= 2 {
+                nb.freq_sum - nb.max_freq
+            } else {
+                0
+            };
 
             let new_pos = new_len;
             nb.members.push(ci as u32);
@@ -2352,13 +2413,17 @@ impl Evaluator {
 
             let after_new_len = new_len + 1;
             let after_new_cc = after_new_len.saturating_sub(1);
-            let after_new_cf = if after_new_len >= 2 { nb.freq_sum - nb.max_freq } else { 0 };
+            let after_new_cf = if after_new_len >= 2 {
+                nb.freq_sum - nb.max_freq
+            } else {
+                0
+            };
             (new_bucket_cc, new_bucket_cf, after_new_cc, after_new_cf)
         };
 
         // 更新全局碰撞计数
-        self.total_collisions = (self.total_collisions + new_old_cc + after_new_cc)
-            - (old_bucket_cc + new_bucket_cc);
+        self.total_collisions =
+            (self.total_collisions + new_old_cc + after_new_cc) - (old_bucket_cc + new_bucket_cc);
         self.collision_frequency = (self.collision_frequency + new_old_cf + after_new_cf)
             - (old_bucket_cf + new_bucket_cf);
         self.current_codes[ci] = new_code;
@@ -2376,9 +2441,7 @@ impl Evaluator {
     fn check_full_code_max(&self, ctx: &OptContext) -> bool {
         let t = &ctx.targets_config.full_code;
 
-        if t.collision_count_max > 0.0
-            && self.total_collisions as f64 > t.collision_count_max
-        {
+        if t.collision_count_max > 0.0 && self.total_collisions as f64 > t.collision_count_max {
             return false;
         }
 
@@ -2425,9 +2488,7 @@ impl Evaluator {
         if let Some(ref se) = self.simple_eval {
             let sm = se.get_simple_metrics(ctx);
 
-            if t.collision_count_max > 0.0
-                && sm.collision_count as f64 > t.collision_count_max
-            {
+            if t.collision_count_max > 0.0 && sm.collision_count as f64 > t.collision_count_max {
                 return false;
             }
             if t.collision_rate_max > 0.0 && sm.collision_rate > t.collision_rate_max {
@@ -2519,16 +2580,13 @@ impl Evaluator {
                 } else {
                     0.0
                 };
-                score += ctx.weights.weight_equivalence
-                    * weighted_equiv
-                    * ctx.scale_config.equivalence;
+                score +=
+                    ctx.weights.weight_equivalence * weighted_equiv * ctx.scale_config.equivalence;
             }
 
             if ctx.weights.weight_equiv_cv > 0.0 {
                 let equiv_cv = self.calc_equiv_cv();
-                score += ctx.weights.weight_equiv_cv
-                    * equiv_cv
-                    * ctx.scale_config.equiv_cv;
+                score += ctx.weights.weight_equiv_cv * equiv_cv * ctx.scale_config.equiv_cv;
             }
 
             if ctx.weights.weight_distribution > 0.0 {
@@ -2728,7 +2786,8 @@ impl Evaluator {
             lw,
         );
 
-        let total_full = s_collision_count + s_collision_rate + s_equivalence + s_equiv_cv + s_distribution;
+        let total_full =
+            s_collision_count + s_collision_rate + s_equivalence + s_equiv_cv + s_distribution;
 
         let total_simple = if ctx.enable_simple_code {
             if let Some(ref se) = self.simple_eval {
@@ -2778,18 +2837,45 @@ impl Evaluator {
                 weight * (d + d * d + lw * (v * s))
             };
             (
-                comp(1.0 - sm.weighted_freq_coverage, 1.0 - t.freq, sc.simple_freq, w.simple_weight_freq),
-                comp(sm.equiv_mean, t.equiv, sc.simple_equiv, w.simple_weight_equiv),
-                comp(sm.dist_deviation, t.dist, sc.simple_dist, w.simple_weight_dist),
-                comp(sm.collision_count as f64, t.collision_count, sc.simple_collision_count, w.simple_weight_collision_count),
-                comp(sm.collision_rate, t.collision_rate, sc.simple_collision_rate, w.simple_weight_collision_rate),
+                comp(
+                    1.0 - sm.weighted_freq_coverage,
+                    1.0 - t.freq,
+                    sc.simple_freq,
+                    w.simple_weight_freq,
+                ),
+                comp(
+                    sm.equiv_mean,
+                    t.equiv,
+                    sc.simple_equiv,
+                    w.simple_weight_equiv,
+                ),
+                comp(
+                    sm.dist_deviation,
+                    t.dist,
+                    sc.simple_dist,
+                    w.simple_weight_dist,
+                ),
+                comp(
+                    sm.collision_count as f64,
+                    t.collision_count,
+                    sc.simple_collision_count,
+                    w.simple_weight_collision_count,
+                ),
+                comp(
+                    sm.collision_rate,
+                    t.collision_rate,
+                    sc.simple_collision_rate,
+                    w.simple_weight_collision_rate,
+                ),
             )
         } else {
             (
                 w.simple_weight_freq * (1.0 - sm.weighted_freq_coverage) * sc.simple_freq,
                 w.simple_weight_equiv * sm.equiv_mean * sc.simple_equiv,
                 w.simple_weight_dist * sm.dist_deviation * sc.simple_dist,
-                w.simple_weight_collision_count * (sm.collision_count as f64) * sc.simple_collision_count,
+                w.simple_weight_collision_count
+                    * (sm.collision_count as f64)
+                    * sc.simple_collision_count,
                 w.simple_weight_collision_rate * sm.collision_rate * sc.simple_collision_rate,
             )
         };
@@ -2839,7 +2925,11 @@ impl Evaluator {
     /// （`apply_simple_for_move` → `apply_move_incremental`），因此该计数在热路径调用
     /// 期间应保持不变。
     pub fn full_rebuild_calls(&self) -> usize {
-        self.full_rebuild_calls + self.simple_eval.as_ref().map_or(0, |se| se.full_rebuild_calls)
+        self.full_rebuild_calls
+            + self
+                .simple_eval
+                .as_ref()
+                .map_or(0, |se| se.full_rebuild_calls)
     }
 
     /// 观测用：返回上一次简码增量移动中阶段 2（出简选择增量）访问的候选字工作量
@@ -2861,7 +2951,9 @@ impl Evaluator {
     pub fn full_rebuild_calls_breakdown(&self) -> (usize, usize) {
         (
             self.full_rebuild_calls,
-            self.simple_eval.as_ref().map_or(0, |se| se.full_rebuild_calls),
+            self.simple_eval
+                .as_ref()
+                .map_or(0, |se| se.full_rebuild_calls),
         )
     }
 
@@ -3293,19 +3385,38 @@ mod first_candidate_tests {
         // 超阈值容量 → Sparse，行内含 "Sparse" 与运行时 n_chars 提示。
         let sparse = backend_log_line("全码桶", 33_554_432, 40, 11177);
         assert!(sparse.contains("Sparse"), "应标记 Sparse: {sparse}");
-        assert!(sparse.contains("n_chars(11177)"), "应含运行时 n_chars 提示: {sparse}");
+        assert!(
+            sparse.contains("n_chars(11177)"),
+            "应含运行时 n_chars 提示: {sparse}"
+        );
     }
 
     // 回归：4 码定长方案（code_space = 32^4，n_chars ≈ 1.1 万）必须判 Sparse。
     // 修前只看容量（1,048,576 ≤ 2^21）→ Dense → 每评估器 48 MB，实际只用到 1%。
     #[test]
     fn backend_log_line_4code_is_sparse() {
-        let line = backend_log_line("全码桶", 32usize.pow(4), std::mem::size_of::<FullBucket>(), 11_177);
+        let line = backend_log_line(
+            "全码桶",
+            32usize.pow(4),
+            std::mem::size_of::<FullBucket>(),
+            11_177,
+        );
         assert!(line.contains("Sparse"), "4 码定长方案应判稀疏后端: {line}");
-        assert!(line.contains("n_chars(11177)"), "应含运行时 n_chars: {line}");
-        assert!(line.contains("44,708") || line.contains("44708"), "应给出非空桶上界: {line}");
+        assert!(
+            line.contains("n_chars(11177)"),
+            "应含运行时 n_chars: {line}"
+        );
+        assert!(
+            line.contains("44,708") || line.contains("44708"),
+            "应给出非空桶上界: {line}"
+        );
         // 3 码仍是 Dense（占用率够高，数组索引更快）
-        let line3 = backend_log_line("全码桶", 32usize.pow(3), std::mem::size_of::<FullBucket>(), 11_177);
+        let line3 = backend_log_line(
+            "全码桶",
+            32usize.pow(3),
+            std::mem::size_of::<FullBucket>(),
+            11_177,
+        );
         assert!(line3.contains("Dense ("), "3 码方案应判密集后端: {line3}");
     }
 
@@ -3342,7 +3453,10 @@ mod first_candidate_tests {
                         root_selector: 'A',
                         code_selector: 'a',
                     }]],
-                    commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                    commit_keys: Vec::new(),
+                    commit_pref_last_left: Vec::new(),
+                    commit_pref_last_right: Vec::new(),
+                    commit_alt_hand_only: false,
                 }],
             }
         } else {
@@ -3480,7 +3594,8 @@ mod first_candidate_tests {
         assert!(
             (sum - sub.total).abs() < 1e-9,
             "简码子分数之和 {} 应等于 total {}",
-            sum, sub.total
+            sum,
+            sub.total
         );
 
         // 与综合算分的 total_simple 同口径（均为未乘 weight_simple_code 的简码总分）。
@@ -3488,7 +3603,8 @@ mod first_candidate_tests {
         assert!(
             (sub.total - total_simple).abs() < 1e-9,
             "get_simple_metric_scores.total {} 应等于 get_metric_scores.total_simple {}",
-            sub.total, total_simple
+            sub.total,
+            total_simple
         );
     }
 
@@ -3557,7 +3673,10 @@ mod full_collision_independence_tests {
                         root_selector: 'A',
                         code_selector: 'a',
                     }]],
-                    commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                    commit_keys: Vec::new(),
+                    commit_pref_last_left: Vec::new(),
+                    commit_pref_last_right: Vec::new(),
+                    commit_alt_hand_only: false,
                 }],
             }
         } else {
@@ -3715,19 +3834,28 @@ mod dealloc_free_tests {
                 level: 1,
                 code_num: 1,
                 rule_candidates: vec![vec![step('A')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
             SimpleCodeLevel {
                 level: 2,
                 code_num: 1,
                 rule_candidates: vec![vec![step('A'), step('B')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
             SimpleCodeLevel {
                 level: 3,
                 code_num: 1,
                 rule_candidates: vec![vec![step('A'), step('B'), step('C')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
         ];
 
@@ -3952,19 +4080,28 @@ mod bucket_selection_tests {
                 level: 1,
                 code_num,
                 rule_candidates: vec![vec![step('A')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
             SimpleCodeLevel {
                 level: 2,
                 code_num,
                 rule_candidates: vec![vec![step('A'), step('B')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
             SimpleCodeLevel {
                 level: 3,
                 code_num,
                 rule_candidates: vec![vec![step('A'), step('B'), step('C')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
         ];
 
@@ -3993,12 +4130,7 @@ mod bucket_selection_tests {
     /// - Frequency 模式：`key = freq`；
     /// - Efficiency 模式：`key = freq × (base_saving[ci][li] + sel_len)`，`sel_len` 由
     ///   `is_first_candidate[ci]` 取 0（首选字）或 1（非首选字）。
-    fn oracle_sort_key(
-        ctx: &OptContext,
-        is_first_candidate: &[bool],
-        li: usize,
-        ci: usize,
-    ) -> i64 {
+    fn oracle_sort_key(ctx: &OptContext, is_first_candidate: &[bool], li: usize, ci: usize) -> i64 {
         let freq = ctx.char_infos[ci].frequency as i64;
         match ctx.simple_assign_mode {
             SimpleAssignMode::Frequency => freq,
@@ -4275,19 +4407,28 @@ mod incremental_full_consistency_tests {
                 level: 1,
                 code_num,
                 rule_candidates: vec![vec![step('A')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
             SimpleCodeLevel {
                 level: 2,
                 code_num,
                 rule_candidates: vec![vec![step('A'), step('B')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
             SimpleCodeLevel {
                 level: 3,
                 code_num,
                 rule_candidates: vec![vec![step('A'), step('B'), step('C')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
         ];
 
@@ -4343,7 +4484,12 @@ mod incremental_full_consistency_tests {
             code_selector: 'a',
         };
         let levels = vec![
-            SimpleCodeLevel::with_space_commit(1, code_num, vec![vec![step('A')]], space_commits[0]),
+            SimpleCodeLevel::with_space_commit(
+                1,
+                code_num,
+                vec![vec![step('A')]],
+                space_commits[0],
+            ),
             SimpleCodeLevel::with_space_commit(
                 2,
                 code_num,
@@ -4384,7 +4530,13 @@ mod incremental_full_consistency_tests {
     ///
     /// 这样 `ev.simple_eval` 即经增量维护得到的简码状态，可与对同一 `assignment` 从零
     /// 全量构建的 `Evaluator::new(...).simple_eval` 作为 oracle 逐字段比对。
-    fn apply_move_inc(ev: &mut Evaluator, ctx: &OptContext, assignment: &mut [u8], r: usize, new_key: u8) {
+    fn apply_move_inc(
+        ev: &mut Evaluator,
+        ctx: &OptContext,
+        assignment: &mut [u8],
+        r: usize,
+        new_key: u8,
+    ) {
         assignment[r] = new_key;
         // 注意：先克隆组内字列表以规避借用冲突（group_to_chars 借自 ctx，update_char 借 ev）
         for idx in 0..ctx.group_to_chars[r].len() {
@@ -4524,7 +4676,12 @@ mod incremental_full_consistency_tests {
         );
 
         // 逐级 selected / current_simple_code
-        prop_assert_eq!(se_inc.levels.len(), se_full.levels.len(), "{}: 级别数不一致", label);
+        prop_assert_eq!(
+            se_inc.levels.len(),
+            se_full.levels.len(),
+            "{}: 级别数不一致",
+            label
+        );
         for li in 0..se_inc.levels.len() {
             prop_assert_eq!(
                 &se_inc.levels[li].selected,
@@ -4932,13 +5089,19 @@ mod incremental_full_consistency_tests {
             // 频率两两不同（i+1），避免并列，使选择确定且每字独占桶后全部选中。
             splits.push((ch, vec![root], (i as u64) + 1));
         }
-        let step = |sel: char| SimpleCodeStep { root_selector: sel, code_selector: 'a' };
+        let step = |sel: char| SimpleCodeStep {
+            root_selector: sel,
+            code_selector: 'a',
+        };
         // 单级（level 1）：单根字仅在该级有简码，足以验证局部性。
         let levels = vec![SimpleCodeLevel {
             level: 1,
             code_num: 1,
             rule_candidates: vec![vec![step('A')]],
-            commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+            commit_keys: Vec::new(),
+            commit_pref_last_left: Vec::new(),
+            commit_pref_last_right: Vec::new(),
+            commit_alt_hand_only: false,
         }];
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
@@ -4965,7 +5128,7 @@ mod incremental_full_consistency_tests {
         let n_keys = (n as u8) + 5; // 充足键位，保证初始两两不同且留有空闲键
         let ctx = make_sparse_ctx(n, n_keys);
         let n_groups = ctx.num_groups; // = n（每字单根单组）
-        // 初始分配：assignment[i] = i ⟹ 各字级别 1 简码两两不同（独占桶）。
+                                       // 初始分配：assignment[i] = i ⟹ 各字级别 1 简码两两不同（独占桶）。
         let mut assignment: Vec<u8> = (0..n_groups as u8).collect();
         let mut ev = Evaluator::new(&ctx, &assignment);
         // 迁移字 0 到一个未被占用的键位（n+1），其旧/新简码桶均 ≤1 成员。
@@ -4994,7 +5157,8 @@ mod incremental_full_consistency_tests {
         assert!(
             v_large < n_large,
             "阶段 2 访问量 {} 应远小于候选字数 {}（证明非整体重算）",
-            v_large, n_large
+            v_large,
+            n_large
         );
         assert!(n_small == 6 && n_large == 20, "稀疏构造应令全部字为候选字");
     }
@@ -5058,19 +5222,28 @@ mod rollback_roundtrip_tests {
                 level: 1,
                 code_num,
                 rule_candidates: vec![vec![step('A')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
             SimpleCodeLevel {
                 level: 2,
                 code_num,
                 rule_candidates: vec![vec![step('A'), step('B')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
             SimpleCodeLevel {
                 level: 3,
                 code_num,
                 rule_candidates: vec![vec![step('A'), step('B'), step('C')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
         ];
 
@@ -5127,10 +5300,16 @@ mod rollback_roundtrip_tests {
             }
             assert_eq!(se.g_covered_freq, cov, "g_covered_freq 与级别和不一致");
             assert_eq!(se.g_equiv_freq_sum, ef, "g_equiv_freq_sum 与级别和不一致");
-            assert!((se.g_equiv_weighted - ew).abs() < 1e-6, "g_equiv_weighted 漂移");
+            assert!(
+                (se.g_equiv_weighted - ew).abs() < 1e-6,
+                "g_equiv_weighted 漂移"
+            );
             assert!((se.g_key_presses - kp).abs() < 1e-6, "g_key_presses 漂移");
             for k in 0..EQUIV_TABLE_SIZE {
-                assert!((se.g_key_usage[k] - ku[k]).abs() < 1e-6, "g_key_usage[{k}] 漂移");
+                assert!(
+                    (se.g_key_usage[k] - ku[k]).abs() < 1e-6,
+                    "g_key_usage[{k}] 漂移"
+                );
             }
         };
 
@@ -5152,7 +5331,16 @@ mod rollback_roundtrip_tests {
     #[test]
     fn test_incremental_dist_matches_full_rebuild() {
         let mut ctx = make_ctx(
-            &[(9, 2), (7, 2), (5, 2), (4, 1), (3, 2), (2, 1), (1, 2), (6, 2)],
+            &[
+                (9, 2),
+                (7, 2),
+                (5, 2),
+                (4, 1),
+                (3, 2),
+                (2, 1),
+                (1, 2),
+                (6, 2),
+            ],
             SimpleAssignMode::Efficiency,
             1,
             1.0,
@@ -5263,7 +5451,13 @@ mod rollback_roundtrip_tests {
 
     /// 施加一次完整移动（不提交）：复刻产线顺序 —— 先改写 assignment[r]，再对组内全码受影响字
     /// 增量维护全码桶（update_char），最后走简码增量 + 快照路径（apply_simple_for_move）。
-    fn apply_move(ev: &mut Evaluator, ctx: &OptContext, assignment: &mut [u8], r: usize, new_key: u8) {
+    fn apply_move(
+        ev: &mut Evaluator,
+        ctx: &OptContext,
+        assignment: &mut [u8],
+        r: usize,
+        new_key: u8,
+    ) {
         assignment[r] = new_key;
         for idx in 0..ctx.group_to_chars[r].len() {
             let ci = ctx.group_to_chars[r][idx];
@@ -5274,7 +5468,13 @@ mod rollback_roundtrip_tests {
 
     /// 逆转一次移动（拒绝路径）：复刻产线拒绝顺序 —— 先逆转全码更新（恢复 assignment[r] = old_key
     /// 并对组内字 update_char 回退），再回滚简码增量（rollback_simple）。
-    fn reject_move(ev: &mut Evaluator, ctx: &OptContext, assignment: &mut [u8], r: usize, old_key: u8) {
+    fn reject_move(
+        ev: &mut Evaluator,
+        ctx: &OptContext,
+        assignment: &mut [u8],
+        r: usize,
+        old_key: u8,
+    ) {
         assignment[r] = old_key;
         for idx in 0..ctx.group_to_chars[r].len() {
             let ci = ctx.group_to_chars[r][idx];
@@ -5443,19 +5643,28 @@ mod pre_activation_zero_contribution_tests {
                 level: 1,
                 code_num,
                 rule_candidates: vec![vec![step('A')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
             SimpleCodeLevel {
                 level: 2,
                 code_num,
                 rule_candidates: vec![vec![step('A'), step('B')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
             SimpleCodeLevel {
                 level: 3,
                 code_num,
                 rule_candidates: vec![vec![step('A'), step('B'), step('C')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
         ];
 
@@ -5481,7 +5690,13 @@ mod pre_activation_zero_contribution_tests {
 
     /// 施加一次合法全码移动（仅维护全码桶；简码未参与，无需 apply_simple_for_move）：
     /// 改写 `assignment[r]` 后对组内全码受影响字调用 `update_char`，并置 `score_dirty` 触发重算。
-    fn apply_full_move(ev: &mut Evaluator, ctx: &OptContext, assignment: &mut [u8], r: usize, new_key: u8) {
+    fn apply_full_move(
+        ev: &mut Evaluator,
+        ctx: &OptContext,
+        assignment: &mut [u8],
+        r: usize,
+        new_key: u8,
+    ) {
         assignment[r] = new_key;
         for idx in 0..ctx.group_to_chars[r].len() {
             let ci = ctx.group_to_chars[r][idx];
@@ -5646,19 +5861,28 @@ mod hot_path_no_full_rebuild_tests {
                 level: 1,
                 code_num,
                 rule_candidates: vec![vec![step('A')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
             SimpleCodeLevel {
                 level: 2,
                 code_num,
                 rule_candidates: vec![vec![step('A'), step('B')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
             SimpleCodeLevel {
                 level: 3,
                 code_num,
                 rule_candidates: vec![vec![step('A'), step('B'), step('C')]],
-                commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
             },
         ];
 
@@ -5773,7 +5997,10 @@ mod hot_path_no_full_rebuild_tests {
         // 把组0 从键0 移到键1 ⟹ 三字同键，重码频率从 1 暴涨到 100001，delta>0。
         // temp = f64::MIN_POSITIVE ⟹ exp(-delta/temp) = 0.0，rng.gen()∈[0,1) 不可能 < 0 ⟹ 必然拒绝。
         let rejected = !ev.try_move(&ctx, &mut assignment, 0, 1, f64::MIN_POSITIVE, &mut rng);
-        assert!(rejected, "恶化移动 + 极小温度应必然拒绝（覆盖 rollback 分支）");
+        assert!(
+            rejected,
+            "恶化移动 + 极小温度应必然拒绝（覆盖 rollback 分支）"
+        );
         // 拒绝后 assignment 应已被还原。
         assert_eq!(assignment, vec![0u8, 1u8, 1u8], "拒绝后分配应回滚");
         assert_eq!(
@@ -5783,8 +6010,7 @@ mod hot_path_no_full_rebuild_tests {
         );
 
         // try_swap 的拒绝分支：交换组0(键0)与组2(键1) ⟹ 组0(高频)与组1(高频)同键，重码暴涨，必然拒绝。
-        let swap_rejected =
-            !ev.try_swap(&ctx, &mut assignment, 0, 2, f64::MIN_POSITIVE, &mut rng);
+        let swap_rejected = !ev.try_swap(&ctx, &mut assignment, 0, 2, f64::MIN_POSITIVE, &mut rng);
         assert!(swap_rejected, "恶化交换 + 极小温度应必然拒绝");
         assert_eq!(assignment, vec![0u8, 1u8, 1u8], "拒绝后分配应回滚");
         assert_eq!(
@@ -5905,7 +6131,12 @@ mod space_commit_and_length_tests {
         let levels = vec![
             SimpleCodeLevel::with_space_commit(1, 1, vec![vec![step('A')]], space[0]),
             SimpleCodeLevel::with_space_commit(2, 1, vec![vec![step('A'), step('B')]], space[1]),
-            SimpleCodeLevel::with_space_commit(3, 1, vec![vec![step('A'), step('B'), step('C')]], space[2]),
+            SimpleCodeLevel::with_space_commit(
+                3,
+                1,
+                vec![vec![step('A'), step('B'), step('C')]],
+                space[2],
+            ),
         ];
 
         let fixed_roots: HashMap<String, u8> = HashMap::new();
@@ -6338,8 +6569,14 @@ mod fixed_simple_code_tests {
                     .iter()
                     .filter(|&&ci| lvl.selected[ci as usize])
                     .count();
-                prop_assert!(sel_count <= slots,
-                    "级别 {} 桶 {} 优化出简数 {} 超过可出简名额 {}", li, code, sel_count, slots);
+                prop_assert!(
+                    sel_count <= slots,
+                    "级别 {} 桶 {} 优化出简数 {} 超过可出简名额 {}",
+                    li,
+                    code,
+                    sel_count,
+                    slots
+                );
             }
         }
         Ok(())
@@ -6440,17 +6677,38 @@ mod fixed_simple_code_tests {
         let ch = char::from_u32(0x4e00).unwrap();
 
         // "a" → 级别 0
-        let ctx0 = make_ctx_fixed(&specs, SimpleAssignMode::Efficiency, 1, 1.0, [false; 3], &[(ch, "a".to_string())]);
+        let ctx0 = make_ctx_fixed(
+            &specs,
+            SimpleAssignMode::Efficiency,
+            1,
+            1.0,
+            [false; 3],
+            &[(ch, "a".to_string())],
+        );
         assert_eq!(ctx0.simple_fixed_codes.len(), 1);
         assert_eq!(ctx0.simple_fixed_codes[0].li, Some(0));
 
         // "ab" → 级别 1
-        let ctx1 = make_ctx_fixed(&specs, SimpleAssignMode::Efficiency, 1, 1.0, [false; 3], &[(ch, "ab".to_string())]);
+        let ctx1 = make_ctx_fixed(
+            &specs,
+            SimpleAssignMode::Efficiency,
+            1,
+            1.0,
+            [false; 3],
+            &[(ch, "ab".to_string())],
+        );
         assert_eq!(ctx1.simple_fixed_codes.len(), 1);
         assert_eq!(ctx1.simple_fixed_codes[0].li, Some(1));
 
         // "abc" → 级别 2（有效长 3 < 全码 4）
-        let ctx2 = make_ctx_fixed(&specs, SimpleAssignMode::Efficiency, 1, 1.0, [false; 3], &[(ch, "abc".to_string())]);
+        let ctx2 = make_ctx_fixed(
+            &specs,
+            SimpleAssignMode::Efficiency,
+            1,
+            1.0,
+            [false; 3],
+            &[(ch, "abc".to_string())],
+        );
         assert_eq!(ctx2.simple_fixed_codes.len(), 1);
         assert_eq!(ctx2.simple_fixed_codes[0].li, Some(2));
     }
@@ -6462,23 +6720,47 @@ mod fixed_simple_code_tests {
 
         // 级别 0 commit_keys=["_"]（由 space=[true,..] 构造），固定简码 "a_"：
         // 核心+上屏解释 → 归属级别 0、上屏键为空格、输出 "a_"。
-        let ctx = make_ctx_fixed(&specs, SimpleAssignMode::Efficiency, 1, 1.0, [true, false, false], &[(ch, "a_".to_string())]);
+        let ctx = make_ctx_fixed(
+            &specs,
+            SimpleAssignMode::Efficiency,
+            1,
+            1.0,
+            [true, false, false],
+            &[(ch, "a_".to_string())],
+        );
         assert_eq!(ctx.simple_fixed_codes.len(), 1);
         assert_eq!(ctx.simple_fixed_codes[0].li, Some(0));
-        assert_eq!(ctx.simple_fixed_codes[0].commit_key, Some(crate::types::KEY_SPACE as u8));
+        assert_eq!(
+            ctx.simple_fixed_codes[0].commit_key,
+            Some(crate::types::KEY_SPACE as u8)
+        );
         assert_eq!(ctx.simple_fixed_codes[0].code_str, "a_");
 
         // 级别 0 commit_keys=["_"]，固定简码 "a"（无上屏键、1 键）：
         // 纯核心需空 commit_keys 级别、核心+上屏需 T-1=核心长——两者皆不命中 →
         // 无归属（li=None），仍被接受（不丢弃）、输出 "a"。
-        let ctx2 = make_ctx_fixed(&specs, SimpleAssignMode::Efficiency, 1, 1.0, [true, false, false], &[(ch, "a".to_string())]);
-        assert_eq!(ctx2.simple_fixed_codes.len(), 1, "无归属固定简码应被接受而非丢弃");
+        let ctx2 = make_ctx_fixed(
+            &specs,
+            SimpleAssignMode::Efficiency,
+            1,
+            1.0,
+            [true, false, false],
+            &[(ch, "a".to_string())],
+        );
+        assert_eq!(
+            ctx2.simple_fixed_codes.len(),
+            1,
+            "无归属固定简码应被接受而非丢弃"
+        );
         assert_eq!(ctx2.simple_fixed_codes[0].li, None, "无匹配级别应 li=None");
         assert_eq!(ctx2.simple_fixed_codes[0].commit_key, None);
         assert_eq!(ctx2.simple_fixed_codes[0].code_str, "a");
         // 仍从候选集排除、计入常量贡献。
         assert!(!ctx2.simple_is_candidate[0], "无归属固定简码仍应排除候选集");
-        assert!(ctx2.fixed_covered_freq >= 100, "无归属固定简码字频仍计入覆盖偏置");
+        assert!(
+            ctx2.fixed_covered_freq >= 100,
+            "无归属固定简码字频仍计入覆盖偏置"
+        );
     }
 
     #[test]
@@ -6486,11 +6768,29 @@ mod fixed_simple_code_tests {
         // 全码长度 2，级别 1（2 键）有效长度 2，不严格短于全码 → 拒绝（需求 22.3）。
         let specs = vec![(100u64, 2usize)];
         let ch = char::from_u32(0x4e00).unwrap();
-        let ctx = make_ctx_fixed(&specs, SimpleAssignMode::Efficiency, 1, 1.0, [false; 3], &[(ch, "ab".to_string())]);
-        assert_eq!(ctx.simple_fixed_codes.len(), 0, "有效长度不短于全码应被拒绝");
+        let ctx = make_ctx_fixed(
+            &specs,
+            SimpleAssignMode::Efficiency,
+            1,
+            1.0,
+            [false; 3],
+            &[(ch, "ab".to_string())],
+        );
+        assert_eq!(
+            ctx.simple_fixed_codes.len(),
+            0,
+            "有效长度不短于全码应被拒绝"
+        );
 
         // 级别 0（1 键）有效长度 1 < 全码 2 → 接受。
-        let ctx_ok = make_ctx_fixed(&specs, SimpleAssignMode::Efficiency, 1, 1.0, [false; 3], &[(ch, "a".to_string())]);
+        let ctx_ok = make_ctx_fixed(
+            &specs,
+            SimpleAssignMode::Efficiency,
+            1,
+            1.0,
+            [false; 3],
+            &[(ch, "a".to_string())],
+        );
         assert_eq!(ctx_ok.simple_fixed_codes.len(), 1);
     }
 
@@ -6509,7 +6809,11 @@ mod fixed_simple_code_tests {
             &[(ch, "a".to_string())],
         );
         // 固定简码被接受、归属级别 0
-        assert_eq!(ctx.simple_fixed_codes.len(), 1, "code_num=0 级别的固定简码应生效");
+        assert_eq!(
+            ctx.simple_fixed_codes.len(),
+            1,
+            "code_num=0 级别的固定简码应生效"
+        );
         assert_eq!(ctx.simple_fixed_codes[0].li, Some(0));
         // 固定字被剔除候选、计入常量覆盖
         assert!(!ctx.simple_is_candidate[0], "固定字应被剔除候选集");
@@ -6528,11 +6832,25 @@ mod fixed_simple_code_tests {
         let specs = vec![(100u64, 4usize)];
         let ch = char::from_u32(0x4e00).unwrap();
         // 非法简码键位（数字 '1' 无法映射键位）→ 拒绝
-        let ctx_bad = make_ctx_fixed(&specs, SimpleAssignMode::Efficiency, 1, 1.0, [false; 3], &[(ch, "1".to_string())]);
+        let ctx_bad = make_ctx_fixed(
+            &specs,
+            SimpleAssignMode::Efficiency,
+            1,
+            1.0,
+            [false; 3],
+            &[(ch, "1".to_string())],
+        );
         assert_eq!(ctx_bad.simple_fixed_codes.len(), 0);
         // 汉字不在拆分表中 → 拒绝
         let other = char::from_u32(0x9fa5).unwrap();
-        let ctx_unknown = make_ctx_fixed(&specs, SimpleAssignMode::Efficiency, 1, 1.0, [false; 3], &[(other, "a".to_string())]);
+        let ctx_unknown = make_ctx_fixed(
+            &specs,
+            SimpleAssignMode::Efficiency,
+            1,
+            1.0,
+            [false; 3],
+            &[(other, "a".to_string())],
+        );
         assert_eq!(ctx_unknown.simple_fixed_codes.len(), 0);
     }
 
@@ -6544,26 +6862,90 @@ mod fixed_simple_code_tests {
     // ---------------------------------------------------------------------
 
     /// 逐字段断言两个 SimpleEvaluator 的简码指标与状态一致（含固定简码常量偏置）。
-    fn assert_simple_eq(ctx: &OptContext, inc: &Evaluator, full: &Evaluator, label: &str) -> Result<(), TestCaseError> {
+    fn assert_simple_eq(
+        ctx: &OptContext,
+        inc: &Evaluator,
+        full: &Evaluator,
+        label: &str,
+    ) -> Result<(), TestCaseError> {
         let mi = inc.get_simple_metrics(ctx);
         let mf = full.get_simple_metrics(ctx);
         let eps = 1e-9;
-        prop_assert!((mi.weighted_freq_coverage - mf.weighted_freq_coverage).abs() < eps, "{}: coverage", label);
-        prop_assert!((mi.equiv_mean - mf.equiv_mean).abs() < eps, "{}: equiv_mean", label);
-        prop_assert!((mi.dist_deviation - mf.dist_deviation).abs() < eps, "{}: dist", label);
-        prop_assert_eq!(mi.collision_count, mf.collision_count, "{}: coll_count", label);
-        prop_assert!((mi.collision_rate - mf.collision_rate).abs() < eps, "{}: coll_rate", label);
+        prop_assert!(
+            (mi.weighted_freq_coverage - mf.weighted_freq_coverage).abs() < eps,
+            "{}: coverage",
+            label
+        );
+        prop_assert!(
+            (mi.equiv_mean - mf.equiv_mean).abs() < eps,
+            "{}: equiv_mean",
+            label
+        );
+        prop_assert!(
+            (mi.dist_deviation - mf.dist_deviation).abs() < eps,
+            "{}: dist",
+            label
+        );
+        prop_assert_eq!(
+            mi.collision_count,
+            mf.collision_count,
+            "{}: coll_count",
+            label
+        );
+        prop_assert!(
+            (mi.collision_rate - mf.collision_rate).abs() < eps,
+            "{}: coll_rate",
+            label
+        );
 
         let se_i = inc.simple_eval.as_ref().expect("inc se");
         let se_f = full.simple_eval.as_ref().expect("full se");
-        prop_assert_eq!(&se_i.all_assigned_flags, &se_f.all_assigned_flags, "{}: all_assigned", label);
-        prop_assert_eq!(se_i.simple_collision_freq, se_f.simple_collision_freq, "{}: coll_freq", label);
+        prop_assert_eq!(
+            &se_i.all_assigned_flags,
+            &se_f.all_assigned_flags,
+            "{}: all_assigned",
+            label
+        );
+        prop_assert_eq!(
+            se_i.simple_collision_freq,
+            se_f.simple_collision_freq,
+            "{}: coll_freq",
+            label
+        );
         for li in 0..se_i.levels.len() {
-            prop_assert_eq!(&se_i.levels[li].selected, &se_f.levels[li].selected, "{}: L{} selected", label, li);
-            prop_assert_eq!(&se_i.levels[li].current_simple_code, &se_f.levels[li].current_simple_code, "{}: L{} code", label, li);
-            prop_assert_eq!(se_i.levels[li].covered_freq, se_f.levels[li].covered_freq, "{}: L{} covered", label, li);
-            prop_assert!((se_i.levels[li].equiv_weighted - se_f.levels[li].equiv_weighted).abs() < eps, "{}: L{} equiv_w", label, li);
-            prop_assert!((se_i.levels[li].key_presses - se_f.levels[li].key_presses).abs() < eps, "{}: L{} presses", label, li);
+            prop_assert_eq!(
+                &se_i.levels[li].selected,
+                &se_f.levels[li].selected,
+                "{}: L{} selected",
+                label,
+                li
+            );
+            prop_assert_eq!(
+                &se_i.levels[li].current_simple_code,
+                &se_f.levels[li].current_simple_code,
+                "{}: L{} code",
+                label,
+                li
+            );
+            prop_assert_eq!(
+                se_i.levels[li].covered_freq,
+                se_f.levels[li].covered_freq,
+                "{}: L{} covered",
+                label,
+                li
+            );
+            prop_assert!(
+                (se_i.levels[li].equiv_weighted - se_f.levels[li].equiv_weighted).abs() < eps,
+                "{}: L{} equiv_w",
+                label,
+                li
+            );
+            prop_assert!(
+                (se_i.levels[li].key_presses - se_f.levels[li].key_presses).abs() < eps,
+                "{}: L{} presses",
+                label,
+                li
+            );
         }
         Ok(())
     }
@@ -6676,7 +7058,11 @@ mod simple_protect_tests {
     /// `specs[i] = (freq, n_roots)`：第 i 个汉字含 `n_roots` 个独立字根（全码长度 = n_roots）。
     /// 含 n_roots=1 的字时其全码长度为 1，与级别 1 简码同长，从而可能数值相等 —— 触发占用保护。
     /// 仅用 2 个允许键位制造碰撞；覆盖率阈值 1.0 使全部字为候选字。
-    fn make_ctx(specs: &[(u64, usize)], mode: SimpleAssignMode, protect_top_n: usize) -> OptContext {
+    fn make_ctx(
+        specs: &[(u64, usize)],
+        mode: SimpleAssignMode,
+        protect_top_n: usize,
+    ) -> OptContext {
         let mut groups: Vec<RootGroup> = Vec::new();
         let mut splits: Vec<(char, Vec<String>, u64)> = Vec::with_capacity(specs.len());
         for (i, &(freq, n_roots)) in specs.iter().enumerate() {
@@ -6698,9 +7084,33 @@ mod simple_protect_tests {
             code_selector: 'a',
         };
         let levels = vec![
-            SimpleCodeLevel { level: 1, code_num: 1, rule_candidates: vec![vec![step('A')]], commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false },
-            SimpleCodeLevel { level: 2, code_num: 1, rule_candidates: vec![vec![step('A'), step('B')]], commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false },
-            SimpleCodeLevel { level: 3, code_num: 1, rule_candidates: vec![vec![step('A'), step('B'), step('C')]], commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false },
+            SimpleCodeLevel {
+                level: 1,
+                code_num: 1,
+                rule_candidates: vec![vec![step('A')]],
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
+            },
+            SimpleCodeLevel {
+                level: 2,
+                code_num: 1,
+                rule_candidates: vec![vec![step('A'), step('B')]],
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
+            },
+            SimpleCodeLevel {
+                level: 3,
+                code_num: 1,
+                rule_candidates: vec![vec![step('A'), step('B'), step('C')]],
+                commit_keys: Vec::new(),
+                commit_pref_last_left: Vec::new(),
+                commit_pref_last_right: Vec::new(),
+                commit_alt_hand_only: false,
+            },
         ];
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
@@ -6749,7 +7159,10 @@ mod simple_protect_tests {
                     assert!(
                         code >= fc.len() || fc[code].is_empty(),
                         "N=0 违反保护：级别 {} 字 {} 简码 {} 撞全码 {:?}",
-                        li, ci, code, fc.get(code)
+                        li,
+                        ci,
+                        code,
+                        fc.get(code)
                     );
                 } else {
                     // 仅保护 top-N：该简码编码值不应等于任一受保护汉字的全码。
@@ -6854,18 +7267,27 @@ mod active_passive_tests {
             let mut roots = Vec::with_capacity(2);
             for j in 0..2 {
                 let r = format!("a{i}_{j}");
-                groups.push(RootGroup { roots: vec![r.clone()], allowed_keys: vec![0, 1] });
+                groups.push(RootGroup {
+                    roots: vec![r.clone()],
+                    allowed_keys: vec![0, 1],
+                });
                 roots.push(r);
             }
             let ch = char::from_u32(0x4e00 + i as u32).unwrap();
             splits.push((ch, roots, f));
         }
-        let step = |s: char| SimpleCodeStep { root_selector: s, code_selector: 'a' };
+        let step = |s: char| SimpleCodeStep {
+            root_selector: s,
+            code_selector: 'a',
+        };
         let levels = vec![SimpleCodeLevel {
             level: 1,
             code_num: 1000, // 桶内全员出简
             rule_candidates: vec![vec![step('A')]],
-            commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+            commit_keys: Vec::new(),
+            commit_pref_last_left: Vec::new(),
+            commit_pref_last_right: Vec::new(),
+            commit_alt_hand_only: false,
         }];
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
@@ -6876,8 +7298,14 @@ mod active_passive_tests {
         weights.simple_coverage_ratio = output_ratio;
         weights.simple_active_coverage = active_ratio;
         OptContext::new(
-            &splits, &fixed_roots, &groups, equiv_table, key_dist,
-            ScaleConfig::default(), SimpleCodeConfig { levels }, weights,
+            &splits,
+            &fixed_roots,
+            &groups,
+            equiv_table,
+            key_dist,
+            ScaleConfig::default(),
+            SimpleCodeConfig { levels },
+            weights,
             TargetsConfig::default(),
         )
     }
@@ -6920,7 +7348,8 @@ mod active_passive_tests {
         assert!(
             sel_output.len() > sel_active.len(),
             "output 出简数({}) 应多于 active({})",
-            sel_output.len(), sel_active.len()
+            sel_output.len(),
+            sel_active.len()
         );
         // 至少有一个 passive 字在 output 范围被出简。
         assert!(
@@ -6975,7 +7404,10 @@ mod commit_keys_tests {
         let levels = vec![SimpleCodeLevel::with_commit_keys(
             1,
             code_num,
-            vec![vec![SimpleCodeStep { root_selector: 'A', code_selector: 'a' }]],
+            vec![vec![SimpleCodeStep {
+                root_selector: 'A',
+                code_selector: 'a',
+            }]],
             ck,
         )];
         let fixed_roots: HashMap<String, u8> = HashMap::new();
@@ -7019,17 +7451,26 @@ mod commit_keys_tests {
             let mut roots: Vec<String> = Vec::with_capacity(n_roots);
             for j in 0..n_roots {
                 let root = format!("c{i}_{j}");
-                groups.push(RootGroup { roots: vec![root.clone()], allowed_keys: vec![0, 1] });
+                groups.push(RootGroup {
+                    roots: vec![root.clone()],
+                    allowed_keys: vec![0, 1],
+                });
                 roots.push(root);
             }
             let ch = char::from_u32(0x4e00 + i as u32).unwrap();
             splits.push((ch, roots, freq));
         }
-        let ck: Vec<u8> = commit_keys.chars().map(|c| char_to_key_index(c).unwrap() as u8).collect();
+        let ck: Vec<u8> = commit_keys
+            .chars()
+            .map(|c| char_to_key_index(c).unwrap() as u8)
+            .collect();
         let mut level = SimpleCodeLevel::with_commit_keys(
             1,
             code_num,
-            vec![vec![SimpleCodeStep { root_selector: 'A', code_selector: 'a' }]],
+            vec![vec![SimpleCodeStep {
+                root_selector: 'A',
+                code_selector: 'a',
+            }]],
             ck,
         );
         level.commit_alt_hand_only = true;
@@ -7047,7 +7488,9 @@ mod commit_keys_tests {
             equiv_table,
             key_dist,
             ScaleConfig::default(),
-            SimpleCodeConfig { levels: vec![level] },
+            SimpleCodeConfig {
+                levels: vec![level],
+            },
             weights,
             TargetsConfig::default(),
         )
@@ -7061,11 +7504,18 @@ mod commit_keys_tests {
         let asg = vec![0u8; ctx.num_groups]; // 首根 → key 0 = 'a'（左手）
         let (se, is_first) = build_se(&ctx, &asg);
         let ordered = se.selected_ordered(&ctx, &is_first);
-        let codes: Vec<String> = ordered.iter().map(|&(li, ci)| se.rendered_code(li, ci)).collect();
+        let codes: Vec<String> = ordered
+            .iter()
+            .map(|&(li, ci)| se.rendered_code(li, ci))
+            .collect();
         assert_eq!(codes.len(), 4, "code_num=4 应出简 4 字（轮转重码于异手键）");
         for code in &codes {
             let last = code.chars().last().unwrap();
-            assert!(last == 'k' || last == '_', "异手过滤后上屏键只应为 k 或 _，实得 {:?}", code);
+            assert!(
+                last == 'k' || last == '_',
+                "异手过滤后上屏键只应为 k 或 _，实得 {:?}",
+                code
+            );
             assert_ne!(last, 'd', "同手字母 d 不应作为上屏键: {:?}", code);
         }
         // 名次 0,1,2,3 → 可用序列 [k,_] 轮转：k,_,k,_
@@ -7083,7 +7533,11 @@ mod commit_keys_tests {
         let asg = vec![0u8; ctx.num_groups]; // 核心末键 'a' 左手；commit 全左手字母、无 _
         let (se, is_first) = build_se(&ctx, &asg);
         let ordered = se.selected_ordered(&ctx, &is_first);
-        assert!(ordered.is_empty(), "K'=0 时该桶不应出简，实得 {} 个", ordered.len());
+        assert!(
+            ordered.is_empty(),
+            "K'=0 时该桶不应出简，实得 {} 个",
+            ordered.len()
+        );
     }
 
     /// 每有效简码 code_num=1（需求 21.7，方案 A）：commit_keys="dk_"（K=3）→ 3 个有效简码
@@ -7091,7 +7545,8 @@ mod commit_keys_tests {
     #[test]
     fn capacity_expands_to_k() {
         // code_num=1，commit_keys="dk_"（K=3）→ 单桶应出简 3 个字（每上屏键 1 字）。
-        let ctx = make_ctx_commit_single(&[100, 90, 80, 70], 2, "dk_", 1, SimpleAssignMode::Frequency);
+        let ctx =
+            make_ctx_commit_single(&[100, 90, 80, 70], 2, "dk_", 1, SimpleAssignMode::Frequency);
         let asg = vec![0u8; ctx.num_groups]; // 所有首根 → key 0 → 同一桶
         let (se, _) = build_se(&ctx, &asg);
         let selected: Vec<usize> = (0..ctx.char_infos.len())
@@ -7108,7 +7563,10 @@ mod commit_keys_tests {
         let (se, is_first) = build_se(&ctx, &asg);
         // 按分配顺序（名次）取出简字，rendered 末字符应依次为 k, d, _。
         let ordered = se.selected_ordered(&ctx, &is_first);
-        let codes: Vec<String> = ordered.iter().map(|&(li, ci)| se.rendered_code(li, ci)).collect();
+        let codes: Vec<String> = ordered
+            .iter()
+            .map(|&(li, ci)| se.rendered_code(li, ci))
+            .collect();
         assert_eq!(codes.len(), 3);
         // 核心键 'a' + 上屏键：名次 0→k、1→d、2→_。
         assert_eq!(codes[0], "ak", "名次0 应取对侧手首选 k");
@@ -7132,11 +7590,15 @@ mod commit_keys_tests {
     /// 名次按各上屏键剩余容量轮转复用上屏键。
     #[test]
     fn case_b_round_robin() {
-        let ctx = make_ctx_commit_single(&[100, 90, 80, 70], 2, "dk", 4, SimpleAssignMode::Frequency);
+        let ctx =
+            make_ctx_commit_single(&[100, 90, 80, 70], 2, "dk", 4, SimpleAssignMode::Frequency);
         let asg = vec![0u8; ctx.num_groups];
         let (se, is_first) = build_se(&ctx, &asg);
         let ordered = se.selected_ordered(&ctx, &is_first);
-        let codes: Vec<String> = ordered.iter().map(|&(li, ci)| se.rendered_code(li, ci)).collect();
+        let codes: Vec<String> = ordered
+            .iter()
+            .map(|&(li, ci)| se.rendered_code(li, ci))
+            .collect();
         assert_eq!(codes.len(), 4, "4 个候选字均出简（容量 8 充足）");
         // 'a' 左手 → pref_last_left "dk" = [k, d]；名次 0,1,2,3 → k,d,k,d（轮转）。
         assert_eq!(codes[0], "ak");
@@ -7159,17 +7621,26 @@ mod commit_keys_tests {
             let mut roots: Vec<String> = Vec::with_capacity(n_roots);
             for j in 0..n_roots {
                 let root = format!("c{i}_{j}");
-                groups.push(RootGroup { roots: vec![root.clone()], allowed_keys: vec![0, 1] });
+                groups.push(RootGroup {
+                    roots: vec![root.clone()],
+                    allowed_keys: vec![0, 1],
+                });
                 roots.push(root);
             }
             let ch = char::from_u32(0x4e00 + i as u32).unwrap();
             splits.push((ch, roots, freq));
         }
-        let ck: Vec<u8> = commit_keys.chars().map(|c| char_to_key_index(c).unwrap() as u8).collect();
+        let ck: Vec<u8> = commit_keys
+            .chars()
+            .map(|c| char_to_key_index(c).unwrap() as u8)
+            .collect();
         let levels = vec![SimpleCodeLevel::with_commit_keys(
             1,
             code_num,
-            vec![vec![SimpleCodeStep { root_selector: 'A', code_selector: 'a' }]],
+            vec![vec![SimpleCodeStep {
+                root_selector: 'A',
+                code_selector: 'a',
+            }]],
             ck,
         )];
         let fixed_roots: HashMap<String, u8> = HashMap::new();
@@ -7201,11 +7672,20 @@ mod commit_keys_tests {
     #[test]
     fn per_effective_code_cap_code_num_two() {
         // 6 个候选字均落入核心桶 'a'（首根 key 0）。容量 = code_num(2) × K(2) = 4。
-        let ctx = make_ctx_commit_single(&[100, 95, 90, 85, 80, 75], 2, "dk", 2, SimpleAssignMode::Frequency);
+        let ctx = make_ctx_commit_single(
+            &[100, 95, 90, 85, 80, 75],
+            2,
+            "dk",
+            2,
+            SimpleAssignMode::Frequency,
+        );
         let asg = vec![0u8; ctx.num_groups];
         let (se, is_first) = build_se(&ctx, &asg);
         let ordered = se.selected_ordered(&ctx, &is_first);
-        let codes: Vec<String> = ordered.iter().map(|&(li, ci)| se.rendered_code(li, ci)).collect();
+        let codes: Vec<String> = ordered
+            .iter()
+            .map(|&(li, ci)| se.rendered_code(li, ci))
+            .collect();
         assert_eq!(codes.len(), 4, "code_num=2 × K=2 → 该桶应出简 4 字");
         let n_ad = codes.iter().filter(|c| c.as_str() == "ad").count();
         let n_ak = codes.iter().filter(|c| c.as_str() == "ak").count();
@@ -7221,18 +7701,35 @@ mod commit_keys_tests {
         let fixed = [('\u{4e00}', "ad")];
         let ctx = make_ctx_commit_fixed(&[100, 95, 90, 85, 80], 2, "dk", 2, &fixed);
         // 验证占用按键登记。
-        let code_a = ctx.calc_simple_code(0, 0, &vec![0u8; ctx.num_groups]).expect("core code");
+        let code_a = ctx
+            .calc_simple_code(0, 0, &vec![0u8; ctx.num_groups])
+            .expect("core code");
         let d = char_to_key_index('d').unwrap() as u8;
         let k = char_to_key_index('k').unwrap() as u8;
-        assert_eq!(ctx.simple_fixed_occ_key(0, code_a, d), 1, "Ad 应被固定占用 1 次");
+        assert_eq!(
+            ctx.simple_fixed_occ_key(0, code_a, d),
+            1,
+            "Ad 应被固定占用 1 次"
+        );
         assert_eq!(ctx.simple_fixed_occ_key(0, code_a, k), 0, "Ak 不应被占用");
-        assert_eq!(ctx.simple_annealing_slots(0, code_a), 3, "Ad(2-1)+Ak(2-0)=3");
+        assert_eq!(
+            ctx.simple_annealing_slots(0, code_a),
+            3,
+            "Ad(2-1)+Ak(2-0)=3"
+        );
 
         let asg = vec![0u8; ctx.num_groups];
         let (se, is_first) = build_se(&ctx, &asg);
         let ordered = se.selected_ordered(&ctx, &is_first);
-        let codes: Vec<String> = ordered.iter().map(|&(li, ci)| se.rendered_code(li, ci)).collect();
-        assert_eq!(codes.len(), 3, "桶退火名额应为 3（Ad 占 1 后剩 Ad×1 + Ak×2）");
+        let codes: Vec<String> = ordered
+            .iter()
+            .map(|&(li, ci)| se.rendered_code(li, ci))
+            .collect();
+        assert_eq!(
+            codes.len(),
+            3,
+            "桶退火名额应为 3（Ad 占 1 后剩 Ad×1 + Ak×2）"
+        );
         let n_ad = codes.iter().filter(|c| c.as_str() == "ad").count();
         let n_ak = codes.iter().filter(|c| c.as_str() == "ak").count();
         assert_eq!(n_ad, 1, "Ad 固定占 1 后退火仅剩 1");
@@ -7245,23 +7742,46 @@ mod commit_keys_tests {
     fn fixed_occupancy_supports_two_on_same_effective_code() {
         let fixed = [('\u{4e00}', "ak"), ('\u{4e01}', "ak")];
         let ctx = make_ctx_commit_fixed(&[100, 95, 90, 85, 80], 2, "dk", 2, &fixed);
-        let code_a = ctx.calc_simple_code(2, 0, &vec![0u8; ctx.num_groups]).expect("core code");
+        let code_a = ctx
+            .calc_simple_code(2, 0, &vec![0u8; ctx.num_groups])
+            .expect("core code");
         let k = char_to_key_index('k').unwrap() as u8;
-        assert_eq!(ctx.simple_fixed_occ_key(0, code_a, k), 2, "Ak 应被 2 个固定简码占用");
+        assert_eq!(
+            ctx.simple_fixed_occ_key(0, code_a, k),
+            2,
+            "Ak 应被 2 个固定简码占用"
+        );
         // Ak: max(0,2-2)=0；Ad: 2 → 名额 2。
-        assert_eq!(ctx.simple_annealing_slots(0, code_a), 2, "Ak 满占→0，仅余 Ad×2");
+        assert_eq!(
+            ctx.simple_annealing_slots(0, code_a),
+            2,
+            "Ak 满占→0，仅余 Ad×2"
+        );
         let asg = vec![0u8; ctx.num_groups];
         let (se, is_first) = build_se(&ctx, &asg);
         let ordered = se.selected_ordered(&ctx, &is_first);
-        let codes: Vec<String> = ordered.iter().map(|&(li, ci)| se.rendered_code(li, ci)).collect();
+        let codes: Vec<String> = ordered
+            .iter()
+            .map(|&(li, ci)| se.rendered_code(li, ci))
+            .collect();
         assert_eq!(codes.len(), 2, "Ak 满占后桶退火名额 = Ad 的 2");
-        assert!(codes.iter().all(|c| c.as_str() == "ad"), "退火只应出 Ad: {:?}", codes);
+        assert!(
+            codes.iter().all(|c| c.as_str() == "ad"),
+            "退火只应出 Ad: {:?}",
+            codes
+        );
     }
 
     /// 增量 == 全量重建（含 commit_keys）：移动后 ev 的简码指标应与对同一分配全量重建一致。
     #[test]
     fn incremental_matches_full_with_commit_keys() {
-        let ctx = make_ctx_commit_single(&[100, 90, 80, 70, 60], 2, "dk_", 2, SimpleAssignMode::Efficiency);
+        let ctx = make_ctx_commit_single(
+            &[100, 90, 80, 70, 60],
+            2,
+            "dk_",
+            2,
+            SimpleAssignMode::Efficiency,
+        );
         let mut asg = vec![0u8; ctx.num_groups];
         let mut ev = Evaluator::new(&ctx, &asg);
 
@@ -7281,10 +7801,22 @@ mod commit_keys_tests {
             let (se_full, _) = build_se(&ctx, &asg);
             let m_inc = ev.simple_eval.as_ref().unwrap().get_simple_metrics(&ctx);
             let m_full = se_full.get_simple_metrics(&ctx);
-            assert_eq!(m_inc.collision_count, m_full.collision_count, "重码数 增量≠全量");
-            assert!((m_inc.weighted_freq_coverage - m_full.weighted_freq_coverage).abs() < 1e-9, "覆盖率 增量≠全量");
-            assert!((m_inc.equiv_mean - m_full.equiv_mean).abs() < 1e-9, "当量 增量≠全量");
-            assert!((m_inc.dist_deviation - m_full.dist_deviation).abs() < 1e-9, "分布 增量≠全量");
+            assert_eq!(
+                m_inc.collision_count, m_full.collision_count,
+                "重码数 增量≠全量"
+            );
+            assert!(
+                (m_inc.weighted_freq_coverage - m_full.weighted_freq_coverage).abs() < 1e-9,
+                "覆盖率 增量≠全量"
+            );
+            assert!(
+                (m_inc.equiv_mean - m_full.equiv_mean).abs() < 1e-9,
+                "当量 增量≠全量"
+            );
+            assert!(
+                (m_inc.dist_deviation - m_full.dist_deviation).abs() < 1e-9,
+                "分布 增量≠全量"
+            );
         }
         let _ = key_to_char(0);
     }

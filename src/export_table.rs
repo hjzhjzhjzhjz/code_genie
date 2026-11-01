@@ -66,7 +66,10 @@ pub(crate) fn 加载拆分表(path: &str) -> Vec<(String, Vec<String>, u64)> {
         // 首列可能带变体选择符（如「直」+ VS），按原字符串保留，避免截成同一个字
         let 字 = 列[0].to_string();
         let 根: Vec<String> = 列[1].split_whitespace().map(|s| s.to_string()).collect();
-        let 频次 = 列.get(2).and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
+        let 频次 = 列
+            .get(2)
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .unwrap_or(0);
         表.push((字, 根, 频次));
     }
     表
@@ -144,7 +147,9 @@ pub(crate) fn 取码序列<'a>(
 }
 
 /// 按序列把字根翻成键位字母
-pub(crate) fn 编码(序列: &[(&str, 码位)], 键位: &HashMap<String, Vec<char>>) -> Option<String> {
+pub(crate) fn 编码(
+    序列: &[(&str, 码位)], 键位: &HashMap<String, Vec<char>>
+) -> Option<String> {
     let mut 码 = String::with_capacity(序列.len());
     for (根, 位) in 序列 {
         let 键 = 键位.get(*根)?;
@@ -172,7 +177,12 @@ pub fn run(keymap_path: &str, chaifen_path: &str, simple_path: Option<&str>, out
     let 拆分 = 加载拆分表(chaifen_path);
     let 简码 = simple_path.map(加载简码表).unwrap_or_default();
 
-    println!("  字根 {} 个，汉字 {} 个，简码 {} 条", 键位.len(), 拆分.len(), 简码.len());
+    println!(
+        "  字根 {} 个，汉字 {} 个，简码 {} 条",
+        键位.len(),
+        拆分.len(),
+        简码.len()
+    );
 
     let (输出, 全码条数, 简码条数, 缺根) = 生成表(&键位, &拆分, &简码);
     fs::write(output_path, 输出).expect("无法写入输出文件");

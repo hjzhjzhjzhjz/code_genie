@@ -8,12 +8,12 @@ use std::fs;
 use crate::types::{char_to_key_index, KeyDistConfig, RootGroup, EQUIV_TABLE_SIZE};
 
 /// 加载固定字根和受限字根组
-/// 
+///
 /// # 返回值
 /// - (固定字根映射, 受限字根组)
 pub fn load_fixed(path: &str) -> Result<(HashMap<String, u8>, Vec<RootGroup>), String> {
-    let content = fs::read_to_string(path)
-        .map_err(|e| format!("无法读取固定字根文件 {}: {}", path, e))?;
+    let content =
+        fs::read_to_string(path).map_err(|e| format!("无法读取固定字根文件 {}: {}", path, e))?;
     let mut truly_fixed: HashMap<String, u8> = HashMap::new();
     let mut constrained: Vec<RootGroup> = Vec::new();
 
@@ -54,15 +54,19 @@ pub fn load_fixed(path: &str) -> Result<(HashMap<String, u8>, Vec<RootGroup>), S
 }
 
 /// 加载动态字根组
-pub fn load_dynamic(path: &str, constrained: &[RootGroup], allowed_keys: &str) -> Result<Vec<RootGroup>, String> {
+pub fn load_dynamic(
+    path: &str,
+    constrained: &[RootGroup],
+    allowed_keys: &str,
+) -> Result<Vec<RootGroup>, String> {
     let global_allowed: Vec<u8> = allowed_keys
         .chars()
         .filter_map(char_to_key_index)
         .map(|i| i as u8)
         .collect();
 
-    let content = fs::read_to_string(path)
-        .map_err(|e| format!("无法读取动态字根文件 {}: {}", path, e))?;
+    let content =
+        fs::read_to_string(path).map_err(|e| format!("无法读取动态字根文件 {}: {}", path, e))?;
 
     // C7：维护「字根 → 组索引」，替代每行扫描全部组（O(行×组) → O(行内根数)）。
     let mut groups: Vec<RootGroup> = constrained.to_vec();
@@ -148,12 +152,12 @@ pub fn load_dynamic(path: &str, constrained: &[RootGroup], allowed_keys: &str) -
 }
 
 /// 加载拆分表
-/// 
+///
 /// # 返回值
 /// - Vec<(字符, 根名列表, 频率)>
 pub fn load_splits(path: &str) -> Result<Vec<(char, Vec<String>, u64)>, String> {
-    let content = fs::read_to_string(path)
-        .map_err(|e| format!("无法读取拆分表 {}: {}", path, e))?;
+    let content =
+        fs::read_to_string(path).map_err(|e| format!("无法读取拆分表 {}: {}", path, e))?;
     let mut res = Vec::new();
     for line in content.lines() {
         let line = line.trim();
@@ -180,10 +184,12 @@ pub fn load_splits(path: &str) -> Result<Vec<(char, Vec<String>, u64)>, String> 
 }
 
 /// 加载字根对当量表
-/// 
+///
 /// # 返回值
 /// - 31x31 当量矩阵
-pub fn load_pair_equivalence(path: &str) -> Result<[[f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE], String> {
+pub fn load_pair_equivalence(
+    path: &str,
+) -> Result<[[f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE], String> {
     let mut table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
     // #5：缺失当量文件返回 Err（当量项将恒为 0、评分失真）；由调用方决定告警/退出。
     let content = fs::read_to_string(path).map_err(|e| {
@@ -411,7 +417,7 @@ pub fn keymap_to_assignment(
 }
 
 /// 加载键位分布配置
-/// 
+///
 /// # 返回值
 /// - 31 个键位的分布配置
 pub fn load_key_distribution(path: &str) -> Result<[KeyDistConfig; EQUIV_TABLE_SIZE], String> {
@@ -452,9 +458,7 @@ mod keymap_assignment_tests {
     use super::*;
     use crate::config::TargetsConfig;
     use crate::context::OptContext;
-    use crate::types::{
-        ScaleConfig, SimpleCodeConfig, WeightConfig, EQUIV_TABLE_SIZE,
-    };
+    use crate::types::{ScaleConfig, SimpleCodeConfig, WeightConfig, EQUIV_TABLE_SIZE};
     use proptest::prelude::*;
     use rand::{thread_rng, Rng};
 

@@ -374,7 +374,11 @@ fn try_resolve_conflict(
     let idx = rng.gen_range(0..window);
     let (g1, g2, _) = collisions[idx];
 
-    let groups_to_try = if rng.gen_bool(0.5) { vec![g1, g2] } else { vec![g2, g1] };
+    let groups_to_try = if rng.gen_bool(0.5) {
+        vec![g1, g2]
+    } else {
+        vec![g2, g1]
+    };
 
     for &gi in &groups_to_try {
         let current_key = assignment[gi];
@@ -422,11 +426,7 @@ fn try_key_reorganization(
     let gi = groups_on_k1[rng.gen_range(0..groups_on_k1.len())];
     let allowed = &ctx.groups[gi].allowed_keys;
 
-    let other_keys: Vec<u8> = allowed
-        .iter()
-        .filter(|&&k| k != k1)
-        .copied()
-        .collect();
+    let other_keys: Vec<u8> = allowed.iter().filter(|&&k| k != k1).copied().collect();
 
     if other_keys.is_empty() {
         return false;
@@ -586,8 +586,12 @@ pub(crate) fn try_full_key_swap(
         return false;
     }
     // 合法性：整键对调后每组仍在其 allowed_keys 内
-    if !groups_a.iter().all(|&gi| ctx.groups[gi].allowed_keys.contains(&k2))
-        || !groups_b.iter().all(|&gi| ctx.groups[gi].allowed_keys.contains(&k1))
+    if !groups_a
+        .iter()
+        .all(|&gi| ctx.groups[gi].allowed_keys.contains(&k2))
+        || !groups_b
+            .iter()
+            .all(|&gi| ctx.groups[gi].allowed_keys.contains(&k1))
     {
         return false;
     }
@@ -595,7 +599,9 @@ pub(crate) fn try_full_key_swap(
     let affected: Vec<usize> = groups_a.iter().chain(groups_b.iter()).copied().collect();
 
     let old_score = evaluator.get_score(ctx);
-    let needs_simple = affected.iter().any(|&gi| evaluator.has_simple_impact(ctx, gi));
+    let needs_simple = affected
+        .iter()
+        .any(|&gi| evaluator.has_simple_impact(ctx, gi));
 
     // 更新 key_weighted_usage
     for &gi in &affected {
@@ -701,7 +707,15 @@ fn enhanced_hill_climb(
         let success = match op_type {
             0..=3 => {
                 if !collisions.is_empty() {
-                    try_resolve_conflict(ctx, &mut assignment, &mut evaluator, &collisions, 20, zero_temp, rng)
+                    try_resolve_conflict(
+                        ctx,
+                        &mut assignment,
+                        &mut evaluator,
+                        &collisions,
+                        20,
+                        zero_temp,
+                        rng,
+                    )
                 } else {
                     false
                 }
@@ -890,7 +904,13 @@ pub fn multi_start_init(ctx: &OptContext, cfg: &Config, thread_id: usize) -> Vec
         return vec![];
     }
 
-    let n_candidates: usize = if n < 100 { 50 } else if n < 1000 { 50 } else { 30 };
+    let n_candidates: usize = if n < 100 {
+        50
+    } else if n < 1000 {
+        50
+    } else {
+        30
+    };
     let warmup_steps = (n * 30).max(2000).min(50_000);
 
     let mut best_assignment: Option<Vec<u8>> = None;
@@ -926,7 +946,10 @@ pub fn multi_start_init(ctx: &OptContext, cfg: &Config, thread_id: usize) -> Vec
             if thread_id == 0 {
                 println!(
                     "   [Init T0] 候选 {}/{} 策略={} → 预热后得分: {:.4} ✓",
-                    trial + 1, n_candidates, strategy_name, score
+                    trial + 1,
+                    n_candidates,
+                    strategy_name,
+                    score
                 );
             }
         }
@@ -985,7 +1008,16 @@ pub fn simulated_annealing(
 ) -> (Vec<u8>, f64, Metrics, SimpleMetrics) {
     // 向后兼容入口（测试/无 checkpoint 场景）：不写 checkpoint、不可中断、不 resume。
     let stop_flag = Arc::new(AtomicBool::new(false));
-    let r = simulated_annealing_resumable(ctx, cfg, thread_id, &stop_flag, None, None, usize::MAX, None);
+    let r = simulated_annealing_resumable(
+        ctx,
+        cfg,
+        thread_id,
+        &stop_flag,
+        None,
+        None,
+        usize::MAX,
+        None,
+    );
     (r.assignment, r.score, r.metrics, r.simple_metrics)
 }
 
@@ -1283,18 +1315,18 @@ pub fn simulated_annealing_resumable(
     // checkpoint 写出闭包：组装当前线程检查点并归档旧版后原子写（需求 1/13）。
     // 写失败仅告警、不中断退火（需求 10.2）。`step` 为当前步（即下次从此步续算）。
     let write_ckpt = |step: usize,
-                          assignment: &[u8],
-                          best_assignment: &[u8],
-                          best_full_score: f64,
-                          best_simple_score: f64,
-                          best_score: f64,
-                          best_metrics: Metrics,
-                          best_simple_metrics: SimpleMetrics,
-                          temp_multiplier: f64,
-                          steps_since_improve: usize,
-                          last_best_score: f64,
-                          simple_activated: bool,
-                          prev_ts: &mut Option<String>| {
+                      assignment: &[u8],
+                      best_assignment: &[u8],
+                      best_full_score: f64,
+                      best_simple_score: f64,
+                      best_score: f64,
+                      best_metrics: Metrics,
+                      best_simple_metrics: SimpleMetrics,
+                      temp_multiplier: f64,
+                      steps_since_improve: usize,
+                      last_best_score: f64,
+                      simple_activated: bool,
+                      prev_ts: &mut Option<String>| {
         if let Some(dir) = ckpt_dir {
             let tc = ThreadCheckpoint {
                 thread_id,
@@ -1327,9 +1359,19 @@ pub fn simulated_annealing_resumable(
                 println!("\n   [T0] 收到停止信号，正在写出 checkpoint...");
             }
             write_ckpt(
-                step, &assignment, &best_assignment, best_full_score, best_simple_score,
-                best_score, best_metrics, best_simple_metrics, temp_multiplier,
-                steps_since_improve, last_best_score, simple_activated, &mut prev_ts,
+                step,
+                &assignment,
+                &best_assignment,
+                best_full_score,
+                best_simple_score,
+                best_score,
+                best_metrics,
+                best_simple_metrics,
+                temp_multiplier,
+                steps_since_improve,
+                last_best_score,
+                simple_activated,
+                &mut prev_ts,
             );
             return SaResult {
                 assignment: best_assignment,
@@ -1342,9 +1384,19 @@ pub fn simulated_annealing_resumable(
         // === 周期写 checkpoint（每 checkpoint_interval 步，需求 1.2）===
         if ckpt_dir.is_some() && step > start_step && step % checkpoint_interval == 0 {
             write_ckpt(
-                step, &assignment, &best_assignment, best_full_score, best_simple_score,
-                best_score, best_metrics, best_simple_metrics, temp_multiplier,
-                steps_since_improve, last_best_score, simple_activated, &mut prev_ts,
+                step,
+                &assignment,
+                &best_assignment,
+                best_full_score,
+                best_simple_score,
+                best_score,
+                best_metrics,
+                best_simple_metrics,
+                temp_multiplier,
+                steps_since_improve,
+                last_best_score,
+                simple_activated,
+                &mut prev_ts,
             );
         }
 
@@ -1420,7 +1472,10 @@ pub fn simulated_annealing_resumable(
         if thread_id == 0 && simple_enabled && p_ramp > 0.0 {
             while next_ramp_idx < ramp_points.len() && p >= ramp_points[next_ramp_idx].0 {
                 let (pp, alpha, ww) = ramp_points[next_ramp_idx];
-                println!("   [T0] 简码权重渐进 | p={:.3} α={:.3} w={:.4}", pp, alpha, ww);
+                println!(
+                    "   [T0] 简码权重渐进 | p={:.3} α={:.3} w={:.4}",
+                    pp, alpha, ww
+                );
                 next_ramp_idx += 1;
             }
             if !ramp_done_logged && p >= p_start + p_ramp {
@@ -1473,12 +1528,14 @@ pub fn simulated_annealing_resumable(
         };
 
         if !did_conflict {
-            let swap_prob = swap_prob_base + (1.0 - swap_prob_base) * (step as f64 / steps as f64) * 0.3;
+            let swap_prob =
+                swap_prob_base + (1.0 - swap_prob_base) * (step as f64 / steps as f64) * 0.3;
 
             // 整键互换（大邻域）：低概率触发，用于跳出单组 swap/move 的局部最优。
             let fks_prob = cfg.annealing.full_key_swap_probability;
             if fks_prob > 0.0 && n_groups >= 2 && rng.gen::<f64>() < fks_prob {
-                proposal_accepted = try_full_key_swap(ctx, &mut assignment, &mut evaluator, temp, &mut rng);
+                proposal_accepted =
+                    try_full_key_swap(ctx, &mut assignment, &mut evaluator, temp, &mut rng);
             } else if rng.gen::<f64>() < swap_prob && n_groups >= 2 {
                 let r1 = rng.gen_range(0..n_groups);
                 let r2 = rng.gen_range(0..n_groups - 1);
@@ -1490,18 +1547,21 @@ pub fn simulated_annealing_resumable(
                     && ctx.groups[r1].allowed_keys.contains(&k2)
                     && ctx.groups[r2].allowed_keys.contains(&k1)
                 {
-                    proposal_accepted = evaluator.try_swap(ctx, &mut assignment, r1, r2, temp, &mut rng);
+                    proposal_accepted =
+                        evaluator.try_swap(ctx, &mut assignment, r1, r2, temp, &mut rng);
                 } else {
                     let r = r1;
                     let allowed = &ctx.groups[r].allowed_keys;
                     let new_k = allowed[rng.gen_range(0..allowed.len())];
-                    proposal_accepted = evaluator.try_move(ctx, &mut assignment, r, new_k, temp, &mut rng);
+                    proposal_accepted =
+                        evaluator.try_move(ctx, &mut assignment, r, new_k, temp, &mut rng);
                 }
             } else {
                 let r = rng.gen_range(0..n_groups);
                 let allowed = &ctx.groups[r].allowed_keys;
                 let new_k = allowed[rng.gen_range(0..allowed.len())];
-                proposal_accepted = evaluator.try_move(ctx, &mut assignment, r, new_k, temp, &mut rng);
+                proposal_accepted =
+                    evaluator.try_move(ctx, &mut assignment, r, new_k, temp, &mut rng);
             }
         }
 
@@ -1514,7 +1574,8 @@ pub fn simulated_annealing_resumable(
         let current_score = evaluator.get_score(ctx);
         // 最佳解按分量存储，比较时用当前有效权重 w_eff 重算 best_total（需求 11.2/11.3），
         // 解决目标函数随时间漂移导致最佳解被冻结的问题。
-        let best_recomputed = Evaluator::best_total(weight_full, best_full_score, w_eff, best_simple_score);
+        let best_recomputed =
+            Evaluator::best_total(weight_full, best_full_score, w_eff, best_simple_score);
         if current_score < best_recomputed {
             best_full_score = evaluator.full_score_component(ctx);
             best_simple_score = evaluator.simple_score_component(ctx);
@@ -1529,7 +1590,11 @@ pub fn simulated_annealing_resumable(
                 let elapsed = sa_start.elapsed().as_secs_f64();
                 // 自本次会话起的平均吞吐：用 (step - start_step) 而非绝对 step，
                 // 否则 resume 续算时 step 从历史步号起算、elapsed 从 0 起算会使速率瞬间爆表。
-                let speed = if elapsed > 0.0 { (step - start_step) as f64 / elapsed } else { 0.0 };
+                let speed = if elapsed > 0.0 {
+                    (step - start_step) as f64 / elapsed
+                } else {
+                    0.0
+                };
                 let scores = evaluator.get_metric_scores(ctx);
                 // 分量分数（需求 16.4/16.5）：最佳解全码/简码分量以当前有效权重重算。
                 let best_full_comp = weight_full * best_full_score;
@@ -1558,19 +1623,30 @@ pub fn simulated_annealing_resumable(
             if thread_id == 0 {
                 let elapsed = sa_start.elapsed().as_secs_f64();
                 // 自本次会话起的平均吞吐（同上，修正 resume 爆表）。
-                let speed = if elapsed > 0.0 { (step - start_step) as f64 / elapsed } else { 0.0 };
+                let speed = if elapsed > 0.0 {
+                    (step - start_step) as f64 / elapsed
+                } else {
+                    0.0
+                };
                 println!(
                     "   [T0] 步数 {} | 均速 {:.1} 万步/分钟: Reheat ×{:.1} (基温 {:.6})",
-                    step, speed * 60.0 / 10000.0, cfg.annealing.reheat_factor, base_temp
+                    step,
+                    speed * 60.0 / 10000.0,
+                    cfg.annealing.reheat_factor,
+                    base_temp
                 );
             }
         }
 
         // 智能低温扰动
-        if perturb_interval > 0 && step > 0 && step % perturb_interval == 0 && base_temp < perturb_trigger_temp {
+        if perturb_interval > 0
+            && step > 0
+            && step % perturb_interval == 0
+            && base_temp < perturb_trigger_temp
+        {
             let collisions = find_collision_groups(ctx, &assignment, false);
             let n_perturb = (n_groups as f64 * cfg.annealing.perturb_strength) as usize;
-            
+
             if !collisions.is_empty() {
                 let mut perturbed_groups: HashSet<usize> = HashSet::new();
                 for (g1, g2, _) in collisions.iter().take(perturb_pairs_limit) {
@@ -1582,7 +1658,14 @@ pub fn simulated_annealing_resumable(
                     let allowed = &ctx.groups[gi].allowed_keys;
                     if allowed.len() > 1 {
                         let new_k = allowed[rng.gen_range(0..allowed.len())];
-                        evaluator.try_move(ctx, &mut assignment, gi, new_k, temp * perturb_temp_mult, &mut rng);
+                        evaluator.try_move(
+                            ctx,
+                            &mut assignment,
+                            gi,
+                            new_k,
+                            temp * perturb_temp_mult,
+                            &mut rng,
+                        );
                     }
                 }
             } else {
@@ -1595,7 +1678,14 @@ pub fn simulated_annealing_resumable(
                         let can = ctx.groups[r1].allowed_keys.contains(&kb)
                             && ctx.groups[r2].allowed_keys.contains(&ka);
                         if can {
-                            evaluator.try_swap(ctx, &mut assignment, r1, r2, temp * perturb_temp_mult, &mut rng);
+                            evaluator.try_swap(
+                                ctx,
+                                &mut assignment,
+                                r1,
+                                r2,
+                                temp * perturb_temp_mult,
+                                &mut rng,
+                            );
                         }
                     }
                 }
@@ -1605,7 +1695,9 @@ pub fn simulated_annealing_resumable(
                 let m = evaluator.get_metrics(ctx);
                 println!(
                     "   [T0] 步数 {}: 智能扰动 | 重码={} | 当前: {:.4}",
-                    step, m.collision_count, evaluator.get_score(ctx)
+                    step,
+                    m.collision_count,
+                    evaluator.get_score(ctx)
                 );
             }
         }
@@ -1621,12 +1713,24 @@ pub fn simulated_annealing_resumable(
             let now = Instant::now();
             let win_elapsed = now.duration_since(window_start).as_secs_f64();
             let win_steps = step - window_start_step;
-            let win_speed = if win_elapsed > 0.0 { win_steps as f64 / win_elapsed } else { 0.0 };
-            let accept_rate = if win_proposed > 0 { win_accepted as f64 / win_proposed as f64 } else { 0.0 };
+            let win_speed = if win_elapsed > 0.0 {
+                win_steps as f64 / win_elapsed
+            } else {
+                0.0
+            };
+            let accept_rate = if win_proposed > 0 {
+                win_accepted as f64 / win_proposed as f64
+            } else {
+                0.0
+            };
             // 总吞吐：自本次会话起的累计平均速度（= (step - start_step)/总耗时），即原进度行的速度字段。
             // 用 (step - start_step) 而非绝对 step，避免 resume 续算时把历史步数算进来导致爆表。
             let sa_elapsed = sa_start.elapsed().as_secs_f64();
-            let avg_speed = if sa_elapsed > 0.0 { (step - start_step) as f64 / sa_elapsed } else { 0.0 };
+            let avg_speed = if sa_elapsed > 0.0 {
+                (step - start_step) as f64 / sa_elapsed
+            } else {
+                0.0
+            };
 
             // 分量分数（需求 16.4/16.5）：当前解与最佳解的全码/简码分量。
             let cur_full_comp = weight_full * evaluator.full_score_component(ctx);
@@ -1742,8 +1846,13 @@ pub fn simulated_annealing_resumable(
     // 最终精炼传 disable_simple=false：保持简码激活、走增量更新（需求 24）。
     // 简码启用时内部评估器 current_simple_weight = w_target，使 final_score 与 best_score
     // 同口径（全码+简码），接受判定正确；简码关闭时该参数无效（路径与基线一致）。
-    let (final_assignment, final_score) =
-        hill_climb_warmup(ctx, best_assignment.clone(), &mut rng, final_warmup_steps, false);
+    let (final_assignment, final_score) = hill_climb_warmup(
+        ctx,
+        best_assignment.clone(),
+        &mut rng,
+        final_warmup_steps,
+        false,
+    );
 
     if final_score < best_score {
         best_assignment = final_assignment;
@@ -1754,7 +1863,10 @@ pub fn simulated_annealing_resumable(
             // 三分量（需求 28.2）：与精炼内部评估器同口径（weight_full·full + w_target·simple）。
             let fc = weight_full * eval.full_score_component(ctx);
             let sc = w_target * eval.simple_score_component(ctx);
-            println!("   [T0] 最终爬山改进(active范围) → 得分: {:.4} (全码:{:.4} 简码:{:.4})", best_score, fc, sc);
+            println!(
+                "   [T0] 最终爬山改进(active范围) → 得分: {:.4} (全码:{:.4} 简码:{:.4})",
+                best_score, fc, sc
+            );
         }
     }
 
@@ -1955,13 +2067,23 @@ mod conflict_tests {
         let mut ev = Evaluator::new(&ctx, &a);
 
         // 空列表
-        assert!(!try_resolve_conflict(&ctx, &mut a, &mut ev, &[], 5, 1.0, &mut rng));
+        assert!(!try_resolve_conflict(
+            &ctx,
+            &mut a,
+            &mut ev,
+            &[],
+            5,
+            1.0,
+            &mut rng
+        ));
         assert_eq!(a, before);
 
         // window = 0
         let cols = find_collision_groups(&ctx, &a, false);
         assert!(!cols.is_empty());
-        assert!(!try_resolve_conflict(&ctx, &mut a, &mut ev, &cols, 0, 1.0, &mut rng));
+        assert!(!try_resolve_conflict(
+            &ctx, &mut a, &mut ev, &cols, 0, 1.0, &mut rng
+        ));
         assert_eq!(a, before);
     }
 
@@ -2043,7 +2165,10 @@ mod activation_reheat_tests {
                 root_selector: 'A',
                 code_selector: 'a',
             }]],
-            commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+            commit_keys: Vec::new(),
+            commit_pref_last_left: Vec::new(),
+            commit_pref_last_right: Vec::new(),
+            commit_alt_hand_only: false,
         };
         OptContext::new(
             &splits,
@@ -2233,7 +2358,11 @@ mod activation_reheat_tests {
             "简码覆盖率应落在 [0,1]：{}",
             sm.weighted_freq_coverage
         );
-        assert!(sm.equiv_mean.is_finite(), "平均当量应有限：{}", sm.equiv_mean);
+        assert!(
+            sm.equiv_mean.is_finite(),
+            "平均当量应有限：{}",
+            sm.equiv_mean
+        );
         assert!(
             sm.dist_deviation.is_finite(),
             "分布偏差应有限：{}",
@@ -2258,8 +2387,7 @@ mod activation_reheat_tests {
         // 前置事实：激活阈值 0.1 < 1.0，运行内进度必将跨过阈值并触发激活（需求 8.3/12.2）。
         assert!(cfg.weights.simple_code.simple_start_progress < 1.0);
 
-        let (assignment, score, _metrics, simple_metrics) =
-            simulated_annealing(&ctx, &cfg, 1);
+        let (assignment, score, _metrics, simple_metrics) = simulated_annealing(&ctx, &cfg, 1);
 
         assert_eq!(assignment.len(), ctx.num_groups, "分配长度应等于组数");
         assert!(score.is_finite(), "最终综合得分应为有限值：{score}");
@@ -2279,8 +2407,7 @@ mod activation_reheat_tests {
         cfg.annealing.perturb_interval_ratio = 0.0;
         cfg.annealing.perturb_strength = 0.0;
 
-        let (assignment, score, _metrics, simple_metrics) =
-            simulated_annealing(&ctx, &cfg, 1);
+        let (assignment, score, _metrics, simple_metrics) = simulated_annealing(&ctx, &cfg, 1);
 
         assert_eq!(assignment.len(), ctx.num_groups);
         assert!(
@@ -2350,7 +2477,10 @@ mod log_output_tests {
                 root_selector: 'A',
                 code_selector: 'a',
             }]],
-            commit_keys: Vec::new(), commit_pref_last_left: Vec::new(), commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+            commit_keys: Vec::new(),
+            commit_pref_last_left: Vec::new(),
+            commit_pref_last_right: Vec::new(),
+            commit_alt_hand_only: false,
         };
         OptContext::new(
             &splits,
@@ -2375,7 +2505,11 @@ mod log_output_tests {
     /// 首点 α=0、渐进段单调非降。覆盖 p_ramp > 0 与 p_ramp == 0 两种配置。
     fn verify_ramp_config(p_start: f64, p_ramp: f64, w_target: f64) {
         let points = ramp_log_points(p_start, p_ramp, w_target);
-        assert_eq!(points.len(), 10, "渐进期应恰好输出 10 个进度点（需求 16.2）");
+        assert_eq!(
+            points.len(),
+            10,
+            "渐进期应恰好输出 10 个进度点（需求 16.2）"
+        );
 
         let mut prev_w = f64::NEG_INFINITY;
         for (i, &(p_i, alpha, w_i)) in points.iter().enumerate() {
@@ -2399,10 +2533,7 @@ mod log_output_tests {
 
             // w == w_simple_eff(p_i, ...)
             let expect_w = w_simple_eff(p_i, p_start, p_ramp, w_target);
-            assert_eq!(
-                w_i, expect_w,
-                "第 {i} 点 w 应等于 w_simple_eff 的计算值"
-            );
+            assert_eq!(w_i, expect_w, "第 {i} 点 w 应等于 w_simple_eff 的计算值");
 
             // 单调非降
             assert!(
@@ -2530,7 +2661,10 @@ mod log_output_tests {
             // w_eff==0（激活前）时简码分量应为 0，total 退化为纯全码分量。
             if w_eff == 0.0 {
                 assert_eq!(simple_comp, 0.0, "w_eff=0 时简码分量应为 0");
-                assert!((total - full_comp).abs() < 1e-12, "w_eff=0 时 total 应等于全码分量");
+                assert!(
+                    (total - full_comp).abs() < 1e-12,
+                    "w_eff=0 时 total 应等于全码分量"
+                );
             }
         }
     }
@@ -2765,7 +2899,10 @@ mod resume_tests {
         let mut splits = Vec::with_capacity(n);
         for i in 0..n {
             let root = format!("r{i}");
-            groups.push(RootGroup { roots: vec![root.clone()], allowed_keys: allowed.clone() });
+            groups.push(RootGroup {
+                roots: vec![root.clone()],
+                allowed_keys: allowed.clone(),
+            });
             let ch = char::from_u32(0x4e00 + i as u32).unwrap();
             splits.push((ch, vec![root], (100 - i as u64).max(1)));
         }
@@ -2818,7 +2955,16 @@ mod resume_tests {
         let stop = Arc::new(AtomicBool::new(false));
 
         // 1) fresh 运行至完成：应周期写出 thread-00.json。
-        let r0 = simulated_annealing_resumable(&ctx, &cfg, 0, &stop, None, Some(&ckpt_dir), interval, None);
+        let r0 = simulated_annealing_resumable(
+            &ctx,
+            &cfg,
+            0,
+            &stop,
+            None,
+            Some(&ckpt_dir),
+            interval,
+            None,
+        );
         assert!(!r0.interrupted);
         let tpath = checkpoint::thread_path(&ckpt_dir, 0);
         assert!(tpath.exists(), "fresh 运行应写出 thread-00.json");
@@ -2828,7 +2974,16 @@ mod resume_tests {
         assert_eq!(tc.current_step % interval, 0);
 
         // 2) 从该检查点 resume 续算：best 不退化（单调），返回有效结果。
-        let r1 = simulated_annealing_resumable(&ctx, &cfg, 0, &stop, Some(&tc), Some(&ckpt_dir), interval, None);
+        let r1 = simulated_annealing_resumable(
+            &ctx,
+            &cfg,
+            0,
+            &stop,
+            Some(&tc),
+            Some(&ckpt_dir),
+            interval,
+            None,
+        );
         assert!(!r1.interrupted);
         assert!(
             r1.score <= tc.best_score + 1e-9,
@@ -2850,7 +3005,16 @@ mod resume_tests {
         let stop = Arc::new(AtomicBool::new(false));
 
         // 先跑一次拿到一个合法 best_assignment 与分量。
-        let r0 = simulated_annealing_resumable(&ctx, &cfg, 0, &stop, None, Some(&ckpt_dir), usize::MAX, None);
+        let r0 = simulated_annealing_resumable(
+            &ctx,
+            &cfg,
+            0,
+            &stop,
+            None,
+            Some(&ckpt_dir),
+            usize::MAX,
+            None,
+        );
         let mut tc = checkpoint::load_thread_checkpoint(&checkpoint::thread_path(&ckpt_dir, 0))
             .unwrap_or(ThreadCheckpoint {
                 thread_id: 0,
@@ -2871,7 +3035,16 @@ mod resume_tests {
         // 标记为「已完成」：current_step = total_steps。
         tc.current_step = total_steps;
 
-        let r1 = simulated_annealing_resumable(&ctx, &cfg, 0, &stop, Some(&tc), Some(&ckpt_dir), usize::MAX, None);
+        let r1 = simulated_annealing_resumable(
+            &ctx,
+            &cfg,
+            0,
+            &stop,
+            Some(&tc),
+            Some(&ckpt_dir),
+            usize::MAX,
+            None,
+        );
         assert!(!r1.interrupted);
         assert!(r1.score <= tc.best_score + 1e-9);
         let _ = std::fs::remove_dir_all(&ckpt_dir);

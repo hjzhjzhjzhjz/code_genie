@@ -299,7 +299,8 @@ impl SimpleCodeLevel {
         rule_candidates: Vec<Vec<SimpleCodeStep>>,
         commit_keys: Vec<u8>,
     ) -> Self {
-        let (commit_pref_last_left, commit_pref_last_right) = build_commit_pref_tables(&commit_keys);
+        let (commit_pref_last_left, commit_pref_last_right) =
+            build_commit_pref_tables(&commit_keys);
         SimpleCodeLevel {
             level,
             code_num,
@@ -373,7 +374,7 @@ pub enum Hand {
 #[inline]
 pub fn key_hand(key: u8) -> Hand {
     match key {
-        26 => Hand::Neutral, // KEY_SPACE
+        26 => Hand::Neutral,              // KEY_SPACE
         27 | 28 | 29 | 30 => Hand::Right, // ; , . /
         0..=25 => match (key + b'a') as char {
             'q' | 'w' | 'e' | 'r' | 't' | 'a' | 's' | 'd' | 'f' | 'g' | 'z' | 'x' | 'c' | 'v'

@@ -504,7 +504,14 @@ mod tests {
 
         // 伪随机操作序列（确定性）
         let ops: &[(u32, u64)] = &[
-            (5, 10), (5, 20), (9, 3), (40, 100), (5, 0), (9, 7), (127, 1), (40, 2),
+            (5, 10),
+            (5, 20),
+            (9, 3),
+            (40, 100),
+            (5, 0),
+            (9, 7),
+            (127, 1),
+            (40, 2),
         ];
         for &(code, v) in ops {
             for st in [&mut dense, &mut sparse] {
@@ -548,8 +555,16 @@ mod tests {
     // 故后端日志 `capacity × size_of::<FullBucket>()` 的内存估算不因内联化而改变。
     #[test]
     fn full_bucket_size_unchanged_48_bytes() {
-        assert_eq!(std::mem::size_of::<Members>(), 24, "Members(SmallVec<[u32;2]>) 应为 24 字节");
-        assert_eq!(std::mem::size_of::<FullBucket>(), 48, "FullBucket 应保持 48 字节，内存估算不变");
+        assert_eq!(
+            std::mem::size_of::<Members>(),
+            24,
+            "Members(SmallVec<[u32;2]>) 应为 24 字节"
+        );
+        assert_eq!(
+            std::mem::size_of::<FullBucket>(),
+            48,
+            "FullBucket 应保持 48 字节，内存估算不变"
+        );
     }
 
     // remove 后 Dense 槽位保留成员容量（不释放），消除空↔非空转换的分配抖动。
@@ -573,6 +588,9 @@ mod tests {
         s.remove(3);
         assert!(s.get(3).is_none(), "remove 后应判空");
         let cap_after = s.get_mut_or_insert(3).members.capacity();
-        assert_eq!(cap_after, cap_before, "Dense remove 应原地重置并保留容量，不释放缓冲");
+        assert_eq!(
+            cap_after, cap_before,
+            "Dense remove 应原地重置并保留容量，不释放缓冲"
+        );
     }
 }

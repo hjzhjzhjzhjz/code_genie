@@ -23,8 +23,8 @@ pub struct Config {
     pub weights: WeightsConfig,
     pub annealing: AnnealingConfig,
     pub simple_levels: Vec<SimpleLevelConfig>,
-    pub scale: Option<ScaleConfigToml>,    // 可选，缺失则完全依赖 calibrate
-    pub targets: Option<TargetsConfig>,    // 可选，缺失则使用默认（disabled）
+    pub scale: Option<ScaleConfigToml>, // 可选，缺失则完全依赖 calibrate
+    pub targets: Option<TargetsConfig>, // 可选，缺失则使用默认（disabled）
     /// 固定简码映射（需求 21）：顶层内联表 `[fixed_simple_codes]`，形如 `"不" = "u"`、
     /// `"了" = "a_"`。键为汉字、值为字面简码串（可选以 `_` 结尾表示空格上屏）。
     /// 缺失时为 None。用 `BTreeMap` 保证遍历顺序确定。
@@ -120,14 +120,30 @@ pub struct SimpleCodeWeights {
     pub simple_protect_top_n: usize,
 }
 
-fn default_simple_start_progress() -> f64 { 0.4 }
-fn default_simple_ramp_progress() -> f64 { 0.1 }
-fn default_simple_activation_reheat() -> f64 { 1.2 }
-fn default_simple_coverage_ratio() -> f64 { 1.0 }
-fn default_simple_active_coverage() -> f64 { 0.90 }
-fn default_reconcile_interval_ratio() -> f64 { 0.05 }
-fn default_simple_assign_mode() -> String { "efficiency".to_string() }
-fn default_simple_protect_top_n() -> usize { 0 }
+fn default_simple_start_progress() -> f64 {
+    0.4
+}
+fn default_simple_ramp_progress() -> f64 {
+    0.1
+}
+fn default_simple_activation_reheat() -> f64 {
+    1.2
+}
+fn default_simple_coverage_ratio() -> f64 {
+    1.0
+}
+fn default_simple_active_coverage() -> f64 {
+    0.90
+}
+fn default_reconcile_interval_ratio() -> f64 {
+    0.05
+}
+fn default_simple_assign_mode() -> String {
+    "efficiency".to_string()
+}
+fn default_simple_protect_top_n() -> usize {
+    0
+}
 
 /// 模拟退火参数配置
 #[derive(Debug, Clone, Deserialize)]
@@ -186,18 +202,42 @@ pub struct AnnealingConfig {
     pub full_key_swap_probability: f64,
 }
 
-fn default_conflict_probability() -> f64 { 0.0 }
-fn default_conflict_refresh_interval() -> usize { 1000 }
-fn default_conflict_sample_window() -> usize { 20 }
-fn default_conflict_weight_by_freq() -> bool { false }
-fn default_checkpoint_interval_ratio() -> f64 { 0.05 }
-fn default_temp_start() -> f64 { 1.0 }
-fn default_temp_end() -> f64 { 1e-6 }
-fn default_comfort_progress() -> f64 { 0.5 }
-fn default_perturb_trigger_temp_ratio() -> f64 { 0.01 }
-fn default_perturb_temp_multiplier() -> f64 { 2.0 }
-fn default_perturb_collision_pairs_limit() -> usize { 10 }
-fn default_full_key_swap_probability() -> f64 { 0.01 }
+fn default_conflict_probability() -> f64 {
+    0.0
+}
+fn default_conflict_refresh_interval() -> usize {
+    1000
+}
+fn default_conflict_sample_window() -> usize {
+    20
+}
+fn default_conflict_weight_by_freq() -> bool {
+    false
+}
+fn default_checkpoint_interval_ratio() -> f64 {
+    0.05
+}
+fn default_temp_start() -> f64 {
+    1.0
+}
+fn default_temp_end() -> f64 {
+    1e-6
+}
+fn default_comfort_progress() -> f64 {
+    0.5
+}
+fn default_perturb_trigger_temp_ratio() -> f64 {
+    0.01
+}
+fn default_perturb_temp_multiplier() -> f64 {
+    2.0
+}
+fn default_perturb_collision_pairs_limit() -> usize {
+    10
+}
+fn default_full_key_swap_probability() -> f64 {
+    0.01
+}
 
 /// 全码目标配置（对应 [targets.full_code] 段）
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -329,10 +369,10 @@ impl Config {
     /// #1：解析/读取失败不再静默回退默认配置，而是返回 `Err`，由调用方 `exit(1)`。
     /// 这样「配置写错却没生效」不会再被默认值掩盖。
     pub fn load_from_path(path: &str) -> Result<Self, String> {
-        let content = fs::read_to_string(path)
-            .map_err(|e| format!("无法读取配置文件 {}: {}", path, e))?;
-        let config: Self = toml::from_str(&content)
-            .map_err(|e| format!("配置文件解析失败 {}: {}", path, e))?;
+        let content =
+            fs::read_to_string(path).map_err(|e| format!("无法读取配置文件 {}: {}", path, e))?;
+        let config: Self =
+            toml::from_str(&content).map_err(|e| format!("配置文件解析失败 {}: {}", path, e))?;
         println!("✅ 已加载配置文件: {}", path);
         Ok(config)
     }
@@ -381,7 +421,9 @@ impl Config {
                 return true;
             }
             let core_len = l.rule_candidates.iter().map(|r| r.len()).max().unwrap_or(0);
-            fixed.iter().any(|(_, code)| fixed_belongs_to_level(code, core_len, &l.commit_keys))
+            fixed
+                .iter()
+                .any(|(_, code)| fixed_belongs_to_level(code, core_len, &l.commit_keys))
         });
 
         SimpleCodeConfig { levels: built }
@@ -428,11 +470,14 @@ impl Config {
             + self.weights.simple_code.collision_count
             + self.weights.simple_code.collision_rate;
         if self.weights.simple_code.enabled && (total_simple - 1.0).abs() > 0.001 {
-            problems.push(format!("简码子权重总和不为 1.0 (当前: {:.3})", total_simple));
+            problems.push(format!(
+                "简码子权重总和不为 1.0 (当前: {:.3})",
+                total_simple
+            ));
         }
 
-        let total_main = self.weights.simple_code.full_code_weight
-            + self.weights.simple_code.simple_code_weight;
+        let total_main =
+            self.weights.simple_code.full_code_weight + self.weights.simple_code.simple_code_weight;
         if self.weights.simple_code.enabled && (total_main - 1.0).abs() > 0.001 {
             problems.push(format!("全码/简码总权重不为 1.0 (当前: {:.3})", total_main));
         }
@@ -487,7 +532,9 @@ impl Config {
             simple_weight_collision_rate: self.weights.simple_code.collision_rate,
             simple_coverage_ratio: self.weights.simple_code.simple_coverage_ratio,
             simple_active_coverage: self.weights.simple_code.simple_active_coverage,
-            simple_assign_mode: parse_simple_assign_mode(&self.weights.simple_code.simple_assign_mode),
+            simple_assign_mode: parse_simple_assign_mode(
+                &self.weights.simple_code.simple_assign_mode,
+            ),
             simple_protect_top_n: self.weights.simple_code.simple_protect_top_n,
         }
     }
@@ -809,27 +856,45 @@ mod tests {
     #[test]
     fn commit_keys_parse_basic() {
         let k = |c: char| char_to_key_index(c).unwrap() as u8;
-        assert_eq!(resolve_commit_keys(&lvl(Some("dk_"), None)), vec![k('d'), k('k'), KEY_SPACE as u8]);
+        assert_eq!(
+            resolve_commit_keys(&lvl(Some("dk_"), None)),
+            vec![k('d'), k('k'), KEY_SPACE as u8]
+        );
         assert_eq!(resolve_commit_keys(&lvl(Some(""), None)), Vec::<u8>::new());
-        assert_eq!(resolve_commit_keys(&lvl(Some("_"), None)), vec![KEY_SPACE as u8]);
+        assert_eq!(
+            resolve_commit_keys(&lvl(Some("_"), None)),
+            vec![KEY_SPACE as u8]
+        );
     }
 
     #[test]
     fn commit_keys_dedup() {
         let k = |c: char| char_to_key_index(c).unwrap() as u8;
         // 重复键去重，保留首次顺序。
-        assert_eq!(resolve_commit_keys(&lvl(Some("ddk"), None)), vec![k('d'), k('k')]);
+        assert_eq!(
+            resolve_commit_keys(&lvl(Some("ddk"), None)),
+            vec![k('d'), k('k')]
+        );
     }
 
     #[test]
     fn commit_keys_deprecated_space_commit_shim() {
         // 仅 space_commit、无 commit_keys：true→"_"、false→""。
-        assert_eq!(resolve_commit_keys(&lvl(None, Some(true))), vec![KEY_SPACE as u8]);
-        assert_eq!(resolve_commit_keys(&lvl(None, Some(false))), Vec::<u8>::new());
+        assert_eq!(
+            resolve_commit_keys(&lvl(None, Some(true))),
+            vec![KEY_SPACE as u8]
+        );
+        assert_eq!(
+            resolve_commit_keys(&lvl(None, Some(false))),
+            Vec::<u8>::new()
+        );
         // 缺省两者：空。
         assert_eq!(resolve_commit_keys(&lvl(None, None)), Vec::<u8>::new());
         // 两者并存：以 commit_keys 为准（忽略 space_commit）。
-        assert_eq!(resolve_commit_keys(&lvl(Some(""), Some(true))), Vec::<u8>::new());
+        assert_eq!(
+            resolve_commit_keys(&lvl(Some(""), Some(true))),
+            Vec::<u8>::new()
+        );
     }
 
     #[test]
@@ -849,7 +914,7 @@ mod tests {
         assert!(fixed_belongs_to_level("abd", 2, &ck)); // 核心 ab(2) + d
         assert!(fixed_belongs_to_level("ab_", 2, &ck)); // 核心 ab(2) + 空格
         assert!(!fixed_belongs_to_level("abk", 2, &ck)); // 末键 k 不在 commit
-        // 一码固定简码在带 commit 的一键级别（核心长 1）无法核心+上屏（需核心长 0），也非纯核心。
+                                                         // 一码固定简码在带 commit 的一键级别（核心长 1）无法核心+上屏（需核心长 0），也非纯核心。
         assert!(!fixed_belongs_to_level("a", 1, &ck));
     }
 
@@ -1209,16 +1274,31 @@ dist_max = 8.0
     #[test]
     fn test_parse_simple_assign_mode_valid() {
         // "frequency" -> Frequency，"efficiency" -> Efficiency（含大小写/空白容错）
-        assert_eq!(parse_simple_assign_mode("frequency"), SimpleAssignMode::Frequency);
-        assert_eq!(parse_simple_assign_mode("efficiency"), SimpleAssignMode::Efficiency);
-        assert_eq!(parse_simple_assign_mode("  Frequency  "), SimpleAssignMode::Frequency);
-        assert_eq!(parse_simple_assign_mode("EFFICIENCY"), SimpleAssignMode::Efficiency);
+        assert_eq!(
+            parse_simple_assign_mode("frequency"),
+            SimpleAssignMode::Frequency
+        );
+        assert_eq!(
+            parse_simple_assign_mode("efficiency"),
+            SimpleAssignMode::Efficiency
+        );
+        assert_eq!(
+            parse_simple_assign_mode("  Frequency  "),
+            SimpleAssignMode::Frequency
+        );
+        assert_eq!(
+            parse_simple_assign_mode("EFFICIENCY"),
+            SimpleAssignMode::Efficiency
+        );
     }
 
     #[test]
     fn test_parse_simple_assign_mode_illegal_falls_back_to_efficiency() {
         // 非法字符串回落为 Efficiency（需求 17.2）
-        assert_eq!(parse_simple_assign_mode("foo"), SimpleAssignMode::Efficiency);
+        assert_eq!(
+            parse_simple_assign_mode("foo"),
+            SimpleAssignMode::Efficiency
+        );
         assert_eq!(parse_simple_assign_mode(""), SimpleAssignMode::Efficiency);
     }
 

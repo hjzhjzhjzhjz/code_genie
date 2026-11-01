@@ -21,7 +21,7 @@ pub struct TemperatureSchedule {
 
 impl TemperatureSchedule {
     /// 构建温度调度器
-    /// 
+    ///
     /// # 参数
     /// - `t_start`: 初始温度
     /// - `t_end`: 结束温度
@@ -116,11 +116,12 @@ impl TemperatureSchedule {
             };
             let bar_len = log_pos.min(bar_width);
             let bar: String = "█".repeat(bar_len);
-            let marker = if (i as f64 / rows as f64 - self.comfort_progress).abs() < 0.5 / rows as f64 {
-                " ◄ 舒适区"
-            } else {
-                ""
-            };
+            let marker =
+                if (i as f64 / rows as f64 - self.comfort_progress).abs() < 0.5 / rows as f64 {
+                    " ◄ 舒适区"
+                } else {
+                    ""
+                };
             println!(
                 "   │{:>3}% T={:.2e} │{}{}",
                 i * 100 / rows,

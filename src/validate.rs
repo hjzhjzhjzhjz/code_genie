@@ -8,12 +8,12 @@ use std::fs;
 use crate::types::RootGroup;
 
 /// 校验字根定义是否完整
-/// 
+///
 /// # 参数
 /// - `splits`: 拆分表数据
 /// - `fixed`: 固定字根映射  
 /// - `groups`: 字根组列表
-/// 
+///
 /// # 返回值
 /// - (是否有效, 缺失字根列表, 缺失字根的使用示例)
 pub fn validate_roots(
@@ -64,7 +64,7 @@ pub fn check_validation(
         println!("✅ 校验通过");
         return true;
     }
-    
+
     // 打印详细的缺失信息
     println!("❌ 校验失败：发现 {} 个未定义字根！", missing.len());
     let sep = "=".repeat(60);

@@ -119,9 +119,7 @@ fn 解析(
             .and_then(|x| x.as_array())
             .and_then(|arr| {
                 arr.iter()
-                    .find(|x| {
-                        x.get("最有效率的簡碼個數").and_then(|n| n.as_u64()) == Some(500)
-                    })
+                    .find(|x| x.get("最有效率的簡碼個數").and_then(|n| n.as_u64()) == Some(500))
                     .and_then(|x| x.get("字頻加權碼長"))
                     .and_then(|n| n.as_f64())
             });
@@ -251,7 +249,18 @@ fn 带符号(x: Option<f64>) -> String {
 fn 打印(表: &[指标]) {
     println!(
         "{:<22}{:>9}{:>9}{:>11}{:>11}{:>9}{:>10}{:>10}{:>9}{:>9}{:>10}{:>10}",
-        "方案", "速度全码", "速度简码", "动态选重全", "动态选重简", "码长N500", "通用全码", "通用简码", "常用全码", "常用简码", "全码选重数", "简码选重数"
+        "方案",
+        "速度全码",
+        "速度简码",
+        "动态选重全",
+        "动态选重简",
+        "码长N500",
+        "通用全码",
+        "通用简码",
+        "常用全码",
+        "常用简码",
+        "全码选重数",
+        "简码选重数"
     );
     println!("{}", "-".repeat(129));
     for m in 表 {
@@ -320,21 +329,12 @@ fn 打印(表: &[指标]) {
             let Some(x) = &m.选重 else { continue };
             println!(
                 "{:<22}{:>7}{:>9.1}{:>9.2}{:>9.2}{:>9.2}{:>13}{:>11}",
-                m.名,
-                x.用键数,
-                x.阶重[0],
-                x.阶重[1],
-                x.阶重[2],
-                x.阶重[3],
-                x.全码,
-                x.全码让全
+                m.名, x.用键数, x.阶重[0], x.阶重[1], x.阶重[2], x.阶重[3], x.全码, x.全码让全
             );
         }
     }
 
-    let 有心跳 = 表
-        .iter()
-        .any(|m| m.指位.is_some() || m.连击.is_some());
+    let 有心跳 = 表.iter().any(|m| m.指位.is_some() || m.连击.is_some());
     if !有心跳 {
         return;
     }
@@ -478,8 +478,7 @@ pub fn run(
         版本
     };
 
-    let 工作目录 =
-        std::fs::canonicalize(yuhao目录).unwrap_or_else(|_| PathBuf::from(yuhao目录));
+    let 工作目录 = std::fs::canonicalize(yuhao目录).unwrap_or_else(|_| PathBuf::from(yuhao目录));
     let 方案路径 = std::fs::canonicalize(方案).unwrap_or_else(|_| PathBuf::from(方案));
 
     let mut 清单: Vec<(PathBuf, String)> = Vec::new();
@@ -530,7 +529,11 @@ pub fn run(
     // 词表用于算连击
     let 词表 = handfeel::找词表(&工作目录);
     match &词表 {
-        Some(p) => println!("=== 宇浩测评（{} 份）· 连击按 {} 加权 ===", 清单.len(), p.display()),
+        Some(p) => println!(
+            "=== 宇浩测评（{} 份）· 连击按 {} 加权 ===",
+            清单.len(),
+            p.display()
+        ),
         None => {
             println!("=== 宇浩测评（{} 份）===", 清单.len());
             eprintln!("⚠️ 没找到词频表，跳过同指连击/换手率");
@@ -640,7 +643,9 @@ fn 生成汇总(表: &[指标]) -> Result<String, String> {
             "出简让全：出简字放弃自己的全码位，全码桶只剩没有简码的字，\
              全码重码随之下降，代价是这些字不能再打全码。\n\n",
         );
-        s.push_str("| 方案 | 用键数 | 0阶 | 1阶 | 2阶 | 3阶 | 全码选重(不让全) | 全码选重(让全) |\n");
+        s.push_str(
+            "| 方案 | 用键数 | 0阶 | 1阶 | 2阶 | 3阶 | 全码选重(不让全) | 全码选重(让全) |\n",
+        );
         s.push_str("|---|---:|---:|---:|---:|---:|---:|---:|\n");
         for m in 表 {
             let Some(x) = &m.选重 else { continue };
@@ -700,11 +705,17 @@ fn 生成汇总(表: &[指标]) -> Result<String, String> {
              食指负荷反映指位均衡（理想约 40%），小指负荷过低说明 QAZ/P;/ 一圈键闲置。\
              三级增益是三级简码相对二级简码的额外提速。\n\n",
         );
-        s.push_str("| 方案 | 同指连击 | 换手率 | 字内同指 | 食指负荷 | 小指负荷 | 中排 | 三级增益 |\n");
+        s.push_str(
+            "| 方案 | 同指连击 | 换手率 | 字内同指 | 食指负荷 | 小指负荷 | 中排 | 三级增益 |\n",
+        );
         s.push_str("|---|---:|---:|---:|---:|---:|---:|---:|\n");
         for m in 表 {
             let (同指, 换手, 字内) = match &m.连击 {
-                Some(c) => (百分比(Some(c.同指)), 百分比(Some(c.换手)), 百分比(Some(c.字内))),
+                Some(c) => (
+                    百分比(Some(c.同指)),
+                    百分比(Some(c.换手)),
+                    百分比(Some(c.字内)),
+                ),
                 None => ("—".to_string(), "—".to_string(), "—".to_string()),
             };
             let (食指, 小指, 中排) = match &m.指位 {
@@ -827,7 +838,9 @@ fn 生成方案档案(
     作者: &str,
     版本: &str,
 ) -> Result<PathBuf, String> {
-    let 时间 = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    let 时间 = chrono::Local::now()
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string();
     let 标识 = 标识符(名);
 
     let 字数 = 值

@@ -5,8 +5,8 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 
-use crate::context::OptContext;
 use crate::config::Config;
+use crate::context::OptContext;
 use crate::evaluator::SimpleEvaluator;
 use crate::types::{extract_base_name, extract_suffix_num, key_to_char, Metrics, SimpleMetrics};
 
@@ -609,9 +609,14 @@ pub fn save_summary(
     summary.push_str(&format!("# 总步数: {}\n", cfg.annealing.total_steps));
     summary.push_str(&format!("# 总耗时: {:?}\n", elapsed));
     summary.push_str(&format!("# 最优线程: {}\n", best_thread));
-    summary.push_str(&format!("# 简码优化: {}\n", cfg.weights.simple_code.enabled));
+    summary.push_str(&format!(
+        "# 简码优化: {}\n",
+        cfg.weights.simple_code.enabled
+    ));
     if cfg.weights.simple_code.enabled {
-        summary.push_str("# 简码指标范围：output（输出全集，含 passive 候选），与 output-*.txt 一致\n");
+        summary.push_str(
+            "# 简码指标范围：output（输出全集，含 passive 候选），与 output-*.txt 一致\n",
+        );
     }
     summary.push_str("#\n");
 
@@ -682,8 +687,8 @@ mod space_commit_output_tests {
     use crate::config::TargetsConfig;
     use crate::context::OptContext;
     use crate::types::{
-        KeyDistConfig, RootGroup, ScaleConfig, SimpleCodeConfig, SimpleCodeStep,
-        WeightConfig, EQUIV_TABLE_SIZE,
+        KeyDistConfig, RootGroup, ScaleConfig, SimpleCodeConfig, SimpleCodeStep, WeightConfig,
+        EQUIV_TABLE_SIZE,
     };
     use proptest::prelude::*;
     use std::collections::HashMap;
@@ -824,18 +829,28 @@ mod output_selection_mirror_tests {
         for (i, &f) in freqs.iter().enumerate() {
             let r0 = format!("r{i}_0");
             let r1 = format!("r{i}_1");
-            groups.push(RootGroup { roots: vec![r0.clone()], allowed_keys: vec![0, 1] });
-            groups.push(RootGroup { roots: vec![r1.clone()], allowed_keys: vec![0, 1] });
+            groups.push(RootGroup {
+                roots: vec![r0.clone()],
+                allowed_keys: vec![0, 1],
+            });
+            groups.push(RootGroup {
+                roots: vec![r1.clone()],
+                allowed_keys: vec![0, 1],
+            });
             let ch = char::from_u32(0x4e00 + i as u32).unwrap();
             splits.push((ch, vec![r0, r1], f));
         }
         let levels = vec![SimpleCodeLevel {
             level: 1,
             code_num,
-            rule_candidates: vec![vec![SimpleCodeStep { root_selector: 'A', code_selector: 'a' }]],
+            rule_candidates: vec![vec![SimpleCodeStep {
+                root_selector: 'A',
+                code_selector: 'a',
+            }]],
             commit_keys: Vec::new(),
             commit_pref_last_left: Vec::new(),
-            commit_pref_last_right: Vec::new(), commit_alt_hand_only: false,
+            commit_pref_last_right: Vec::new(),
+            commit_alt_hand_only: false,
         }];
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
@@ -865,15 +880,26 @@ mod output_selection_mirror_tests {
         let mut opt: HashMap<(usize, usize), usize> = HashMap::new();
         for (li, ci, _code_str) in &sel {
             // 固定字不应出现在优化选择中
-            assert!(!ctx.simple_fixed_assigned[*ci], "固定字不应在优化出简中: ci={}", ci);
+            assert!(
+                !ctx.simple_fixed_assigned[*ci],
+                "固定字不应在优化出简中: ci={}",
+                ci
+            );
             let code = ctx.calc_simple_code(*ci, *li, asg).expect("出简字必有简码");
             *opt.entry((*li, code)).or_default() += 1;
         }
         for ((li, code), &cnt) in &opt {
             let occ = ctx.simple_fixed_occ_total(*li, *code);
             let cn = ctx.simple_config.levels[*li].code_num;
-            assert!(cnt + occ <= cn,
-                "级别 {} 桶 {}: 优化 {} + 固定 {} 超过 code_num {}", li, code, cnt, occ, cn);
+            assert!(
+                cnt + occ <= cn,
+                "级别 {} 桶 {}: 优化 {} + 固定 {} 超过 code_num {}",
+                li,
+                code,
+                cnt,
+                occ,
+                cn
+            );
         }
     }
 
@@ -889,7 +915,11 @@ mod output_selection_mirror_tests {
         let asg = vec![0u8; ctx1.num_groups];
         assert_occupancy(&ctx1, &asg);
         let sel1 = evaluator_simple_selection(&ctx1, &asg);
-        assert!(sel1.is_empty(), "code_num=1 且固定占满时不应有优化出简，实际 {:?}", sel1.len());
+        assert!(
+            sel1.is_empty(),
+            "code_num=1 且固定占满时不应有优化出简，实际 {:?}",
+            sel1.len()
+        );
 
         // code_num = 2：固定占 1 ⟹ 优化出简恰 1。
         let ctx2 = make_ctx(&freqs, 2, &fixed);

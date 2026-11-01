@@ -64,11 +64,14 @@ pub fn calibrate_scales(
                     initial_metrics.collision_count as f64,
                 ),
             collision_rate: 1.0
-                / pick(ft.collision_rate, ft.enabled, initial_metrics.collision_rate),
+                / pick(
+                    ft.collision_rate,
+                    ft.enabled,
+                    initial_metrics.collision_rate,
+                ),
             equivalence: 1.0 / pick(ft.equivalence, ft.enabled, initial_metrics.equiv_mean),
             equiv_cv: 1.0 / pick(ft.equiv_cv, ft.enabled, initial_metrics.equiv_cv),
-            distribution: 1.0
-                / pick(ft.distribution, ft.enabled, initial_metrics.dist_deviation),
+            distribution: 1.0 / pick(ft.distribution, ft.enabled, initial_metrics.dist_deviation),
             ..ScaleConfig::default()
         }
     };
@@ -117,11 +120,7 @@ pub fn calibrate_scales(
 /// 直接给出，`annealing::舒适区温度` 再按几何降温曲线换算成温度。
 ///
 /// 采样失败（无合法移动/Δ̄≈0）返回 `None`，由调用方回退到配置温度。
-pub fn auto_temperature(
-    ctx: &OptContext,
-    init: &[u8],
-    rng: &mut impl Rng,
-) -> Option<(f64, f64)> {
+pub fn auto_temperature(ctx: &OptContext, init: &[u8], rng: &mut impl Rng) -> Option<(f64, f64)> {
     let n = init.len();
     if n == 0 {
         return None;
