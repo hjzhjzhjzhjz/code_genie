@@ -17,6 +17,10 @@
 // 其余一律不动：`<前缀>_sc.dict.yaml` 主词典、`*.schema.yaml`、`lua/yuhao/*`、
 // `yuhao.*` 符号表、`default.custom.yaml`。
 //
+// 额外产出（不影响 Rime 加载，仅供导入别家输入法或测评）：
+//   输出目录根下合并一张 `完整码表.txt`：单字全码 → 单字简码 → 词组 → 词组简码
+//   → 主词典裸词（按 encoder 现算），按 (文本, 码) 去重，格式 `文本<TAB>码`。
+//
 // 单字编码规则：严格按星陈（yustar）方案 `encoder` 状态机
 // （https://github.com/hanzi-chai/hanzi-chai.github.io/blob/main/examples/yustar.yaml）
 //   s1(A1) → c0: 根2存在? ┬ 否 → s3(S1) → s6(S1)               ⇒ 1 根: A1 S1 S1
@@ -131,18 +135,39 @@ pub fn run(参: &参数) -> Result<(usize, usize), String> {
     警告 += 跳;
     println!("(6) {}: {} 条简码", 文件名(&简码路径), 简条);
 
-    // ---------- 7. 字根提示 ----------
+    // ---------- 7. 完整码表 ----------
+    let 完整路径 = 输出.join("完整码表.txt");
+    let 主词典 = 输出.join(format!("{}_sc.dict.yaml", 前缀));
+    let 完整 = 写完整码表(
+        &完整路径,
+        &[
+            ("单字全码", 全码路径.as_path()),
+            ("单字简码", 快码路径.as_path()),
+            ("词组", 词路径.as_path()),
+            ("词组简码", 简码路径.as_path()),
+        ],
+        &主词典,
+        &字码,
+    )?;
+    println!(
+        "(7) {}: {} 条（{}）",
+        文件名(&完整路径),
+        完整.0,
+        完整.1.iter().map(|(n, c)| format!("{} {}", n, c)).collect::<Vec<_>>().join(" / ")
+    );
+
+    // ---------- 8. 字根提示 ----------
     let 字根路径 = 输出.join("yuhao").join(format!("{}.roots.dict.yaml", 前缀));
     let 图 = 算码.join(format!("zigen-{}.csv", 前缀));
     let 字根条 = 写字根表(&字根路径, &图, &字根)?;
-    println!("(7) {}: {} 条字根提示（来源 {}）", 文件名(&字根路径), 字根条, 文件名(&图));
+    println!("(8) {}: {} 条字根提示（来源 {}）", 文件名(&字根路径), 字根条, 文件名(&图));
 
     println!("\n✅ 已生成：{}", 输出.display());
     println!("   除码以外与底包完全一致；拷进 Rime 用户目录重新部署即可");
     if 警告 > 0 {
         println!("⚠️ 共 {} 处告警，详见上方输出", 警告);
     }
-    Ok((改 + 全条 + 词条 + 快条 + 简条 + 字根条, 警告))
+    Ok((改 + 全条 + 词条 + 快条 + 简条 + 字根条 + 完整.0, 警告))
 }
 
 // =========================================================================
@@ -166,6 +191,87 @@ fn 写文本(路径: &Path, 内容: &str) -> Result<(), String> {
 
 fn 读行(路径: &Path) -> Result<Vec<String>, String> {
     Ok(读文本(路径)?.lines().map(|s| s.to_string()).collect())
+}
+
+/// 往完整码表里收一条（按 文本+码 去重）。返回是否新增。
+fn 收一条(文: &mut String, 已见: &mut HashSet<String>, 文本: &str, 码: &str) -> bool {
+    let 码 = 码.trim();
+    if 文本.is_empty() || 码.is_empty() {
+        return false;
+    }
+    let 键 = format!("{}\t{}", 文本, 码);
+    if !已见.insert(键.clone()) {
+        return false;
+    }
+    文.push_str(&键);
+    文.push('\n');
+    true
+}
+
+/// 合并出一张完整码表：单字全码 → 单字简码 → 词组 → 词组简码 → 主词典裸词（现算）。
+///
+/// 输出 `文本<TAB>码`，按 (文本, 码) 去重，保持各来源原有顺序。
+/// 返回 (总条数, 各来源条数)。
+fn 写完整码表(
+    路径: &Path,
+    来源: &[(&str, &Path)],
+    主词典: &Path,
+    字码: &HashMap<String, String>,
+) -> Result<(usize, Vec<(String, usize)>), String> {
+    let mut 已见: HashSet<String> = HashSet::new();
+    let mut 文 = String::new();
+    let mut 明细: Vec<(String, usize)> = Vec::new();
+
+    for (名, 源) in 来源 {
+        let mut 数 = 0usize;
+        if 源.is_file() {
+            let 行们 = 读行(源)?;
+            let 起 = 行们
+                .iter()
+                .position(|l| l.starts_with("..."))
+                .map(|i| i + 1)
+                .unwrap_or(0);
+            for 行 in &行们[起..] {
+                let 行 = 行.trim_end();
+                if 行.is_empty() || !行.contains('\t') {
+                    continue;
+                }
+                let mut 列 = 行.split('\t');
+                let 文本 = 列.next().unwrap_or("");
+                let 码 = 列.next().unwrap_or("");
+                if 收一条(&mut 文, &mut 已见, 文本, 码) {
+                    数 += 1;
+                }
+            }
+        }
+        明细.push((名.to_string(), 数));
+    }
+
+    // 主词典里的裸词（只有文本、没有码），按 encoder 规则现算
+    let mut 裸数 = 0usize;
+    if 主词典.is_file() {
+        let 行们 = 读行(主词典)?;
+        let 起 = 行们
+            .iter()
+            .position(|l| l.starts_with("..."))
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        for 行 in &行们[起..] {
+            let 词 = 行.trim();
+            if 词.is_empty() || 词.contains('\t') || 词.starts_with('#') {
+                continue;
+            }
+            if let Some(码) = 词码(词, 字码) {
+                if 收一条(&mut 文, &mut 已见, 词, &码) {
+                    裸数 += 1;
+                }
+            }
+        }
+    }
+    明细.push(("主词典裸词".to_string(), 裸数));
+
+    写文本(路径, &文)?;
+    Ok((已见.len(), 明细))
 }
 
 fn 拼行(行: &[String]) -> String {
@@ -991,7 +1097,9 @@ mod tests {
         根.push_str("星月字根編碼提示\t/dl\n輸入對應大碼字母\t/dl\n");
         写("yuhao/starmoon.roots.dict.yaml", &根);
 
-        写("starmoon_sc.dict.yaml", &头("starmoon_sc"));
+        let mut 主词典 = 头("starmoon_sc");
+        主词典.push_str("打字\n一字\n"); // 裸词：只有文本，靠 encoder 现算
+        写("starmoon_sc.dict.yaml", &主词典);
         写(
             "default.custom.yaml",
             "patch:\n  schema_list:\n    - {schema: starmoon_sc}\n",
@@ -1062,6 +1170,18 @@ mod tests {
 
         let 简文 = std::fs::read_to_string(输出.join("yuhao/starmoon_sc.short.dict.yaml")).unwrap();
         assert!(简文.contains("打字\tf"), "简码应保留档位: {}", 简文);
+
+        // 完整码表：四类来源 + 主词典裸词（现算）合并去重
+        let 码表 = std::fs::read_to_string(输出.join("完整码表.txt")).unwrap();
+        assert!(码表.contains("好\tludk"), "单字全码应在: {}", 码表);
+        assert!(码表.contains("好\tl"), "单字简码应在: {}", 码表);
+        assert!(码表.contains("打字\tfsll"), "词组应在: {}", 码表);
+        assert!(码表.contains("打字\tf"), "词组简码应在: {}", 码表);
+        assert!(
+            码表.contains("一字\todll"),
+            "主词典裸词应按 encoder 现算并入: {}",
+            码表
+        );
 
         let _ = std::fs::remove_dir_all(&目录);
     }
