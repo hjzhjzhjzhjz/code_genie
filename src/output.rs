@@ -315,6 +315,7 @@ pub fn save_simple_code_output(ctx: &OptContext, assignment: &[u8], dir: &str) {
 }
 
 /// 保存线程结果
+#[allow(clippy::too_many_arguments)]
 pub fn save_thread_results(
     ctx: &OptContext,
     assignment: &[u8],
@@ -725,9 +726,11 @@ mod space_commit_output_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = 1.0;
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: 1.0,
+            ..Default::default()
+        };
         OptContext::new(
             &splits,
             &fixed_roots,
@@ -855,10 +858,12 @@ mod output_selection_mirror_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = 1.0;
-        weights.simple_assign_mode = SimpleAssignMode::Frequency;
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: 1.0,
+            simple_assign_mode: SimpleAssignMode::Frequency,
+            ..Default::default()
+        };
         OptContext::new_with_fixed(
             &splits,
             &fixed_roots,

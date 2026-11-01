@@ -498,6 +498,7 @@ impl SimpleEvaluator {
     /// - presses 与 move 起始相同（仅键分布变化、未改选中集/长度）：只对本次改动的键
     ///   `g_dirty_keys` 增量更新贡献与总分布；
     /// - presses 变化（所有键归一化 pct 漂移）：退回全量重算。
+    ///
     /// 仅在 `selection_may_change`（已取聚合快照）时调用。
     fn finalize_dist(&mut self, ctx: &OptContext) {
         if (self.g_key_presses - self.snapshot.g_key_presses).abs() < f64::EPSILON {
@@ -832,6 +833,7 @@ impl SimpleEvaluator {
     /// - 阶段 3 的简码重码同为真增量：仅在「移动组改变成员的全码桶」与「`all_assigned_flags`
     ///   翻转的字所在全码桶」这少数桶上用贡献缓存做差量更新，避免每步全量扫描整个编码空间
     ///   （需求 14.3）。
+    #[allow(clippy::too_many_arguments)]
     pub fn apply_move_incremental(
         &mut self,
         ctx: &OptContext,
@@ -904,7 +906,7 @@ impl SimpleEvaluator {
                     }
                     if full_buckets
                         .get(new_code as u32)
-                        .map_or(false, |b| b.members.len() == 1)
+                        .is_some_and(|b| b.members.len() == 1)
                     {
                         self.protect_dirty_buf.push(new_code);
                     }
@@ -1577,6 +1579,7 @@ impl SimpleEvaluator {
     /// - `current_simple_code` / `selected` / 选中贡献缓存（`sel_equiv`/`sel_keys`/`sel_keys_len`）：
     ///   逆序回放撤销日志；
     /// - `all_assigned_flags`：对被触碰候选字写回移动起始值；
+    ///
     /// 以及（无论 `has_selection`）简码重码贡献缓存/标量、`last_full_codes` 与 `cached_simple_score`。
     ///
     /// 不触发任何全量重建；回滚成本为 O(受影响项)，与正向 `apply` 同阶。
@@ -3441,9 +3444,11 @@ mod first_candidate_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = enable_simple;
-        weights.simple_coverage_ratio = 1.0;
+        let weights = WeightConfig {
+            enable_simple_code: enable_simple,
+            simple_coverage_ratio: 1.0,
+            ..Default::default()
+        };
         let simple_config = if enable_simple {
             SimpleCodeConfig {
                 levels: vec![SimpleCodeLevel {
@@ -3661,9 +3666,11 @@ mod full_collision_independence_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = enable_simple;
-        weights.simple_coverage_ratio = 1.0;
+        let weights = WeightConfig {
+            enable_simple_code: enable_simple,
+            simple_coverage_ratio: 1.0,
+            ..Default::default()
+        };
         let simple_config = if enable_simple {
             SimpleCodeConfig {
                 levels: vec![SimpleCodeLevel {
@@ -3862,9 +3869,11 @@ mod dealloc_free_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = 1.0;
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: 1.0,
+            ..Default::default()
+        };
         OptContext::new(
             &splits,
             &fixed_roots,
@@ -4108,10 +4117,12 @@ mod bucket_selection_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = 1.0;
-        weights.simple_assign_mode = mode;
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: 1.0,
+            simple_assign_mode: mode,
+            ..Default::default()
+        };
         OptContext::new(
             &splits,
             &fixed_roots,
@@ -4166,7 +4177,7 @@ mod bucket_selection_tests {
         if ctx.simple_protect_top_n == 0 {
             code < full_code_to_chars.len() && !full_code_to_chars[code].is_empty()
         } else {
-            full_code_to_chars.get(code).map_or(false, |chars| {
+            full_code_to_chars.get(code).is_some_and(|chars| {
                 chars
                     .iter()
                     .any(|&c| ctx.simple_is_topn.get(c).copied().unwrap_or(false))
@@ -4435,10 +4446,12 @@ mod incremental_full_consistency_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = coverage_ratio;
-        weights.simple_assign_mode = mode;
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: coverage_ratio,
+            simple_assign_mode: mode,
+            ..Default::default()
+        };
         OptContext::new(
             &splits,
             &fixed_roots,
@@ -4506,10 +4519,12 @@ mod incremental_full_consistency_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = coverage_ratio;
-        weights.simple_assign_mode = mode;
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: coverage_ratio,
+            simple_assign_mode: mode,
+            ..Default::default()
+        };
         OptContext::new_with_fixed(
             &splits,
             &fixed_roots,
@@ -5106,10 +5121,12 @@ mod incremental_full_consistency_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = 1.0; // 全部为候选字
-        weights.simple_assign_mode = SimpleAssignMode::Efficiency;
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: 1.0, // 全部为候选字
+            simple_assign_mode: SimpleAssignMode::Efficiency,
+            ..Default::default()
+        };
         OptContext::new(
             &splits,
             &fixed_roots,
@@ -5250,10 +5267,12 @@ mod rollback_roundtrip_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = coverage_ratio;
-        weights.simple_assign_mode = mode;
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: coverage_ratio,
+            simple_assign_mode: mode,
+            ..Default::default()
+        };
         OptContext::new(
             &splits,
             &fixed_roots,
@@ -5671,10 +5690,12 @@ mod pre_activation_zero_contribution_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = enable_simple;
-        weights.simple_coverage_ratio = coverage_ratio;
-        weights.simple_assign_mode = mode;
+        let weights = WeightConfig {
+            enable_simple_code: enable_simple,
+            simple_coverage_ratio: coverage_ratio,
+            simple_assign_mode: mode,
+            ..Default::default()
+        };
         OptContext::new(
             &splits,
             &fixed_roots,
@@ -5889,10 +5910,12 @@ mod hot_path_no_full_rebuild_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = coverage_ratio;
-        weights.simple_assign_mode = mode;
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: coverage_ratio,
+            simple_assign_mode: mode,
+            ..Default::default()
+        };
         OptContext::new(
             &splits,
             &fixed_roots,
@@ -6142,9 +6165,11 @@ mod space_commit_and_length_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[1.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = 1.0; // 全部字纳入候选
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: 1.0, // 全部字纳入候选
+            ..Default::default()
+        };
         OptContext::new(
             &splits,
             &fixed_roots,
@@ -6190,9 +6215,11 @@ mod space_commit_and_length_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[1.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = 1.0;
+        let mut weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: 1.0,
+            ..Default::default()
+        };
         // 用 Frequency 模式：桶内排序键 = freq，与 base_saving 无关，使 space true/false 两侧
         // 出简选择集合一致，从而隔离「尾随空格对分布的影响」这一被测口径（需求 20.7/20.8）。
         weights.simple_assign_mode = SimpleAssignMode::Frequency;
@@ -6448,10 +6475,12 @@ mod fixed_simple_code_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = coverage_ratio;
-        weights.simple_assign_mode = mode;
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: coverage_ratio,
+            simple_assign_mode: mode,
+            ..Default::default()
+        };
         OptContext::new_with_fixed(
             &splits,
             &fixed_roots,
@@ -7115,11 +7144,13 @@ mod simple_protect_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = 1.0;
-        weights.simple_assign_mode = mode;
-        weights.simple_protect_top_n = protect_top_n;
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: 1.0,
+            simple_assign_mode: mode,
+            simple_protect_top_n: protect_top_n,
+            ..Default::default()
+        };
         OptContext::new(
             &splits,
             &fixed_roots,
@@ -7292,11 +7323,13 @@ mod active_passive_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_assign_mode = SimpleAssignMode::Frequency;
-        weights.simple_coverage_ratio = output_ratio;
-        weights.simple_active_coverage = active_ratio;
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_assign_mode: SimpleAssignMode::Frequency,
+            simple_coverage_ratio: output_ratio,
+            simple_active_coverage: active_ratio,
+            ..Default::default()
+        };
         OptContext::new(
             &splits,
             &fixed_roots,
@@ -7413,10 +7446,12 @@ mod commit_keys_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[1.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = 1.0;
-        weights.simple_assign_mode = mode;
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: 1.0,
+            simple_assign_mode: mode,
+            ..Default::default()
+        };
         OptContext::new(
             &splits,
             &fixed_roots,
@@ -7477,10 +7512,12 @@ mod commit_keys_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[1.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = 1.0;
-        weights.simple_assign_mode = SimpleAssignMode::Frequency;
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: 1.0,
+            simple_assign_mode: SimpleAssignMode::Frequency,
+            ..Default::default()
+        };
         OptContext::new(
             &splits,
             &fixed_roots,
@@ -7646,10 +7683,12 @@ mod commit_keys_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[1.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = 1.0;
-        weights.simple_assign_mode = SimpleAssignMode::Frequency;
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: 1.0,
+            simple_assign_mode: SimpleAssignMode::Frequency,
+            ..Default::default()
+        };
         let fixed_vec: Vec<(char, String)> =
             fixed.iter().map(|(c, s)| (*c, s.to_string())).collect();
         OptContext::new_with_fixed(
@@ -7905,9 +7944,11 @@ mod targets_proptest {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = enable_simple;
-        weights.simple_coverage_ratio = 1.0;
+        let weights = WeightConfig {
+            enable_simple_code: enable_simple,
+            simple_coverage_ratio: 1.0,
+            ..Default::default()
+        };
         let simple_config = if enable_simple {
             SimpleCodeConfig {
                 levels: vec![SimpleCodeLevel {

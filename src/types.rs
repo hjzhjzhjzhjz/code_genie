@@ -55,18 +55,13 @@ pub fn pow_base(base: usize, exp: usize) -> usize {
 }
 
 /// 简码桶内出简排序模式
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum SimpleAssignMode {
     /// 按字频排序（与旧实现一致）
     Frequency,
     /// 按效率排序（freq × (base_saving + sel_len)）
+    #[default]
     Efficiency,
-}
-
-impl Default for SimpleAssignMode {
-    fn default() -> Self {
-        SimpleAssignMode::Efficiency
-    }
 }
 
 /// 权重配置 - 用于得分计算
@@ -374,8 +369,8 @@ pub enum Hand {
 #[inline]
 pub fn key_hand(key: u8) -> Hand {
     match key {
-        26 => Hand::Neutral,              // KEY_SPACE
-        27 | 28 | 29 | 30 => Hand::Right, // ; , . /
+        26 => Hand::Neutral,    // KEY_SPACE
+        27..=30 => Hand::Right, // ; , . /
         0..=25 => match (key + b'a') as char {
             'q' | 'w' | 'e' | 'r' | 't' | 'a' | 's' | 'd' | 'f' | 'g' | 'z' | 'x' | 'c' | 'v'
             | 'b' => Hand::Left,
@@ -391,11 +386,12 @@ pub fn key_hand(key: u8) -> Hand {
 /// 返回 `(pref_last_left, pref_last_right)`：
 /// - `pref_last_left`：核心末键属左手时使用——对侧（右手）字母在前、同侧（左手）字母在后；
 /// - `pref_last_right`：核心末键属右手时使用——对侧（左手）字母在前、同侧（右手）字母在后；
+///
 /// 字母组内保持原相对顺序；`_`（若有）按其在 `commit_keys` 的首/尾位置加到表首或表尾。
 /// 两表长度均为 K = `commit_keys.len()`。退火前一次性预计算，热路径零分配。
 pub fn build_commit_pref_tables(commit_keys: &[u8]) -> (Vec<u8>, Vec<u8>) {
     let sp = KEY_SPACE as u8;
-    let has_us = commit_keys.iter().any(|&k| k == sp);
+    let has_us = commit_keys.contains(&sp);
     let us_at_start = has_us && commit_keys.first() == Some(&sp);
     let mut left: Vec<u8> = Vec::new();
     let mut right: Vec<u8> = Vec::new();

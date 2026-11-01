@@ -290,10 +290,10 @@ pub fn run(参: &参数) {
         return;
     }
     for v in 码表.values_mut() {
-        v.sort_by(|a, b| b.权重.cmp(&a.权重));
+        v.sort_by_key(|e| std::cmp::Reverse(e.权重));
     }
     for v in 简表.values_mut() {
-        v.sort_by(|a, b| b.权重.cmp(&a.权重));
+        v.sort_by_key(|e| std::cmp::Reverse(e.权重));
     }
     // 合表 = 全码 + 词组 + 简码。Rime 里它们同在一份词典，
     // 所以 3 码字有可能和某个 3 码简码撞在一起，必须一起比。
@@ -302,7 +302,7 @@ pub fn run(参: &参数) {
         合表.entry(码.clone()).or_default().extend(条们.clone());
     }
     for v in 合表.values_mut() {
-        v.sort_by(|a, b| b.权重.cmp(&a.权重));
+        v.sort_by_key(|e| std::cmp::Reverse(e.权重));
     }
 
     // ---- 语料 ----

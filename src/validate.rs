@@ -69,7 +69,7 @@ pub fn check_validation(
     println!("❌ 校验失败：发现 {} 个未定义字根！", missing.len());
     let sep = "=".repeat(60);
     println!("{}", sep);
-    println!("{:<15} {}", "缺失字根", "使用示例");
+    println!("{:<15} 使用示例", "缺失字根");
     println!("{}", "-".repeat(60));
     for root in &missing {
         let ex = examples.get(root).unwrap();

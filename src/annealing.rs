@@ -153,7 +153,7 @@ fn greedy_balance_init(ctx: &OptContext, cfg: &Config, rng: &mut ThreadRng) -> V
         .enumerate()
         .map(|(i, v)| (i, v.len()))
         .collect();
-    group_freq.sort_by(|a, b| b.1.cmp(&a.1));
+    group_freq.sort_by_key(|x| std::cmp::Reverse(x.1));
 
     let max_ki = cfg
         .keys
@@ -904,14 +904,9 @@ pub fn multi_start_init(ctx: &OptContext, cfg: &Config, thread_id: usize) -> Vec
         return vec![];
     }
 
-    let n_candidates: usize = if n < 100 {
-        50
-    } else if n < 1000 {
-        50
-    } else {
-        30
-    };
-    let warmup_steps = (n * 30).max(2000).min(50_000);
+    // 多起点候选数：组数不多时多撒几把（每次爬山成本低），规模大时减半以控总耗时。
+    let n_candidates: usize = if n < 1000 { 50 } else { 30 };
+    let warmup_steps = (n * 30).clamp(2000, 50_000);
 
     let mut best_assignment: Option<Vec<u8>> = None;
     let mut best_score = f64::MAX;
@@ -1029,7 +1024,8 @@ pub fn simulated_annealing(
 pub(crate) fn 舒适区温度(cfg: &Config) -> f64 {
     let ts = cfg.annealing.temp_start;
     let te = cfg.annealing.temp_end;
-    if !(ts > 0.0) || !(te > 0.0) {
+    // 温度未标定（NaN 或非正数）时不换算，直接返回 t_start 由调用方兜底。
+    if ts.is_nan() || ts <= 0.0 || te.is_nan() || te <= 0.0 {
         return ts;
     }
     let p = cfg.annealing.comfort_progress.clamp(0.0, 1.0);
@@ -1045,6 +1041,7 @@ pub(crate) fn 舒适区温度(cfg: &Config) -> f64 {
 /// - `seed`：若为 `Some(s)`（仅 fresh 路径生效），用 `s` 作为退火初始分配替代 `multi_start_init`
 ///   （从既有结果播种微调）；走 fresh 路径（起始步 0、`new_full_only`、简码延迟激活），
 ///   与 resume 续算互斥（`resume.is_some()` 时忽略 `seed`）。
+#[allow(clippy::too_many_arguments)]
 pub fn simulated_annealing_resumable(
     ctx: &OptContext,
     cfg: &Config,
@@ -1842,7 +1839,7 @@ pub fn simulated_annealing_resumable(
         println!("   [T0] SA 完成，执行最终精炼...");
     }
 
-    let final_warmup_steps = (n_groups * 50).max(5000).min(100_000);
+    let final_warmup_steps = (n_groups * 50).clamp(5000, 100_000);
     // 最终精炼传 disable_simple=false：保持简码激活、走增量更新（需求 24）。
     // 简码启用时内部评估器 current_simple_weight = w_target，使 final_score 与 best_score
     // 同口径（全码+简码），接受判定正确；简码关闭时该参数无效（路径与基线一致）。
@@ -2155,9 +2152,11 @@ mod activation_reheat_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = 1.0; // 全部高频字纳入候选，确保有出简候选
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: 1.0, // 全部高频字纳入候选，确保有出简候选
+            ..Default::default()
+        };
         let level = SimpleCodeLevel {
             level: 1,
             code_num: 1,
@@ -2467,9 +2466,11 @@ mod log_output_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = coverage_ratio;
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: coverage_ratio,
+            ..Default::default()
+        };
         let level = SimpleCodeLevel {
             level: 1,
             code_num: 1,

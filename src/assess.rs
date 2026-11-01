@@ -457,6 +457,7 @@ fn 整理名字(段: &[String]) -> String {
 }
 
 /// 入口
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     表: Option<&str>,
     目录: Option<&str>,
@@ -771,7 +772,7 @@ fn 生成汇总(表: &[指标]) -> Result<String, String> {
                 最优.速度简码,
                 带符号(最优.三级增益())
             ));
-            s.push_str("\n");
+            s.push('\n');
         }
 
         if let Some(f) = &最优.指位 {

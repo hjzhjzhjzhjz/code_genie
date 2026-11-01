@@ -196,10 +196,7 @@ pub fn 算连击(码表: &Path, 词表: &Path) -> Result<连击, String> {
         if let Some((左, 右)) = 行.split_once('\t') {
             let mut 字 = 左.chars();
             if let (Some(c), None) = (字.next(), 字.next()) {
-                分组
-                    .entry(c)
-                    .or_insert_with(Vec::new)
-                    .push(右.trim().to_string());
+                分组.entry(c).or_default().push(右.trim().to_string());
             }
         }
     }
@@ -292,12 +289,7 @@ pub fn 找词表(yuhao目录: &Path) -> Option<std::path::PathBuf> {
             .join("wordAbsoluteFrequencySC.json"),
         std::path::PathBuf::from("yuhao-data").join("wordAbsoluteFrequencySC.json"),
     ];
-    for 路 in 候选 {
-        if 路.is_file() {
-            return Some(路);
-        }
-    }
-    None
+    候选.into_iter().find(|路| 路.is_file())
 }
 
 // -------------------------------------------------------------------------
@@ -380,10 +372,7 @@ pub fn 算选重(码表: &Path, 区块: &[(u32, u32)]) -> Result<选重统计, S
                 if !在区块(c, 区块) {
                     continue;
                 }
-                分组
-                    .entry(c)
-                    .or_insert_with(Vec::new)
-                    .push(右.trim().to_string());
+                分组.entry(c).or_default().push(右.trim().to_string());
             }
         }
     }

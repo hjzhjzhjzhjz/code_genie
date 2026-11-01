@@ -2,6 +2,11 @@
 // 🚀 字根编码优化器 - 主入口
 // =========================================================================
 
+// 索引循环在本项目大量用于「一组等长数组按下标并行访问」（如 `ku[k]`/`kd[k]`、
+// `max_len[li]`/`levels[li]`、`果[k]`/`r.手感[k]`）。改写为 enumerate/zip 只能消掉
+// 其中一个下标，其余数组仍要裸下标，读起来反而更绕；故全局关闭这条纯风格 lint。
+#![allow(clippy::needless_range_loop)]
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -860,7 +865,7 @@ fn run_encode(division_path: &str, keymap_path: &str, output_path: &str) {
     if !missing_roots.is_empty() {
         println!("  ⚠️ 未找到映射的字根 ({} 种):", missing_roots.len());
         let mut sorted: Vec<_> = missing_roots.into_iter().collect();
-        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        sorted.sort_by_key(|x| std::cmp::Reverse(x.1));
         for (root, count) in sorted.iter().take(20) {
             println!("    {} (出现 {} 次)", root, count);
         }
@@ -1170,7 +1175,7 @@ fn build_evaluate_report(
                 .iter()
                 .map(|&ci| (ctx.raw_splits[ci].0, ctx.char_infos[ci].frequency))
                 .collect();
-            group.sort_by(|a, b| b.1.cmp(&a.1));
+            group.sort_by_key(|x| std::cmp::Reverse(x.1));
             collision_groups.push((*code, group));
         }
     }
@@ -1559,7 +1564,7 @@ fn run_optimize(
     // ==================== 初始校准 ====================
     // 判断是否需要 calibrate
     // 全码 5 个字段必须全部设置；简码字段仅在 simple_code.enabled = true 时才要求
-    let full_code_scale_set = cfg.scale.as_ref().map_or(false, |s| {
+    let full_code_scale_set = cfg.scale.as_ref().is_some_and(|s| {
         s.collision_count.is_some()
             && s.collision_rate.is_some()
             && s.equivalence.is_some()
@@ -1567,7 +1572,7 @@ fn run_optimize(
             && s.distribution.is_some()
     });
     let simple_code_scale_set = !cfg.weights.simple_code.enabled
-        || cfg.scale.as_ref().map_or(false, |s| {
+        || cfg.scale.as_ref().is_some_and(|s| {
             s.simple_freq.is_some()
                 && s.simple_equiv.is_some()
                 && s.simple_dist.is_some()

@@ -633,7 +633,7 @@ fn parse_simple_assign_mode(s: &str) -> SimpleAssignMode {
 /// 解析规则字符串为 SimpleCodeStep 列表
 fn parse_rule_string(rule: &str) -> Option<Vec<SimpleCodeStep>> {
     let chars: Vec<char> = rule.trim().chars().collect();
-    if chars.len() % 2 != 0 || chars.is_empty() {
+    if !chars.len().is_multiple_of(2) || chars.is_empty() {
         return None;
     }
 
@@ -727,7 +727,7 @@ fn fixed_belongs_to_level(code: &str, core_len: usize, commit_keys: &[u8]) -> bo
     } else {
         t >= 1
             && t - 1 == core_len
-            && char_to_key_index(chars[t - 1]).map_or(false, |k| commit_keys.contains(&(k as u8)))
+            && char_to_key_index(chars[t - 1]).is_some_and(|k| commit_keys.contains(&(k as u8)))
     }
 }
 
@@ -1322,9 +1322,9 @@ dist_max = 8.0
     fn test_code_num_zero_level_kept_only_with_matching_fixed() {
         // 确认点 1：get_simple_code_config 中 code_num=0 的级别仅在「有按码长归属到该级的
         // 固定简码」时保留，否则丢弃（默认配置 level 1 code_num=0 无固定简码 → 丢弃）。
+        // 默认值即 `fixed_simple_codes = None`；默认 simple_levels：level 1 code_num=0
+        // (rules ["Aa"], 1 键)、level 2/3 code_num>0。
         let mut cfg = Config::default();
-        // 默认 simple_levels：level 1 code_num=0(rules ["Aa"], 1 键)、level 2/3 code_num>0。
-        cfg.fixed_simple_codes = None;
         let levels_no_fixed = cfg.get_simple_code_config().levels;
         assert!(
             levels_no_fixed.iter().all(|l| l.code_num > 0),

@@ -43,6 +43,9 @@ pub(crate) type 字根表 = HashMap<String, String>;
 /// 字 → 拆分根序列，取自 `chaifen-all.txt`
 type 拆分表 = HashMap<String, Vec<String>>;
 
+/// `重写拆分表` 的产出：(字→根们, 改写行数, 原样保留行数)
+type 拆分重写结果 = (HashMap<String, Vec<String>>, usize, usize);
+
 /// `rime-convert` 的入参
 ///
 /// 底包的一切（文件名、schema_id、方案名、lua、词表裸词）**原样沿用**，
@@ -609,7 +612,7 @@ fn 重写拆分表(
     拆分: &拆分表,
     字根: &字根表,
     清单: &[String],
-) -> Result<(HashMap<String, Vec<String>>, usize, usize), String> {
+) -> Result<拆分重写结果, String> {
     let mut 输出 = Vec::new();
     let mut 已解析: HashMap<String, Vec<String>> = HashMap::new();
     let (mut 改, mut 留) = (0usize, 0usize);
@@ -1122,11 +1125,11 @@ mod tests {
 
         // 拆分表：字<TAB>[拆分式,全码,分组简码,注音,保留,字集,码位]
         let mut 拆分 = 头("starmoon_chaifen");
-        拆分.push_str(&"好\t[女子,LkUd,Lk-Ud,㊌hao,,CJK,597D]\n一\t[一,Odd,Od,㊌it,,CJK,4E00]\n打\t[打,Fss,Fs,㊌da,,CJK,6253]\n字\t[字,Lls,Ll,㊌zi,,CJK,5B57]\n");
+        拆分.push_str("好\t[女子,LkUd,Lk-Ud,㊌hao,,CJK,597D]\n一\t[一,Odd,Od,㊌it,,CJK,4E00]\n打\t[打,Fss,Fs,㊌da,,CJK,6253]\n字\t[字,Lls,Ll,㊌zi,,CJK,5B57]\n");
         写("starmoon_chaifen.dict.yaml", &拆分);
 
         let mut 全码 = 头("starmoon.full");
-        全码.push_str(&"好\tludk\t100\n一\todd\t50\n打\tfss\t80\n字\tlll\t70\n");
+        全码.push_str("好\tludk\t100\n一\todd\t50\n打\tfss\t80\n字\tlll\t70\n");
         写("yuhao/starmoon.full.dict.yaml", &全码);
 
         let mut 词 = 头("starmoon_sc.words");

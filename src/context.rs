@@ -114,6 +114,7 @@ pub struct OptContext {
     /// `simple_fixed_occupancy[li]` 为 `核心桶编码 → 该桶各被占用「上屏键」的占用计数列表 (key, count)`。
     /// - 有上屏键级别：按实际上屏键索引（每个上屏键 = 一个有效简码）。
     /// - 无上屏键级别：用哨兵键 `OCC_CORE_KEY`（255，非法键索引）记核心简码自身的占用计数。
+    ///
     /// 采用计数（取代旧 bitmask）以支持「同一有效简码上 ≥2 个固定字」。可能为空 `Vec`（无固定简码时），
     /// 访问统一经 `simple_fixed_occ_total` / `simple_fixed_occ_key` 回退 0。
     pub simple_fixed_occupancy: Vec<FxHashMap<u32, Vec<(u8, u32)>>>,
@@ -136,6 +137,9 @@ impl OptContext {
     ///
     /// 生产路径走 [`OptContext::new_with_fixed_and_termination`]；本入口供测试直接构造。
     #[allow(dead_code)]
+    // 构造参数就是上下文各配置块本身；打包成参数结构体只会把同样的字段再抄一遍，
+    // 且波及全部调用点（含大量测试），收益不抵改动。
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         splits: &[(char, Vec<String>, u64)],
         fixed_roots: &HashMap<String, u8>,
@@ -167,6 +171,7 @@ impl OptContext {
     ///
     /// 测试专用（生产走 `new_with_fixed_and_termination`）。
     #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_fixed(
         splits: &[(char, Vec<String>, u64)],
         fixed_roots: &HashMap<String, u8>,
@@ -195,6 +200,7 @@ impl OptContext {
     }
 
     /// 创建优化上下文（含固定简码映射和全码终止键配置）。
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_fixed_and_termination(
         splits: &[(char, Vec<String>, u64)],
         fixed_roots: &HashMap<String, u8>,
@@ -560,8 +566,8 @@ impl OptContext {
                     }
 
                     // 归属日志（需求 21.11）。
-                    match li_opt {
-                        Some(li) => println!(
+                    if let Some(li) = li_opt {
+                        println!(
                             "  固定简码 \"{}\" = \"{}\" → 归属级别 {}{}",
                             ch,
                             raw_code,
@@ -570,8 +576,7 @@ impl OptContext {
                                 Some(ck) => format!("（上屏键 '{}'）", key_to_char(ck)),
                                 None => String::new(),
                             }
-                        ),
-                        None => {}
+                        )
                     }
 
                     // 占用登记（需求 21.7/36.4，方案 A）：仅在归属级别时登记。按「上屏键（或核心
@@ -961,6 +966,7 @@ impl OptContext {
     /// - 无上屏键级别（K=0）：单一有效简码 = 核心简码，名额 = `max(0, code_num − 核心占用)`。
     /// - 有上屏键级别：每个上屏键 = 一个独立有效简码，名额 = `Σ_{有效上屏键 k} max(0, code_num − occ_k)`；
     ///   被需求 37 异手过滤剔除的同手字母上屏键不构成有效简码、不计入。
+    ///
     /// 纯函数、零堆分配（有上屏键时沿预计算偏好表 O(K) 累加，与既有 K′ 检查同阶）。
     #[inline]
     pub fn simple_annealing_slots(&self, li: usize, code: usize) -> usize {
@@ -999,6 +1005,7 @@ impl OptContext {
     ///   分配：第 0 轮给所有 `cap_k>0` 的键各一次、第 1 轮给 `cap_k>1` 的键……名次 `rank` 落到对应键。
     /// - 异手过滤（需求 37）：同手字母上屏键不参与；`_` 始终保留。
     /// - 该级无上屏键（K=0）或无任何可用容量时返回 `None`（不追加上屏键）。
+    ///
     /// `code_num=1` 且无占用时退化为「偏好表第 `rank mod K'` 个」（与历史轮转一致）。
     /// 纯函数、零堆分配（在常量小集上遍历，O(code_num·K)）。
     #[inline]
@@ -1085,9 +1092,11 @@ mod candidate_set_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = ratio;
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: ratio,
+            ..Default::default()
+        };
         OptContext::new(
             &splits,
             &fixed_roots,
@@ -1157,10 +1166,12 @@ mod candidate_set_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = 1.0; // output = 全集
-        weights.simple_active_coverage = 0.5; // active = 覆盖率 0.5 的前缀（更小）
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: 1.0,  // output = 全集
+            simple_active_coverage: 0.5, // active = 覆盖率 0.5 的前缀（更小）
+            ..Default::default()
+        };
         let ctx = OptContext::new(
             &splits,
             &fixed_roots,
@@ -1332,9 +1343,11 @@ mod affected_intersection_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = ratio;
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: ratio,
+            ..Default::default()
+        };
         let level = SimpleCodeLevel {
             level: 1,
             code_num: 1,
@@ -1512,9 +1525,11 @@ mod base_saving_tests {
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
         let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        let mut weights = WeightConfig::default();
-        weights.enable_simple_code = true;
-        weights.simple_coverage_ratio = ratio;
+        let weights = WeightConfig {
+            enable_simple_code: true,
+            simple_coverage_ratio: ratio,
+            ..Default::default()
+        };
         OptContext::new(
             &splits,
             &fixed_roots,

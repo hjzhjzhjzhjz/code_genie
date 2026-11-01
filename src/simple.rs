@@ -71,7 +71,7 @@ pub fn parse_simple_code_config(path: &str) -> SimpleCodeConfig {
                 continue;
             }
             let chars: Vec<char> = candidate_str.chars().collect();
-            if chars.len() % 2 != 0 {
+            if !chars.len().is_multiple_of(2) {
                 eprintln!(
                     "⚠️ 简码级别 {} 的候选规则长度不是偶数: '{}'，跳过该候选",
                     level, candidate_str

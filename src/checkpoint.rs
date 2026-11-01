@@ -99,8 +99,7 @@ pub fn now_timestamp_ms() -> String {
 
 /// 原子写：先写 `*.tmp` 临时文件再 `rename` 到目标路径，避免写入中途中断损坏目标文件。
 fn save_atomic<T: Serialize>(value: &T, path: &Path) -> std::io::Result<()> {
-    let json = serde_json::to_string_pretty(value)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let json = serde_json::to_string_pretty(value).map_err(std::io::Error::other)?;
     let tmp_path = path.with_extension("json.tmp");
     std::fs::write(&tmp_path, &json)?;
     std::fs::rename(&tmp_path, path)?;

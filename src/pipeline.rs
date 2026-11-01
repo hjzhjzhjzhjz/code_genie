@@ -17,6 +17,9 @@ use crate::handfeel;
 
 const 最大码长: usize = 4;
 
+/// 一个键位变体：名字 + 该变体下的「字根 → 码位序列」表 + 应用规则时的告警。
+type 键位变体 = (String, HashMap<String, Vec<char>>, Vec<String>);
+
 fn 码位名(位: 码位) -> &'static str {
     match 位 {
         码位::A => "首码",
@@ -79,7 +82,7 @@ pub fn 流水线(
     if 要查.is_empty() && top > 0 {
         let mut 排序: Vec<(&str, u64)> =
             拆分.iter().map(|(字, _, 频)| (字.as_str(), *频)).collect();
-        排序.sort_by(|a, b| b.1.cmp(&a.1));
+        排序.sort_by_key(|x| std::cmp::Reverse(x.1));
         要查 = 排序.into_iter().take(top).map(|(c, _)| c).collect();
     }
 
@@ -291,7 +294,7 @@ pub fn 归并(
     let 拆分 = 加载拆分表(chaifen);
     let 简码 = simple.map(加载简码表).unwrap_or_default();
 
-    let mut 变体们: Vec<(String, HashMap<String, Vec<char>>, Vec<String>)> = Vec::new();
+    let mut 变体们: Vec<键位变体> = Vec::new();
     变体们.push(("基线".to_string(), 基线.clone(), Vec::new()));
     for (i, 规则文) in 规则组.iter().enumerate() {
         let mut 键位 = 基线.clone();

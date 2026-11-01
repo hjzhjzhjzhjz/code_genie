@@ -152,7 +152,8 @@ pub fn auto_temperature(ctx: &OptContext, init: &[u8], rng: &mut impl Rng) -> Op
         return None;
     }
     let avg = sum / cnt as f64;
-    if !(avg > 0.0) {
+    // 平均 |Δ| 为 0（或非有限）说明初态已在局部极优、温度无从标定，交给调用方兜底。
+    if avg.is_nan() || avg <= 0.0 {
         return None;
     }
     let t_start = avg / (1.0f64 / 0.98).ln();
