@@ -553,46 +553,104 @@ pub fn save_results(
     );
 }
 
-/// 保存「全量码表」：覆盖 `全量拆分` 里的每一个字，格式 `字<TAB>码<TAB>频次`。
+/// 缺根诊断里最多列出几个字根
+const 缺根样例数: usize = 8;
+
+/// 全量码表的生成统计
+#[derive(Debug, Default)]
+pub struct 全量码表统计 {
+    /// 全码段条数（覆盖 `全量拆分` 里所有能编码的字）
+    pub 全码条数: usize,
+    /// 简码段条数（只覆盖被优化过的字）
+    pub 简码条数: usize,
+    /// 因字根缺键位（或键位串为空）跳过的字数
+    pub 缺根条数: usize,
+    /// 缺失最频繁的字根 `(根名, 涉及字数)`，按字数降序，最多 [`缺根样例数`] 个。
+    ///
+    /// 大面积缺失通常意味着 `files.full_splits` 与 `files.splits` 不是同一套根名体系
+    /// （例如一个用真实部件名、另一个用映射后的根名），而不是真的存在 12 万个无法编码的字。
+    pub 缺失字根: Vec<(String, usize)>,
+}
+
+/// 生成「全量码表」文本：**先全部简码行，再全部全码行**（严格两段，不做字级交错）。
 ///
 /// 优化为了速度通常只喂常用字（`files.splits`），而码表要覆盖全部字（如 12 万字）。
-/// 本函数用优化得到的键位（`assignment`）对全量拆分重新编码：简码仍取优化结果
+/// 这里用优化得到的键位（`assignment`）对全量拆分重新编码：简码仍取优化结果
 /// （只覆盖被优化过的字），全码覆盖全量。
 ///
-/// 返回 (全码条数, 简码条数, 缺字根条数)。
+/// 「简码在前」是**结构性保证**而非书写顺序：两段各写各的缓冲，末尾显式拼接，
+/// 因此任何单段内部的改动都不可能把简码行插到全码段之后。见
+/// `full_code_table_order_tests::简码段整体位于全码段之前`。
+pub(crate) fn 全量码表文本(
+    ctx: &OptContext,
+    assignment: &[u8],
+    全量拆分: &[(String, Vec<String>, u64)],
+) -> (String, 全量码表统计) {
+    let 字根表 = 根键位串(ctx, assignment);
+
+    // —— 第一段：简码（按级别升序 → 级内简码桶升序 → 桶内选择排序键，短码自然在前）——
+    let mut 简码段 = String::new();
+    let mut 简条 = 0usize;
+    for (_, ci, code) in evaluator_simple_selection(ctx, assignment) {
+        let (ch, _, freq) = &ctx.raw_splits[ci];
+        简码段.push_str(&format!("{}\t{}\t{}\n", ch, code, freq));
+        简条 += 1;
+    }
+
+    // —— 第二段：全码（覆盖全量拆分）——
+    let mut 全码段 = String::with_capacity(全量拆分.len() * 16);
+    let mut 全条 = 0usize;
+    let mut 缺根 = 0usize;
+    let mut 缺根计数: HashMap<&str, usize> = HashMap::new();
+    for (字, 根们, 频) in 全量拆分 {
+        match crate::rime_convert::单字码(根们, &字根表) {
+            Ok(code) if !code.is_empty() => {
+                全码段.push_str(&format!("{}\t{}\t{}\n", 字, code, 频));
+                全条 += 1;
+            }
+            _ => {
+                缺根 += 1;
+                // 记下究竟是哪个根没有键位：根名体系不匹配时能一眼看出来。
+                if let Some(根) = 根们.iter().find(|r| !字根表.contains_key(r.as_str())) {
+                    *缺根计数.entry(根.as_str()).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+
+    let mut 缺失字根: Vec<(String, usize)> = 缺根计数
+        .into_iter()
+        .map(|(根, 数)| (根.to_string(), 数))
+        .collect();
+    缺失字根.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    缺失字根.truncate(缺根样例数);
+
+    let mut out = String::with_capacity(简码段.len() + 全码段.len());
+    out.push_str(&简码段);
+    out.push_str(&全码段);
+
+    (
+        out,
+        全量码表统计 {
+            全码条数: 全条,
+            简码条数: 简条,
+            缺根条数: 缺根,
+            缺失字根,
+        },
+    )
+}
+
+/// 保存「全量码表」到 `{output_dir}/完整码表.txt`：格式 `字<TAB>码<TAB>频次`，
+/// **简码段整体在前、全码段整体在后**（顺序见 [`全量码表文本`]）。
 pub fn save_full_code_table(
     ctx: &OptContext,
     assignment: &[u8],
     全量拆分: &[(String, Vec<String>, u64)],
     output_dir: &str,
-) -> (usize, usize, usize) {
-    let 字根表 = 根键位串(ctx, assignment);
-
-    let mut out = String::with_capacity(全量拆分.len() * 16);
-
-    // 简码在前（只覆盖优化过的字）
-    let mut 简条 = 0usize;
-    for (_, ci, code) in evaluator_simple_selection(ctx, assignment) {
-        let (ch, _, freq) = &ctx.raw_splits[ci];
-        out.push_str(&format!("{}\t{}\t{}\n", ch, code, freq));
-        简条 += 1;
-    }
-
-    // 全码：覆盖全量拆分
-    let mut 全条 = 0usize;
-    let mut 缺根 = 0usize;
-    for (字, 根们, 频) in 全量拆分 {
-        match crate::rime_convert::单字码(根们, &字根表) {
-            Ok(code) if !code.is_empty() => {
-                out.push_str(&format!("{}\t{}\t{}\n", 字, code, 频));
-                全条 += 1;
-            }
-            _ => 缺根 += 1,
-        }
-    }
-
+) -> 全量码表统计 {
+    let (out, 统计) = 全量码表文本(ctx, assignment, 全量拆分);
     crate::fsutil::write_with_backup(format!("{}/完整码表.txt", output_dir), out).unwrap();
-    (全条, 简条, 缺根)
+    统计
 }
 
 /// 保存汇总信息
@@ -826,7 +884,7 @@ mod output_selection_mirror_tests {
     /// 单级简码（步数 1，规则 [A.a]）、每字 2 根（全码长 2 > 简码长 1）、允许键位 [0,1]，
     /// 可指定 code_num 与固定简码映射。assignment 全 0 时各字首根均解析为键 0，故所有候选字
     /// 的级别 0 简码落入同一桶（编码 = encode([0])），便于构造「固定占用 + 优化」竞争同桶。
-    fn make_ctx(freqs: &[u64], code_num: usize, fixed: &[(char, String)]) -> OptContext {
+    pub(super) fn make_ctx(freqs: &[u64], code_num: usize, fixed: &[(char, String)]) -> OptContext {
         let mut groups: Vec<RootGroup> = Vec::new();
         let mut splits: Vec<(char, Vec<String>, u64)> = Vec::with_capacity(freqs.len());
         for (i, &f) in freqs.iter().enumerate() {
@@ -939,5 +997,90 @@ mod output_selection_mirror_tests {
         assert_occupancy(&ctx0, &asg0);
         let sel0 = evaluator_simple_selection(&ctx0, &asg0);
         assert_eq!(sel0.len(), 1, "无固定简码、code_num=1 时优化出简应恰为 1");
+    }
+}
+
+#[cfg(test)]
+mod full_code_table_order_tests {
+    use super::output_selection_mirror_tests::make_ctx;
+    use super::*;
+
+    /// 全量拆分替身：直接取 `ctx` 的优化拆分（同根名体系），保证全码段有内容。
+    fn 全量拆分(ctx: &OptContext) -> Vec<(String, Vec<String>, u64)> {
+        ctx.raw_splits
+            .iter()
+            .map(|(ch, roots, freq)| (ch.to_string(), roots.clone(), *freq))
+            .collect()
+    }
+
+    /// 全量码表必须是「严格两段」：全部简码行在前、全部全码行在后。
+    ///
+    /// 这是结构性不变量——两段各写各的缓冲再拼接，任何单段内部改动都不会破坏它。
+    #[test]
+    fn 简码段整体位于全码段之前() {
+        let ctx = make_ctx(&[1000, 800, 600, 400], 4, &[]);
+        let asg = vec![0u8; ctx.num_groups];
+
+        let 简码行: HashSet<String> = evaluator_simple_selection(&ctx, &asg)
+            .into_iter()
+            .map(|(_, ci, code)| format!("{}\t{}", ctx.raw_splits[ci].0, code))
+            .collect();
+        assert!(!简码行.is_empty(), "夹具应至少产出一条简码");
+
+        let (文本, 统计) = 全量码表文本(&ctx, &asg, &全量拆分(&ctx));
+        assert_eq!(
+            统计.简码条数,
+            简码行.len(),
+            "统计的简码条数应与实际出简一致"
+        );
+        assert_eq!(统计.全码条数, ctx.raw_splits.len(), "全码应覆盖全量拆分");
+        assert_eq!(统计.缺根条数, 0);
+
+        let 行们: Vec<&str> = 文本.lines().collect();
+        assert_eq!(行们.len(), 统计.简码条数 + 统计.全码条数);
+
+        // 首行必须是简码行。
+        let 首键 = {
+            let mut it = 行们[0].split('\t');
+            format!("{}\t{}", it.next().unwrap(), it.next().unwrap())
+        };
+        assert!(简码行.contains(&首键), "首行应为简码，实际: {}", 行们[0]);
+
+        // 一旦出现全码行，其后不得再出现简码行。
+        let mut 已见全码行 = false;
+        for (n, 行) in 行们.iter().enumerate() {
+            let mut it = 行.split('\t');
+            let 键 = format!("{}\t{}", it.next().unwrap(), it.next().unwrap());
+            if 简码行.contains(&键) {
+                assert!(
+                    !已见全码行,
+                    "第 {} 行 `{}` 是简码行，却出现在全码段之后（违反「简码在前」）",
+                    n + 1,
+                    行
+                );
+            } else {
+                已见全码行 = true;
+            }
+        }
+    }
+
+    /// 缺根时要把「是哪个字根缺键位」记下来——两套根名体系混用时能一眼定位。
+    #[test]
+    fn 缺根诊断记录缺失字根名() {
+        let ctx = make_ctx(&[1000, 800], 4, &[]);
+        let asg = vec![0u8; ctx.num_groups];
+
+        let mut 全量 = 全量拆分(&ctx);
+        全量.push(("囧".to_string(), vec!["查无此根".to_string()], 7));
+        全量.push(("囧".to_string(), vec!["查无此根".to_string()], 7));
+
+        let (文本, 统计) = 全量码表文本(&ctx, &asg, &全量);
+        assert_eq!(统计.缺根条数, 2, "两条缺根都应计入");
+        assert_eq!(
+            统计.缺失字根,
+            vec![("查无此根".to_string(), 2)],
+            "缺失字根应按涉及字数聚合"
+        );
+        assert!(!文本.contains("囧\t"), "缺根的字不应写进码表");
     }
 }

@@ -147,6 +147,7 @@ fixed = "input-fixed.txt"
 dynamic = "input-roots.txt"
 splits = "input-division.txt"          # 优化用（常用字，快）
 full_splits = "moling/chaifen-all.txt" # 全量拆分表（手动指定；留空 = 不生成完整码表）
+                                       # ⚠️ 必须与 splits 同一套根名体系，否则全量字会因缺字根被跳过
 pair_equiv = "pair_equivalence.txt"    # 字根对当量表
 key_dist = "key_distribution.txt"      # 用指分布目标
 
@@ -225,7 +226,7 @@ rules = ["AaAbZz", "AaBaZz"]  # 多候选规则
 优化完成后生成 `output-{YYYYMMDDHHMMSS}/` 目录：
 - `字根键位表.txt`: 字根 → 键位串 + 使用频次
 - `单字编码表.txt`: 简码在前、全码在后（`字/码/频次`），覆盖**优化字集**
-- `完整码表.txt`: 同上格式，覆盖**全量拆分表**（配置 `files.full_splits` 时生成）
+- `完整码表.txt`: 同上格式，覆盖**全量拆分表**（配置 `files.full_splits` 时生成）。**严格两段**：先全部简码行（`全量码表文本` 的第一段缓冲），再全部全码行——顺序由两段拼接保证，不靠书写顺序
 - `简码表.txt`: 简码分配（按级别、按频率排序）
 - `合并码表.txt`: 简码+全码合并输出
 - `用指分布.txt` / `当量分布.txt`: 用指分布 / 当量分布统计

@@ -2112,20 +2112,47 @@ fn finalize_and_save(
             } else {
                 let 全量 = crate::export_table::加载拆分表(&p);
                 if 全量.len() > ctx.raw_splits.len() {
-                    let (全条, 简条, 缺根) =
+                    let 统计 =
                         output::save_full_code_table(ctx, &best_assignment, &全量, output_dir);
                     println!(
-                        "\n📄 完整码表: {} 条（全码 {} / 简码 {}，缺字根 {}），来源 {}",
-                        全条 + 简条,
-                        全条,
-                        简条,
-                        缺根,
+                        "\n📄 完整码表: {} 条（简码 {} 在前 / 全码 {}，缺字根 {}），来源 {}",
+                        统计.简码条数 + 统计.全码条数,
+                        统计.简码条数,
+                        统计.全码条数,
+                        统计.缺根条数,
                         p
                     );
-                    if 缺根 > 0 {
+                    if 统计.缺根条数 > 0 {
+                        let 样例: Vec<String> = 统计
+                            .缺失字根
+                            .iter()
+                            .map(|(根, 数)| format!("{}({} 字)", 根, 数))
+                            .collect();
+                        if 样例.is_empty() {
+                            println!(
+                                "   ⚠️ 有 {} 个字因字根缺键位被跳过（键位表没覆盖全量拆分的字根）",
+                                统计.缺根条数
+                            );
+                        } else {
+                            println!(
+                                "   ⚠️ 有 {} 个字因字根缺键位被跳过；缺失最多的字根: {}",
+                                统计.缺根条数,
+                                样例.join(", ")
+                            );
+                        }
+                        // 过半缺失基本不可能是真缺根，而是两套表用了不同的根名体系。
+                        if 统计.缺根条数 * 2 > 全量.len() {
+                            println!(
+                                "   💡 缺失超过一半：files.full_splits 与 files.splits 多半不是同一套根名体系"
+                            );
+                            println!(
+                                "      （如一份用真实部件名、另一份用映射后的根名）。两者必须取自同一套字根，否则全量字无法编码。"
+                            );
+                        }
+                    }
+                    if 统计.简码条数 == 0 {
                         println!(
-                            "   ⚠️ 有 {} 个字因字根缺键位被跳过（键位表没覆盖全量拆分的字根）",
-                            缺根
+                            "   💡 简码段为空：简码优化未启用（[weights.simple_code] enabled = false），码表只有全码行"
                         );
                     }
                     true
