@@ -40,7 +40,7 @@ cargo build --release
 | `pipeline` | 逐字取码推导表（Markdown） | `code_genie pipeline --keymap 字根键位表.txt --chaifen 拆分全表.txt --top 5` |
 | `merge` | 字根归并对比 | `code_genie merge --keymap 字根键位表.txt --chaifen 拆分全表.txt --rules "还=人"` |
 | `diagnose` | 批量诊断码表目录 | `code_genie diagnose --dir runs` |
-| `clusters` | 聚类重码分析：某一行聚类压成一个大码，要付出多少重码 | `code_genie clusters --per-row` |
+| `clusters` | 聚类重码分析：把一簇压成一个大码要付出多少重码（聚类表内嵌于 `assets/roots_cluster.ron`） | `code_genie clusters --per-row` |
 | `zigen` | 字形变体表：`zigen-<方案>.csv` + `roots-mapping.tsv` + `zigen-trainer-<方案>.json` | `code_genie zigen --schema moling --source moling` |
 | `prepare` | 从上游 yaml/lua/csv 数据加工出优化器输入文件（13 步） | `code_genie prepare --dir moling` |
 | `explore` | 权重空间探索：汇总一批 optimize 日志，出平行坐标网页 | `code_genie explore test-*.log --html batch-test-weights.html` |

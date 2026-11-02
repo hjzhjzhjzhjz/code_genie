@@ -31,6 +31,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 use crate::prepare::text::{写文本, 读行};
+use crate::roots_cluster;
 
 /// 元音字母：判「键位串是否含元音」用于字根排序
 const 元音: [char; 5] = ['a', 'e', 'u', 'i', 'o'];
@@ -88,7 +89,7 @@ pub struct 参数 {
     pub 方案: String,
     /// 字根键位表：`output-keymap.txt` 或 `字根键位表.txt`
     pub 键位文件: String,
-    /// 源目录：取 `yuhao-zigens.csv` / `字根声韵.txt` / `roots-cluster.txt`
+    /// 源目录：取 `yuhao-zigens.csv` / `字根声韵.txt` / `roots-cluster.ron`
     pub 源目录: String,
     /// 输出目录
     pub 输出目录: String,
@@ -96,13 +97,12 @@ pub struct 参数 {
     pub 严格: bool,
 }
 
-/// 一个键位槽位：A=大码、S=声码、Y=韵码、U=飞键
+/// 一个键位槽位：A=大码、S=声码、Y=韵码
 #[derive(Default, Clone, Copy)]
 struct 槽位 {
     a: Option<char>,
     s: Option<char>,
     y: Option<char>,
-    u: Option<char>,
 }
 
 // =========================================================================
@@ -112,7 +112,7 @@ struct 槽位 {
 /// 读字根键位表，返回 `(字根, 键位串)`，顺序同脚本。
 ///
 /// 两种格式都吃：
-/// - 带槽位后缀（`干.A` / `干.S` / `干.Y` / `干.U`）→ 拼成 `A S Y`，飞键根另出一行 `U S Y`
+/// - 带槽位后缀（`干.A` / `干.S` / `干.Y`）→ 拼成 `A S Y`
 /// - 朴素格式（`干<TAB>od<TAB>频次`）→ 原样照抄
 pub(crate) fn 读字根码(路径: &Path) -> Result<Vec<(String, String)>, String> {
     解析字根码(&读行(路径)?)
@@ -138,10 +138,9 @@ pub(crate) fn 解析字根码(行们: &[String]) -> Result<Vec<(String, String)>
                     "A" => 槽.a = Some(码字),
                     "S" => 槽.s = Some(码字),
                     "Y" => 槽.y = Some(码字),
-                    "U" => 槽.u = Some(码字),
                     _ => {}
                 }
-                if matches!(尾, "A" | "S" | "Y" | "U") {
+                if matches!(尾, "A" | "S" | "Y") {
                     continue;
                 }
                 // 后缀不是槽位（如 `.0`）→ 当朴素行，不能动已收集的槽位
@@ -173,9 +172,6 @@ pub(crate) fn 解析字根码(行们: &[String]) -> Result<Vec<(String, String)>
             }
             s
         };
-        if 槽.u.is_some() {
-            出.push((根.clone(), 拼(槽.u)));
-        }
         if 槽.a.is_none() {
             return Err(format!("字根「{}」只有小码没有 `.A` 大码", 根));
         }
@@ -264,23 +260,6 @@ pub(crate) fn 读拼音(路径: &Path) -> Result<HashMap<String, String>, String
         );
     }
     Ok(表)
-}
-
-/// 读 `roots-cluster.txt`：每行第一个 TAB 段是「首领 + 成员」，按空白切开
-pub(crate) fn 读聚类(路径: &Path) -> Result<Vec<Vec<String>>, String> {
-    let mut 出 = Vec::new();
-    for 行 in 读行(路径)? {
-        let 去空 = 行.trim();
-        if 去空.is_empty() || 去空.starts_with('#') {
-            continue;
-        }
-        let 首段 = 行.split('\t').next().unwrap_or("");
-        let 组: Vec<String> = 首段.split_whitespace().map(str::to_string).collect();
-        if !组.is_empty() {
-            出.push(组);
-        }
-    }
-    Ok(出)
 }
 
 // =========================================================================
@@ -534,19 +513,19 @@ pub fn run(参: &参数) -> Result<(), String> {
         }
     };
 
-    // 4. 聚类（只影响排序与「类」的分组，缺了不算错）
+    // 4. 聚类（只影响排序与「类」的分组）：内嵌 RON 兜底，源目录有文件则覆盖
     let 聚类名 = [
-        format!("roots-cluster-{}.txt", 参.方案),
-        "roots-cluster.txt".to_string(),
+        format!("roots-cluster-{}.ron", 参.方案),
+        "roots-cluster.ron".to_string(),
     ];
     let 聚类名: Vec<&str> = 聚类名.iter().map(String::as_str).collect();
-    let 聚类 = match 找(源, &聚类名) {
-        Some(p) => 读聚类(&p)?,
-        None => {
-            eprintln!("⚠️ {} 下没有聚类表，按字根各自独立排", 源.display());
-            Vec::new()
-        }
-    };
+    let 聚类: Vec<Vec<String>> = match 找(源, &聚类名) {
+        Some(p) => roots_cluster::加载(Some(&p))?,
+        None => roots_cluster::内嵌()?,
+    }
+    .into_iter()
+    .map(|簇| 簇.roots)
+    .collect();
 
     // 5. 数量对账（脚本在此 die）
     let 映射根: HashSet<&str> = 字形表.iter().map(|(r, _, _)| r.as_str()).collect();
@@ -696,16 +675,6 @@ mod tests {
         .unwrap();
         assert_eq!(出[0].0, "乙", "乙 的码 a k k 含元音 a，排在前");
         assert_eq!(出[1].0, "甲");
-    }
-
-    /// 飞键根多出一行 `U S Y`
-    #[test]
-    fn 飞键根出两行() {
-        let 出 = 解析字根码(&行(&["乙.A\ta", "乙.S\tk", "乙.Y\tk", "乙.U\tv"])).unwrap();
-        assert_eq!(出.len(), 2);
-        let 码集: Vec<&str> = 出.iter().map(|(_, c)| c.as_str()).collect();
-        assert!(码集.contains(&"Vkk"), "飞键行用 U 槽：{码集:?}");
-        assert!(码集.contains(&"Akk"), "正常行用 A 槽：{码集:?}");
     }
 
     /// 缺 `.A` 大码要报错，不能悄悄放过（脚本是 `die "No ASY root found"`）

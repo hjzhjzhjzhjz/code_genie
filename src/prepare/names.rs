@@ -5,9 +5,10 @@
 // 改这里的名字就等于改掉整条链路的文件名——prepare 写出、config.ron 读入、
 // CI 校验与打包都引用同一组常量或注释里的名字，所以只允许在这一处定义。
 //
-// 注意：**输入**文件（roots-cluster.txt / roots-fly.txt / yustar_*.dict.yaml /
-// chars.dict.yaml / pair_equivalence.txt / key_distribution.txt）不在此列，它们是
-// 人工维护或上游提供的原始数据，名字保持不变。
+// 注意：**输入**文件（yustar_*.dict.yaml / chars.dict.yaml / pair_equivalence.txt /
+// key_distribution.txt）不在此列，它们是人工维护或上游提供的原始数据，名字保持不变；
+// 字根聚类表已改成 `assets/roots_cluster.ron` 并 `include_str!` 内嵌，也不再是
+// 运行期文件。
 // =========================================================================
 
 /// 全字集字频表（简繁混合，第 0 步产出）
@@ -41,10 +42,7 @@ pub const 字根读音: &str = "字根读音.txt";
 pub const 字根声韵: &str = "字根声韵.txt";
 pub const 字根声韵基名: &str = "字根声韵";
 
-/// 飞键候选表（第 7 步产出，人工挑飞键根用）
-pub const 飞键候选: &str = "飞键候选.txt";
-
-/// 固定字根与各码位约束（第 8~10 步产出）
+/// 固定字根与各码位约束（第 8~9 步产出）
 pub const 字根约束: &str = "字根约束.txt";
 
 /// 单字拆分输入表（第 12 步产出，`字\t根.码位 …\t频次`）

@@ -2,7 +2,7 @@
 // 📥 prepare 步骤 8–13：生成 字根约束 / 单字拆分
 // =========================================================================
 //
-// 前四步（8–11）按 `>>` 语义逐步追加到 `字根约束.txt`，因此单独跑某一步时
+// 第 8、9 步按 `>>` 语义逐步追加到 `字根约束.txt`，因此单独跑某一步时
 // 会接在已有内容后面——与 bash 版一致。第 12 步按方案的编码规则把「字根序列」
 // 展开成「码位序列」，第 13 步在开启简码时把 `.A/.S/.Y` 改写成 `.0/.1/.2`。
 // =========================================================================
@@ -14,6 +14,7 @@ use crate::prepare::names;
 use crate::prepare::schema::{方案, 编码规则, 韵码来源};
 use crate::prepare::text::{self, 数值字段};
 use crate::prepare::上下文;
+use crate::roots_cluster;
 
 /// 左手声母：撇、折在这些声母后面时用右手的替代映射
 const 左声母: &str = "qwrtsdfgzxcvb";
@@ -23,7 +24,10 @@ const 右声母: &str = "yphjklnm";
 /// 步骤 8：大码约束（字根聚类 + 字根频率分档），覆盖写 `字根约束.txt`
 pub fn 步骤8_大码约束(上: &上下文) -> Result<(), String> {
     println!("(8) 生成码灵输入文件 字根约束.txt, 大码约束 ...");
-    if 上.聚类表 != "roots-cluster.txt" {
+    // 聚类表已内嵌（assets/roots_cluster.ron）；只有放了一份
+    // `roots-cluster.ron` / `roots-cluster-<方案>.ron` 时才走外部文件
+    let 聚类路径 = 上.源路径(&上.聚类表);
+    if 聚类路径.is_some() {
         println!("    !!! 使用方案自行提供的字根聚类表 {} ...", 上.聚类表);
     }
 
@@ -40,23 +44,28 @@ pub fn 步骤8_大码约束(上: &上下文) -> Result<(), String> {
     let mut 出 = String::new();
 
     // 第一阶段：聚类表，每一簇输出一条 `# freq=` + 一条约束
-    for 行 in 上.读(&上.聚类表)? {
-        if 行.trim().is_empty() || 行.trim_start().starts_with('#') {
+    for 簇 in roots_cluster::加载(聚类路径.as_deref())? {
+        if 跳过一列约束(&簇, 方案.低频字根键位) {
             continue;
         }
-        if 跳过一列约束(&行, 方案.低频字根键位) {
-            continue;
-        }
-        let (根串, 键串) = 行.split_once('\t').unwrap_or((行.as_str(), ""));
-        let 非法 = 根串.chars().any(|c| c.is_ascii_lowercase())
-            || 键串
+        let 非法 = 簇
+            .roots
+            .iter()
+            .any(|r| r.chars().any(|c| c.is_ascii_lowercase()))
+            || 簇
+                .keys
                 .chars()
                 .any(|c| !(c.is_ascii_lowercase() || c.is_whitespace()));
         if 非法 {
-            return Err(format!("Invalid line in {}: {}", 上.聚类表, 行));
+            return Err(format!(
+                "Invalid entry in {}: {} / {}",
+                上.聚类表,
+                簇.roots.join(" "),
+                簇.keys
+            ));
         }
 
-        let mut 根: Vec<&str> = 根串.split_whitespace().collect();
+        let mut 根: Vec<&str> = 簇.roots.iter().map(String::as_str).collect();
         根.sort();
         let mut 合计 = 0.0;
         for r in &根 {
@@ -66,10 +75,10 @@ pub fn 步骤8_大码约束(上: &上下文) -> Result<(), String> {
             合计 += *值;
         }
 
-        let 键 = if 键串.trim().is_empty() {
+        let 键 = if 簇.keys.trim().is_empty() {
             方案.分档键位(合计)
         } else {
-            键串.trim()
+            簇.keys.trim()
         };
         出.push_str(&format!("# freq={合计:.8}\n"));
         出.push_str(
@@ -105,19 +114,12 @@ pub fn 步骤8_大码约束(上: &上下文) -> Result<(), String> {
     上.写(names::字根约束, &出)
 }
 
-/// `^\s*一\s+f` 且 `ALL_ROOT_KEYS` 里没有 f 时跳过该行
+/// 「一」被钉在 F 键、而本方案又把 F 用作 B 区（`低频字根键位` 里没有 f）时跳过该簇
 ///
-/// 宇码传统把「一」的大码钉在 F 上；对把 F 用作 B 区的方案，这条约束不适用。
-fn 跳过一列约束(行: &str, 低频键位: &str) -> bool {
-    let 匹配 = 行
-        .trim_start()
-        .strip_prefix('一')
-        .and_then(|余| {
-            let 去空白 = 余.trim_start();
-            (去空白.len() != 余.len()).then_some(去空白)
-        })
-        .map(|余| 余.starts_with(['f', 'F']))
-        .unwrap_or(false);
+/// 宇码传统把「一」的大码钉在 F 上；对把 F 另作他用的方案，这条约束不适用。
+fn 跳过一列约束(簇: &roots_cluster::簇, 低频键位: &str) -> bool {
+    let 匹配 = 簇.roots.first().map(String::as_str) == Some("一")
+        && 簇.keys.trim_start().starts_with(['f', 'F']);
     匹配 && !低频键位.to_ascii_lowercase().contains('f')
 }
 
@@ -194,21 +196,6 @@ pub fn 步骤9_声韵约束(上: &上下文) -> Result<(), String> {
     上.追加(names::字根约束, &出)
 }
 
-/// 步骤 10：飞键约束（`roots-fly.txt` 里每个字根占满 AEUIO）
-pub fn 步骤10_飞键约束(上: &上下文) -> Result<(), String> {
-    println!("(10) 添加码灵输入文件 字根约束.txt, 飞键约束 ...");
-    let mut 出 = String::new();
-    for 行 in 上.读("roots-fly.txt")? {
-        if 行.trim_start().starts_with('#') {
-            continue;
-        }
-        if let Some(根) = 行.split_whitespace().next() {
-            出.push_str(&format!("{根}.U\ta e u i o\n"));
-        }
-    }
-    上.追加(names::字根约束, &出)
-}
-
 /// 步骤 12：按编码规则把拆分展开成码位序列 `单字拆分.txt`
 pub fn 步骤12_编码展开(上: &上下文) -> Result<(), String> {
     println!("(12) 生成码灵输入文件 单字拆分.txt ...");
@@ -221,17 +208,6 @@ pub fn 步骤12_编码展开(上: &上下文) -> Result<(), String> {
             码表.insert(列[0].to_string(), 列[1].to_string());
         }
     }
-    let mut 飞键: HashSet<String> = HashSet::new();
-    for 行 in 上.读("roots-fly.txt")? {
-        if 行.trim_start().starts_with('#') {
-            continue;
-        }
-        let 根: String = 行.chars().filter(|c| !c.is_whitespace()).collect();
-        if !根.is_empty() {
-            飞键.insert(根);
-        }
-    }
-
     let mut 出 = String::new();
     for 行 in 上.读(names::拆分表)? {
         let 列: Vec<&str> = 行.split('\t').collect();
@@ -243,11 +219,11 @@ pub fn 步骤12_编码展开(上: &上下文) -> Result<(), String> {
             continue;
         }
         for r in &根 {
-            if !码表.contains_key(*r) && !飞键.contains(*r) {
+            if !码表.contains_key(*r) {
                 return Err(format!("Bad root {r}"));
             }
         }
-        let 序列 = 展开(&根, &码表, &飞键, 方案);
+        let 序列 = 展开(&根, &码表, 方案);
         出.push_str(&format!("{}\t{}\t{}\n", 列[0], 序列.join(" "), 列[2]));
     }
     上.写(names::单字拆分, &出)
@@ -255,13 +231,10 @@ pub fn 步骤12_编码展开(上: &上下文) -> Result<(), String> {
 
 /// 按方案展开码位序列（截断到 `MAX_CODE_LEN` 在展开**之后**做）
 ///
-/// 返回槽位标签（`根.A` / `根.S` / `根.Y` / `根.U`），聚类重码分析直接复用这一份，
+/// 返回槽位标签（`根.A` / `根.S` / `根.Y`），聚类重码分析直接复用这一份，
 /// 保证与优化器实际出码同口径。
 pub(crate) fn 展开(
-    根: &[&str],
-    码表: &HashMap<String, String>,
-    飞键: &HashSet<String>,
-    方案: &方案,
+    根: &[&str], 码表: &HashMap<String, String>, 方案: &方案
 ) -> Vec<String> {
     let 有声母 = |r: &str| 码表.get(r).map(|c| c.chars().count() > 1).unwrap_or(false);
     let 末 = 根[根.len() - 1];
@@ -318,13 +291,10 @@ pub(crate) fn 展开(
                 }
             }
         }
-        // A1A2A3AzSzYz；二根字回头码 A1A2S2S1Y1；首根是飞键字根时用 .U
+        // A1A2A3AzSzYz；二根字回头码 A1A2S2S1Y1
         编码规则::魔灵 => {
             for r in 根 {
                 序列.push(format!("{r}.A"));
-            }
-            if 飞键.contains(根[0]) {
-                序列[0] = format!("{}.U", 根[0]);
             }
             if 根.len() == 2 {
                 if 有声母(根[1]) {
@@ -510,39 +480,27 @@ mod tests {
     fn 魔灵三根取大码再加末根声韵() {
         let 表 = 码表(&[("白", "ba"), ("勹", "bo"), ("丶", "a")]);
         let 根 = ["白", "勹", "丶"];
-        assert_eq!(
-            展开(&根, &表, &HashSet::new(), &魔灵),
-            vec!["白.A", "勹.A", "丶.A", "丶.Y"]
-        );
+        assert_eq!(展开(&根, &表, &魔灵), vec!["白.A", "勹.A", "丶.A", "丶.Y"]);
     }
 
     #[test]
     fn 魔灵二根走回头码并被码长截断() {
         let 表 = 码表(&[("木", "mu"), ("木2", "mu")]);
         let 根 = ["木", "木"];
-        assert_eq!(
-            展开(&根, &表, &HashSet::new(), &魔灵),
-            vec!["木.A", "木.A", "木.S", "木.S"]
-        );
+        assert_eq!(展开(&根, &表, &魔灵), vec!["木.A", "木.A", "木.S", "木.S"]);
     }
 
     #[test]
     fn 灵明四根且首根有声母时跳第三根() {
         let 表 = 码表(&[("弓", "gu"), ("口", "ko"), ("一", "a"), ("丨", "su")]);
         let 根 = ["弓", "口", "一", "丨"];
-        assert_eq!(
-            展开(&根, &表, &HashSet::new(), &灵明),
-            vec!["弓.A", "弓.S", "口.A", "丨.A"]
-        );
+        assert_eq!(展开(&根, &表, &灵明), vec!["弓.A", "弓.S", "口.A", "丨.A"]);
     }
 
     #[test]
     fn 星陈单根重复小码() {
         let 表 = 码表(&[("一", "yi")]);
-        assert_eq!(
-            展开(&["一"], &表, &HashSet::new(), &星陈),
-            vec!["一.A", "一.S", "一.S"]
-        );
+        assert_eq!(展开(&["一"], &表, &星陈), vec!["一.A", "一.S", "一.S"]);
     }
 
     #[test]
@@ -552,14 +510,22 @@ mod tests {
         assert_eq!(替换码位标签("白.Y\tu\n"), "白.2\tu\n");
         // 行首的 `.A` 前面没有非空白字符，不替换
         assert_eq!(替换码位标签(".A\n"), ".A\n");
-        // `.U` 不在改写范围内
-        assert_eq!(替换码位标签("白.U\ta e\n"), "白.U\ta e\n");
+        // 不认识的码位标签一律不动
+        assert_eq!(替换码位标签("白.Q\ta e\n"), "白.Q\ta e\n");
     }
 
     #[test]
     fn 一列约束按低频键位决定是否跳过() {
-        assert!(!跳过一列约束("一 f", "qwrtyp sdfghjkl xcvbnm")); // 含 f → 不跳过
-        assert!(跳过一列约束("一 f", "qwrtyp sdghjkl xcvbnm")); // 不含 f → 跳过
-        assert!(!跳过一列约束("二 冫", "qwrtyp sdghjkl")); // 不是「一」
+        let 一 = roots_cluster::簇 {
+            roots: vec!["一".into()],
+            keys: "f".into(),
+        };
+        let 二 = roots_cluster::簇 {
+            roots: vec!["二".into(), "冫".into()],
+            keys: String::new(),
+        };
+        assert!(!跳过一列约束(&一, "qwrtyp sdfghjkl xcvbnm")); // 含 f → 不跳过
+        assert!(跳过一列约束(&一, "qwrtyp sdghjkl xcvbnm")); // 不含 f → 跳过
+        assert!(!跳过一列约束(&二, "qwrtyp sdghjkl")); // 不是「一」
     }
 }

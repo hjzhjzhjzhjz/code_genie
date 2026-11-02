@@ -42,7 +42,7 @@ pub struct 上下文 {
     pub 方案: &'static 方案,
     /// `ROOTS_TXT`：字根声码韵码表
     pub 字根表: String,
-    /// `ROOTS_CLUSTER_TXT`：字根聚类表
+    /// `ROOTS_CLUSTER_TXT`：字根聚类表（`roots-cluster.ron`；缺省用内嵌表）
     pub 聚类表: String,
     /// `FULL_FREQ_TXT`：全字集字频表
     pub 全字频表: String,
@@ -59,9 +59,10 @@ impl 上下文 {
         };
         // 对应 init.sh 末尾的 `for s in full-freq chars roots roots-cluster` 循环：
         // 方案自己放了 `全字频表-<schema>.txt` 这类文件就用它，否则用默认名
-        // （`roots-cluster` 是人工维护的输入，不随产物一起改名）。
-        let 解析 = |基名: &str, 默认: &str| {
-            let 专用 = 目录.join(format!("{基名}-{}.txt", 方案.名));
+        // （`roots-cluster` 是人工维护的输入，已改成 RON 并内嵌，只在换方案时
+        //  才放一份 `roots-cluster-<schema>.ron` 覆盖）。
+        let 解析 = |基名: &str, 默认: &str, 扩展: &str| {
+            let 专用 = 目录.join(format!("{基名}-{}.{扩展}", 方案.名));
             if 专用.exists() {
                 专用
                     .file_name()
@@ -75,10 +76,10 @@ impl 上下文 {
             字根表: 方案
                 .字根表
                 .map(str::to_string)
-                .unwrap_or_else(|| 解析(names::字根声韵基名, names::字根声韵)),
-            聚类表: 解析("roots-cluster", "roots-cluster.txt"),
-            全字频表: 解析(names::全字频表基名, names::全字频表),
-            算码字集: 解析(names::算码字集基名, names::算码字集),
+                .unwrap_or_else(|| 解析(names::字根声韵基名, names::字根声韵, "txt")),
+            聚类表: 解析("roots-cluster", "roots-cluster.ron", "ron"),
+            全字频表: 解析(names::全字频表基名, names::全字频表, "txt"),
+            算码字集: 解析(names::算码字集基名, names::算码字集, "txt"),
             方案,
             目录,
             素材目录,
@@ -140,7 +141,7 @@ pub struct 参数 {
 }
 
 /// 一次产出的文件清单，用于 `--baseline-dir` 对照
-const 产物清单: [&str; 12] = [
+const 产物清单: [&str; 11] = [
     names::全字频表,
     names::算码字集,
     names::算码字频,
@@ -150,7 +151,6 @@ const 产物清单: [&str; 12] = [
     names::字根频率,
     names::字根读音,
     names::字根声韵,
-    names::飞键候选,
     names::字根约束,
     names::单字拆分,
 ];
@@ -177,10 +177,10 @@ pub fn run(参: &参数) -> Result<(), String> {
             4 => tables::步骤4_字根频率(&上)?,
             5 => roots::步骤5_字根读音(&上)?,
             6 => roots::步骤6_字根声韵码(&上)?,
-            7 => roots::步骤7_飞键候选(&上)?,
+            7 => {} // 原「飞键候选」步骤已移除：不再有飞键根，无需分析首根冲突
             8 => inputs::步骤8_大码约束(&上)?,
             9 => inputs::步骤9_声韵约束(&上)?,
-            10 => inputs::步骤10_飞键约束(&上)?,
+            10 => {} // 原「飞键约束」步骤已移除：飞键根机制整体删除
             11 => {} // 原「动态字根」步骤已移除：字根分组全部在 字根约束.txt 内定义
             12 => inputs::步骤12_编码展开(&上)?,
             13 => inputs::步骤13_简码码位(&上, 解析配置(参, &上).as_deref())?,

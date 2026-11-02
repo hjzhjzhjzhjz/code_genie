@@ -39,6 +39,7 @@ mod prepare;
 mod rime_convert;
 mod root_chart;
 mod roots_chart;
+mod roots_cluster;
 mod run;
 mod schedule;
 mod sentence;
@@ -564,12 +565,9 @@ enum Commands {
         #[arg(long, default_value = crate::prepare::names::字根声韵)]
         roots: String,
 
-        /// 飞键根表；文件不存在按无飞键处理
-        #[arg(long, default_value = "roots-fly.txt")]
-        fly: String,
-
-        /// 聚类表路径，或直接写 "根1 根2 ; 根3 根4"
-        #[arg(long, default_value = "roots-cluster.txt")]
+        /// 聚类表（RON）；留空用内嵌表（assets/roots_cluster.ron），
+        /// 也可直接写 "根1 根2 ; 根3 根4"
+        #[arg(long, default_value = "")]
         cluster: String,
 
         /// 明细只列超过这么多重的组（全码那一档不受限）
@@ -592,7 +590,7 @@ enum Commands {
         #[arg(long, default_value = "output-keymap.txt")]
         keymap: String,
 
-        /// 源目录：取 字根声韵.txt / roots-cluster.txt；yuhao-zigens.csv 是上游素材，
+        /// 源目录：取 字根声韵.txt / roots-cluster.ron；yuhao-zigens.csv 是上游素材，
         /// 源目录里没有就到 yuhao-data/ 里找
         #[arg(long, default_value = ".")]
         source: String,
@@ -739,7 +737,6 @@ fn main() {
         schema,
         chaifen,
         roots,
-        fly,
         cluster,
         max_dups,
         per_row,
@@ -749,7 +746,6 @@ fn main() {
             方案: schema.clone(),
             拆分表: chaifen.clone(),
             字根声韵: roots.clone(),
-            飞键: fly.clone(),
             聚类: cluster.clone(),
             最多重数: *max_dups,
             逐行: *per_row,

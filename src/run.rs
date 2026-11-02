@@ -317,19 +317,26 @@ fn 按模式扫(目录: &Path, 前缀: &str, 后缀: &str) -> Vec<PathBuf> {
 fn 待备份清单(工作: &Path, 素材: &Path, 配置: &str, 方案名: &str) -> Vec<PathBuf> {
     let mut 名单: Vec<PathBuf> = vec![工作.join(配置)];
 
-    // 产物 + 人工维护的输入：后四项名字固定，前六项可能带 `-<方案>` 后缀
+    // 产物 + 人工维护的输入：后两项名字固定，前五项可能带 `-<方案>` 后缀
+    // （聚类表已内嵌进二进制，不再需要留档）
     for 基 in [
         names::算码字集基名,
         names::全字频表基名,
         names::字根声韵基名,
         基名(names::单字拆分),
         基名(names::字根约束),
-        "roots-fly",
-        "roots-cluster",
         "key_distribution",
         "pair_equivalence",
     ] {
         名单.push(方案文件(工作, 基, 方案名));
+    }
+
+    // 方案覆盖版聚类表（`roots-cluster-<方案>.ron` / `roots-cluster.ron`）若存在也留档
+    for 名 in [
+        format!("roots-cluster-{方案名}.ron"),
+        "roots-cluster.ron".to_string(),
+    ] {
+        名单.push(工作.join(名));
     }
 
     // 脚本里写死在 `cp` 行上的几项
@@ -715,7 +722,8 @@ mod tests {
         for 名 in ["拆分表.txt", "拆分全表.txt", "拆分全表-台.txt"] {
             std::fs::write(工作.join(名), "").unwrap();
         }
-        std::fs::write(工作.join("roots-cluster.txt"), "").unwrap();
+        // 聚类表默认内嵌，只有方案覆盖版才需要留档
+        std::fs::write(工作.join("roots-cluster-yustar.ron"), "").unwrap();
         std::fs::write(素材.join("charAbsoluteFrequencySC.json"), "{}").unwrap();
 
         let 清单 = 待备份清单(&工作, &素材, "config.ron", "yustar");
@@ -733,6 +741,10 @@ mod tests {
             assert!(名们.contains(&名.to_string()), "缺 {名}: {名们:?}");
         }
         assert!(名们.contains(&"charAbsoluteFrequencySC.json".to_string()));
+        assert!(
+            名们.contains(&"roots-cluster-yustar.ron".to_string()),
+            "方案覆盖版聚类表应留档: {名们:?}"
+        );
         assert!(
             !名们.contains(&"算码字频.txt".to_string()),
             "不存在的文件不该进清单"

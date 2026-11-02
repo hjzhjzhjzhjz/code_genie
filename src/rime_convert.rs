@@ -477,12 +477,12 @@ fn ucfirst(s: &str) -> String {
 
 /// 读算码输出的字根键位表：`字根<TAB>键位串[<TAB>频次]`，取前两列。
 ///
-/// 兼容 `generate-root-chart.sh` 支持的飞键写法——同一字根拆成
-/// `白.A` / `白.S` / `白.Y`（或 `白.U` 表示飞键）多行时，按 A+S+Y（飞键取 U+S+Y）拼接，
+/// 兼容 `generate-root-chart.sh` 支持的槽位写法——同一字根拆成
+/// `白.A` / `白.S` / `白.Y` 多行时，按 A+S+Y 拼接，
 /// 与 `roots.tsv` 的口径一致。首字母统一大写，与底包「分组简码」风格对齐。
 fn 读字根键位(路径: &Path) -> Result<字根表, String> {
     let mut 平表: 字根表 = HashMap::new();
-    // 根 → { A/S/Y/U: 键位串 }
+    // 根 → { A/S/Y: 键位串 }
     let mut 位表: HashMap<String, HashMap<char, String>> = HashMap::new();
 
     for 行 in 读行(路径)? {
@@ -498,11 +498,11 @@ fn 读字根键位(路径: &Path) -> Result<字根表, String> {
         if 根.is_empty() || 键.is_empty() {
             continue;
         }
-        // 飞键写法：<根>.A / .S / .Y / .U
+        // 槽位写法：<根>.A / .S / .Y
         if let Some((名, 位)) = 根.rsplit_once('.') {
             if !名.is_empty() && 位.chars().count() == 1 {
                 let c = 位.chars().next().unwrap().to_ascii_uppercase();
-                if matches!(c, 'A' | 'S' | 'Y' | 'U') {
+                if matches!(c, 'A' | 'S' | 'Y') {
                     位表
                         .entry(名.to_string())
                         .or_default()
@@ -515,7 +515,7 @@ fn 读字根键位(路径: &Path) -> Result<字根表, String> {
     }
 
     for (根, 位) in 位表 {
-        let 首 = 位.get(&'U').or_else(|| 位.get(&'A'));
+        let 首 = 位.get(&'A');
         let Some(首) = 首 else { continue };
         let 串 = format!(
             "{}{}{}",
@@ -1084,24 +1084,20 @@ mod tests {
     }
 
     #[test]
-    fn 键位表飞键写法合并() {
-        let 目录 = std::env::temp_dir().join(format!("cg-keymap-fly-{}", std::process::id()));
+    fn 键位表槽位写法合并() {
+        let 目录 = std::env::temp_dir().join(format!("cg-keymap-slot-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&目录);
         std::fs::create_dir_all(&目录).unwrap();
         let 路径 = 目录.join("output-keymap.txt");
-        // 白.A/.S/.Y 拼成 ASY；艹.U 表示飞键，取 U+S+Y
+        // 白.A/.S/.Y 与 艹.A/.S/.Y 都拼成 ASY
         std::fs::write(
             &路径,
-            "白.A\tF\n白.S\tk\n白.Y\te\n艹.U\tx\n艹.S\tq\n艹.Y\tw\n",
+            "白.A\tF\n白.S\tk\n白.Y\te\n艹.A\tx\n艹.S\tq\n艹.Y\tw\n",
         )
         .unwrap();
         let 表 = 读字根键位(&路径).unwrap();
         assert_eq!(表.get("白").map(|s| s.as_str()), Some("Fke"));
-        assert_eq!(
-            表.get("艹").map(|s| s.as_str()),
-            Some("Xqw"),
-            "飞键应取 U+S+Y"
-        );
+        assert_eq!(表.get("艹").map(|s| s.as_str()), Some("Xqw"), "拼成 A+S+Y");
         let _ = std::fs::remove_dir_all(&目录);
     }
 

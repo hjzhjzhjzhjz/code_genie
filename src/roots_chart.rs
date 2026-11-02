@@ -177,8 +177,7 @@ fn 找文件(目录们: &[PathBuf], 名: &str) -> Option<PathBuf> {
 /// `output-keymap.txt` → `roots.tsv`
 ///
 /// 对应脚本 38–64 行，两条分支：
-/// - keymap 里有 `字根.U/.A/.S/.Y` 这类槽位后缀 → 每槽取该行第二列，
-///   飞键字根（有 `.U`）额外出一条 `U S Y`，正常字根出 `A S Y`；
+/// - keymap 里有 `字根.A/.S/.Y` 这类槽位后缀 → 每槽取该行第二列，拼成 `A S Y`；
 ///   排序是「含元音优先 → 码升序 → 名升序」。
 /// - 没有槽位后缀（当前 `字根键位表.txt` 就是这种）→ 跳过注释行，原样输出前两列。
 pub(crate) fn 生成字根表文本(keymap: &Path) -> Result<String, String> {
@@ -220,9 +219,7 @@ pub(crate) fn 生成字根表文本(keymap: &Path) -> Result<String, String> {
     let mut 行们: Vec<(String, String)> = Vec::new();
     for (名, 表) in &槽位 {
         let 取 = |标志: char| 表.get(&标志).cloned().unwrap_or_default();
-        if 表.contains_key(&'U') {
-            行们.push((名.clone(), format!("{}{}{}", 取('U'), 取('S'), 取('Y'))));
-        } else if !表.contains_key(&'A') {
+        if !表.contains_key(&'A') {
             return Err(format!("字根 {名} 没有 .A 槽位"));
         }
         行们.push((名.clone(), format!("{}{}{}", 取('A'), 取('S'), 取('Y'))));
@@ -242,12 +239,12 @@ pub(crate) fn 生成字根表文本(keymap: &Path) -> Result<String, String> {
     Ok(输出)
 }
 
-/// `^(\S+)\.([UASY])` 的行返回 (基名, 标志)
+/// `^(\S+)\.([ASY])` 的行返回 (基名, 标志)
 fn 槽位后缀(行: &str) -> Option<(&str, char)> {
     let 首字段 = 行.split_whitespace().next()?;
     let (基名, 尾) = 首字段.rsplit_once('.')?;
     let 标志 = 尾.chars().next()?;
-    if 尾.chars().count() == 1 && matches!(标志, 'U' | 'A' | 'S' | 'Y') && !基名.is_empty() {
+    if 尾.chars().count() == 1 && matches!(标志, 'A' | 'S' | 'Y') && !基名.is_empty() {
         Some((基名, 标志))
     } else {
         None
@@ -1215,17 +1212,14 @@ mod 测试 {
     }
 
     #[test]
-    fn 生成字根表文本_飞键字根多出_usy() {
-        // 含 `.U` 槽位 → 该字根额外出一条 `USY`；`首字母大写` 只大写首字母
+    fn 生成字根表文本_槽位写法拼成_asy() {
+        // `首字母大写` 只大写首字母
         let p = 写临时(
             "keymap_slot.txt",
-            "一.U\tod\n一.A\taa\n一.S\tss\n一.Y\tyy\n口.A\tii\n口.S\tee\n口.Y\ttt\n",
+            "一.A\taa\n一.S\tss\n一.Y\tyy\n口.A\tii\n口.S\tee\n口.Y\ttt\n",
         );
         let t = 生成字根表文本(&p).unwrap();
-        // 一：U 存在 → 额外一条 USY=Odssyy，再一条 ASY=Aassyy
-        assert!(t.contains("一\tOdssyy"));
         assert!(t.contains("一\tAassyy"));
-        // 口：无 U → 只 ASY=Iieett
         assert!(t.contains("口\tIieett"));
         // 排序：含元音(aeiou)优先
         let 首行 = t.lines().next().unwrap();

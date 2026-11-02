@@ -1,13 +1,13 @@
 // =========================================================================
-// 🌱 prepare 步骤 5–7：字根读音、声韵码、飞键候选
+// 🌱 prepare 步骤 5–6：字根读音、声韵码
 // =========================================================================
 //
-// 这三步的 Perl 逻辑密度最高，注释里保留了原始表达式，方便对照。
+// 这两步的 Perl 逻辑密度最高，注释里保留了原始表达式，方便对照。
 // 特别提醒：`s/[^aeuio]//` 只删**一个**字符（没有 `/g`），它承担了
 // 「非常用字根不取声母」的全部职责，漏掉就会让低频字根的声码带上辅音。
 // =========================================================================
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
 
@@ -371,180 +371,6 @@ fn 下载文本(网址: &str) -> Result<String, String> {
         )),
         Err(e) => Err(format!("无法执行 curl 下载 {网址}（{e}）")),
     }
-}
-
-/// 一组字根的冲突累计（对应 Perl 的 `%h2`，元素为 `[首根, 首值, 次根, 次值, 合计]`）
-struct 冲突对 {
-    首: String,
-    首值: f64,
-    次: String,
-    次值: f64,
-    合计: f64,
-}
-
-/// 步骤 7：分析首根冲突，给出飞键（AEUIO）字根候选 `飞键候选.txt`
-///
-/// 只看多根字：按「首根之后的尾序列」分组，组内不同的首根互相冲突。
-/// 三个截断条件：冲突概率 `< 0.01` 直接跳过；已选满 50 个终止；
-/// 某字根已连着 4 个冲突根时不再选它（AEUIO 只有 5 个位置）。
-pub fn 步骤7_飞键候选(上: &上下文) -> Result<(), String> {
-    println!("(7) 分析首根冲突情况，为选择飞键字根提供参考，写入 飞键候选.txt ...");
-
-    let mut 尾表: BTreeMap<String, BTreeMap<String, i64>> = BTreeMap::new();
-    let mut 根频: BTreeMap<String, [i64; 4]> = BTreeMap::new();
-    let mut 总频: i64 = 0;
-    for 行 in 上.读(names::拆分表)? {
-        let 列: Vec<&str> = 行.split('\t').collect();
-        if 列.len() < 3 {
-            continue;
-        }
-        let mut 根: Vec<&str> = 列[1].split_whitespace().collect();
-        if 根.len() <= 1 {
-            continue;
-        }
-        let 频: i64 = 列[2].trim().parse().unwrap_or(0);
-        let 首 = 根.remove(0);
-        *尾表
-            .entry(根.join(" "))
-            .or_default()
-            .entry(首.to_string())
-            .or_insert(0) += 频;
-        总频 += 频;
-
-        let 条 = 根频.entry(首.to_string()).or_default();
-        条[0] += 1; // 作为首根的次数
-        条[1] += 1; // 出现次数
-        条[2] += 频; // 作为首根的频次
-        条[3] += 频; // 不分角色的频次
-        for r in &根 {
-            let 条 = 根频.entry(r.to_string()).or_default();
-            条[1] += 1;
-            条[3] += 频;
-        }
-    }
-    let 总 = 总频 as f64;
-
-    let mut 对表: BTreeMap<String, 冲突对> = BTreeMap::new();
-    let mut 整体冲突: BTreeMap<String, i64> = BTreeMap::new();
-    for 首表 in 尾表.values() {
-        let 首: Vec<&String> = 首表.keys().collect();
-        // Perl: `next unless @a > 1` —— 只有出现过不止一个首根的尾串才算冲突，
-        // 整组在「整体冲突概率」里也不参与累加
-        if 首.len() <= 1 {
-            continue;
-        }
-        for i in 0..首.len() {
-            for j in i + 1..首.len() {
-                let a = 100.0 * *首表.get(首[i]).unwrap_or(&0) as f64 / 总;
-                let b = 100.0 * *首表.get(首[j]).unwrap_or(&0) as f64 / 总;
-                let 条 = 对表
-                    .entry(format!("{} {}", 首[i], 首[j]))
-                    .or_insert_with(|| 冲突对 {
-                        首: 首[i].clone(),
-                        首值: 0.0,
-                        次: 首[j].clone(),
-                        次值: 0.0,
-                        合计: 0.0,
-                    });
-                条.首值 += a;
-                条.次值 += b;
-                条.合计 += a + b;
-            }
-        }
-        for r in &首 {
-            *整体冲突.entry((*r).clone()).or_insert(0) += *首表.get(*r).unwrap_or(&0);
-        }
-    }
-
-    // 冲突概率高的对排在前面；同概率时按首、次字根的字节序
-    let mut 序号: Vec<&String> = 对表.keys().collect();
-    序号.sort_by(|x, y| {
-        let p = &对表[*x];
-        let q = &对表[*y];
-        q.合计
-            .partial_cmp(&p.合计)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| p.首.cmp(&q.首))
-            .then_with(|| p.次.cmp(&q.次))
-    });
-
-    let mut 已选: HashSet<String> = HashSet::new();
-    let mut 邻接: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    let mut 已选数 = 0usize;
-    let mut 出 = String::with_capacity(对表.len() * 48);
-
-    for 键 in 序号 {
-        let 条 = &对表[键];
-        if 条.合计 < 0.01 {
-            continue;
-        }
-        if 已选数 >= 50 {
-            break;
-        }
-        let p = &条.首;
-        let q = &条.次;
-        let a = 100.0 * *整体冲突.get(p).unwrap_or(&0) as f64 / 总;
-        let b = 100.0 * *整体冲突.get(q).unwrap_or(&0) as f64 / 总;
-
-        let mut s = String::from("SKIP");
-        if 已选.contains(p) {
-            if !已选.contains(q) {
-                邻接.entry(q.clone()).or_default().insert(p.clone());
-            }
-        } else if 已选.contains(q) {
-            if !已选.contains(p) {
-                邻接.entry(p.clone()).or_default().insert(q.clone());
-            }
-        } else {
-            // 整体冲突概率更高的那个根优先占飞键位
-            let (选, 选值, 邻) = if a > b { (p, a, q) } else { (q, b, p) };
-            if 邻接.get(选).map(|集| 集.len()).unwrap_or(0) <= 4 {
-                s = String::from("SELECT");
-                已选.insert(选.clone());
-                if !已选.contains(邻) {
-                    邻接.entry(邻.clone()).or_default().insert(选.clone());
-                }
-                已选数 += 1;
-            }
-            s.push_str(&格式字根(选, 选值, &根频, 总));
-            if let Some(集) = 邻接.get(选) {
-                s.push_str(&格式邻接(集, &整体冲突, 总));
-            }
-        }
-
-        出.push_str(&format!(
-            "{}\t{:.2}\t{}\t{:.2}\t{:.2} ({:.2} : {:.2}) ## {s}\n",
-            p, 条.首值, q, 条.次值, 条.合计, a, b
-        ));
-    }
-    上.写(names::飞键候选, &出)
-}
-
-fn 格式字根(根: &str, 值: f64, 根频: &BTreeMap<String, [i64; 4]>, 总: f64) -> String {
-    let 条 = 根频.get(根).copied().unwrap_or([0; 4]);
-    format!(
-        " {}/{:.2}/{}/{}/{:.2}/{:.2}",
-        根,
-        值,
-        条[0],
-        条[1],
-        100.0 * 条[2] as f64 / 总,
-        100.0 * 条[3] as f64 / 总
-    )
-}
-
-fn 格式邻接(集: &BTreeSet<String>, 整体冲突: &BTreeMap<String, i64>, 总: f64) -> String {
-    let 项: Vec<String> = 集
-        .iter()
-        .map(|根| {
-            format!(
-                "{}/{:.2}",
-                根,
-                100.0 * *整体冲突.get(根).unwrap_or(&0) as f64 / 总
-            )
-        })
-        .collect();
-    format!(" ?? {}", 项.join(" "))
 }
 
 #[cfg(test)]

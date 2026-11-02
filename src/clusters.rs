@@ -5,23 +5,27 @@
 // 回答两个问题：
 //
 //   1. 哪一码区分力不够？—— 去掉第 i 码后重码暴涨，说明那一码在该位置几乎不提供信息；
-//   2. `roots-cluster.txt` 里哪一行聚类代价最高？—— 把一簇根压成同一个大码，
-//      换来键位复用，付出重码，这一行值不值。
+//   2. 聚类表里哪一簇代价最高？—— 把一簇根压成同一个大码，换来键位复用，
+//      付出重码，这一簇值不值。
+//
+// 聚类数据来自内嵌的 `assets/roots_cluster.ron`（见 `roots_cluster` 模块），
+// 也可用 `--cluster` 指定一份 RON 文件，或临时写 `"根1 根2 ; 根3 根4"` 内联。
 //
 // 两种模式：
 //
-//   code_genie clusters                          逐行代入聚类表，与「全不聚类」基线做差
+//   code_genie clusters                          逐簇代入聚类表，与「全不聚类」基线做差
 //   code_genie clusters --cluster "卯 {卯左}"     只看指定这一簇
 //
-// 编码规则直接复用 `prepare::inputs::展开`（含飞键、回头码、声韵位），与优化器实际
+// 编码规则直接复用 `prepare::inputs::展开`（含回头码、声韵位），与优化器实际
 // 出码同口径。已删的 `moling/analyze-duplicates-by-cluster.pl` 那套是简化版（只展开大码 +
-// 声韵，不认飞键），两者数值不可比，本模块不追求与它逐字节一致。
+// 声韵），两者数值不可比，本模块不追求与它逐字节一致。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::prepare::schema::{self, 方案};
 use crate::prepare::{inputs, text};
+use crate::roots_cluster::{self, 簇};
 
 /// 五种取码法：前四种各去掉一码看剩下三码能否区分，最后一种用全码。
 const 取码法: [&str; 5] = ["去0", "去1", "去2", "去3", "全码"];
@@ -33,9 +37,7 @@ pub struct 参数 {
     pub 拆分表: String,
     /// 字根声韵表（字根声韵.txt：根<TAB>声韵<TAB>拼音）
     pub 字根声韵: String,
-    /// 飞键根表（roots-fly.txt：每行一个根）；文件不存在按无飞键处理
-    pub 飞键: String,
-    /// 聚类表路径，或直接写 "根1 根2 ; 根3 根4"
+    /// 聚类表：留空用内嵌表；给路径则读该 RON；也可直接写 "根1 根2 ; 根3 根4"
     pub 聚类: String,
     /// 明细只列超过这么多重的组（全码那一种不受限）
     pub 最多重数: usize,
@@ -55,7 +57,7 @@ pub fn run(参: &参数) -> Result<(), String> {
     );
 
     if 参.逐行 {
-        逐行分析(&语境, Path::new(&参.聚类))
+        逐行分析(&语境, &参.聚类)
     } else {
         单次分析(&语境, &参.聚类, 参.最多重数)
     }
@@ -67,8 +69,6 @@ struct 语境 {
     方案: &'static 方案,
     /// 根 → 声韵码（"ba"、"a"）
     声韵: HashMap<String, String>,
-    /// 飞键根
-    飞键: HashSet<String>,
     /// (字, 根序列, 频次)
     字表: Vec<(String, Vec<String>, f64)>,
     总频: f64,
@@ -100,18 +100,6 @@ fn 加载(参: &参数, 方案: &'static 方案) -> Result<语境, String> {
         return Err(format!("{} 里没有任何字根声韵", 声韵路径.display()));
     }
 
-    let mut 飞键 = HashSet::new();
-    let 飞键路径 = Path::new(&参.飞键);
-    if 飞键路径.is_file() {
-        for 行 in text::读行(飞键路径)? {
-            let t = 行.trim();
-            if t.is_empty() || t.starts_with('#') {
-                continue;
-            }
-            飞键.insert(t.to_string());
-        }
-    }
-
     let 拆分路径 = Path::new(&参.拆分表);
     let mut 字表 = Vec::new();
     for 行 in text::读行(拆分路径)? {
@@ -133,7 +121,6 @@ fn 加载(参: &参数, 方案: &'static 方案) -> Result<语境, String> {
     Ok(语境 {
         方案,
         声韵,
-        飞键,
         字表,
         总频,
     })
@@ -143,12 +130,11 @@ fn 加载(参: &参数, 方案: &'static 方案) -> Result<语境, String> {
 
 /// 把一簇根展开成 4 个码字符
 ///
-/// 槽位来自 `prepare::inputs::展开`，形如 `至.A` / `至.S` / `至.Y` / `至.U`：
+/// 槽位来自 `prepare::inputs::展开`，形如 `至.A` / `至.S` / `至.Y`：
 ///   - `.A` 大码位——在聚类里就换成簇标记 `#簇号`（一簇共用一个大码），否则留根名；
-///   - `.U` 飞键位——独占一个键，不参与聚类；
 ///   - `.S` / `.Y` 声母位 / 韵母位——取真实声韵字符，不同根同声韵会自然撞码。
 fn 取码(根: &[&str], 语境: &语境, 聚类: &HashMap<String, usize>) -> [String; 4] {
-    let 槽 = inputs::展开(根, &语境.声韵, &语境.飞键, 语境.方案);
+    let 槽 = inputs::展开(根, &语境.声韵, 语境.方案);
     let mut 码: Vec<String> = Vec::with_capacity(4);
     for s in 槽 {
         let 值 = match s.rsplit_once('.') {
@@ -156,8 +142,6 @@ fn 取码(根: &[&str], 语境: &语境, 聚类: &HashMap<String, usize>) -> [St
                 Some(组) => format!("#{组}"),
                 None => format!("{根名}.A"),
             },
-            // 飞键位独占，即便这个根也在聚类里也不合并
-            Some((根名, "U")) => format!("{根名}.U"),
             Some((根名, "S")) => 声母(语境, 根名),
             Some((根名, "Y")) => 韵母(语境, 根名),
             _ => s.clone(),
@@ -271,76 +255,42 @@ fn 统计(语境: &语境, 聚类: &HashMap<String, usize>) -> 统计 {
 }
 
 // ───────────────────────────────── 聚类表 ─────────────────────────────────
+//
+// 数据本身（哪几个根一簇、簇的顺序）统一由 `roots_cluster` 解析，
+// 本模块只负责「把簇映射成组号」和报表。原先这里另有一份文本解析，与
+// `prepare` 第 8 步、`zigen` 各写一遍，格式细节早已漂移；改 RON 后合成一份。
 
-/// 聚类表的一行
-struct 聚类行 {
-    /// 最近一个 `# X` 注释里的 X（键位分组标题），没有就空
-    标签: String,
-    根: Vec<String>,
-}
-
-fn 读聚类表(路径: &Path) -> Result<Vec<聚类行>, String> {
-    if !路径.is_file() {
-        return Err(format!("聚类表 {} 不存在", 路径.display()));
+/// 解析 `--cluster`：留空 → 内嵌表；文件路径 → 读 RON；否则按
+/// `"根1 根2 ; 根3 根4"` 内联解析
+fn 解析聚类(源: &str) -> Result<Vec<簇>, String> {
+    let 源 = 源.trim();
+    if 源.is_empty() {
+        return roots_cluster::内嵌();
     }
-    let mut 行表 = Vec::new();
-    let mut 标签 = String::new();
-    for 行 in text::读行(路径)? {
-        let t = 行.trim();
-        if t.is_empty() {
-            continue;
-        }
-        if t.starts_with('#') {
-            // `# Q` 这种单字符标题记下来当分组标签，其余注释忽略
-            let 标题 = t.trim_start_matches('#').trim();
-            if !标题.is_empty() && !标题.contains(' ') && !标题.contains('\t') {
-                标签 = 标题.to_string();
-            }
-            continue;
-        }
-        // 格式与 字根约束.txt 类似：根 … <TAB> 按键序列，TAB 之后丢掉
-        let 根串 = t.split('\t').next().unwrap_or("");
-        let 根: Vec<String> = 根串.split_whitespace().map(str::to_string).collect();
-        if 根.is_empty() {
-            continue;
-        }
-        行表.push(聚类行 {
-            标签: 标签.clone(),
-            根,
-        });
-    }
-    if 行表.is_empty() {
-        return Err(format!("聚类表 {} 里没有有效的聚类行", 路径.display()));
-    }
-    Ok(行表)
-}
-
-/// `--cluster` 参数既可以是文件，也可以是 `"根1 根2 ; 根3 根4"`
-fn 解析聚类(源: &str) -> Result<Vec<聚类行>, String> {
-    let 路径 = Path::new(源);
+    let 路径 = std::path::Path::new(源);
     if 路径.is_file() {
-        return 读聚类表(路径);
+        return roots_cluster::加载(Some(路径));
     }
     let mut 行表 = Vec::new();
     for 段 in 源.split([';', '；', ',', '，']) {
         let 根: Vec<String> = 段.split_whitespace().map(str::to_string).collect();
         if !根.is_empty() {
-            行表.push(聚类行 {
-                标签: String::new(),
-                根,
+            行表.push(簇 {
+                roots: 根,
+                keys: String::new(),
             });
         }
     }
     if 行表.is_empty() {
-        return Err("--cluster 既不是文件路径，也没有解析出任何字根".to_string());
+        return Err("--cluster 既不是 RON 文件路径，也没有解析出任何字根".to_string());
     }
     Ok(行表)
 }
 
-fn 建映射(行表: &[聚类行]) -> HashMap<String, usize> {
+fn 建映射(行表: &[簇]) -> HashMap<String, usize> {
     let mut 映射 = HashMap::new();
-    for (组号, 行) in 行表.iter().enumerate() {
-        for 根 in &行.根 {
+    for (组号, 簇) in 行表.iter().enumerate() {
+        for 根 in &簇.roots {
             映射.insert(根.clone(), 组号);
         }
     }
@@ -354,7 +304,7 @@ fn 单次分析(语境: &语境, 源: &str, 最多: usize) -> Result<(), String>
     let 映射 = 建映射(&行表);
     let 全部: Vec<&str> = 行表
         .iter()
-        .flat_map(|r| r.根.iter().map(String::as_str))
+        .flat_map(|r| r.roots.iter().map(String::as_str))
         .collect();
     println!("聚类字根： {} {}", 全部.len(), 全部.join(" "));
     println!();
@@ -383,8 +333,8 @@ fn 打印统计(语境: &语境, 统: &统计, 最多: usize) {
     }
 }
 
-fn 逐行分析(语境: &语境, 路径: &Path) -> Result<(), String> {
-    let 行表 = 读聚类表(路径)?;
+fn 逐行分析(语境: &语境, 源: &str) -> Result<(), String> {
+    let 行表 = 解析聚类(源)?;
     let 空: HashMap<String, usize> = HashMap::new();
     let 基线 = 统计(语境, &空);
 
@@ -399,7 +349,6 @@ fn 逐行分析(语境: &语境, 路径: &Path) -> Result<(), String> {
     println!();
 
     struct 增量 {
-        标签: String,
         根: Vec<String>,
         动重: [f64; 5],
         /// 全码档的静重增量（重码字数）
@@ -409,14 +358,13 @@ fn 逐行分析(语境: &语境, 路径: &Path) -> Result<(), String> {
     let mut 全部 = Vec::with_capacity(行表.len());
     for 行 in &行表 {
         let mut 映射 = HashMap::new();
-        for 根 in &行.根 {
+        for 根 in &行.roots {
             映射.insert(根.clone(), 0usize);
         }
         let 统 = 统计(语境, &映射);
         let 动重: [f64; 5] = std::array::from_fn(|i| 统.动重[i] - 基线.动重[i]);
         全部.push(增量 {
-            标签: 行.标签.clone(),
-            根: 行.根.clone(),
+            根: 行.roots.clone(),
             动重,
             静重: 统.静重[4] as isize - 基线.静重[4] as isize,
         });
@@ -431,8 +379,8 @@ fn 逐行分析(语境: &语境, 路径: &Path) -> Result<(), String> {
     });
 
     println!(
-        "{:<4} {:<34} {:>10} {:>10} {:>10} {:>10} {:>10} {:>8}",
-        "键", "聚类根", "Δ动重0", "Δ动重1", "Δ动重2", "Δ动重3", "Δ动重全码", "Δ静重"
+        "{:<34} {:>10} {:>10} {:>10} {:>10} {:>10} {:>8}",
+        "聚类根", "Δ动重0", "Δ动重1", "Δ动重2", "Δ动重3", "Δ动重全码", "Δ静重"
     );
     for 项 in &全部 {
         let 根串 = 项.根.join(" ");
@@ -443,8 +391,8 @@ fn 逐行分析(语境: &语境, 路径: &Path) -> Result<(), String> {
             根串
         };
         println!(
-            "{:<4} {:<34} {:>+10.4} {:>+10.4} {:>+10.4} {:>+10.4} {:>+10.4} {:>+8}",
-            项.标签, 显, 项.动重[0], 项.动重[1], 项.动重[2], 项.动重[3], 项.动重[4], 项.静重
+            "{:<34} {:>+10.4} {:>+10.4} {:>+10.4} {:>+10.4} {:>+10.4} {:>+8}",
+            显, 项.动重[0], 项.动重[1], 项.动重[2], 项.动重[3], 项.动重[4], 项.静重
         );
     }
     println!();
@@ -473,7 +421,6 @@ mod tests {
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
-            飞键: HashSet::new(),
             字表: Vec::new(),
             总频: 0.0,
         }
@@ -528,8 +475,16 @@ mod tests {
     fn 字符串形式的聚类参数按分隔符切分() {
         let 行表 = 解析聚类("卯 {卯左} ; 片 爿").unwrap();
         assert_eq!(行表.len(), 2);
-        assert_eq!(行表[0].根, ["卯", "{卯左}"]);
-        assert_eq!(行表[1].根, ["片", "爿"]);
+        assert_eq!(行表[0].roots, ["卯", "{卯左}"]);
+        assert_eq!(行表[1].roots, ["片", "爿"]);
+    }
+
+    /// 留空 → 内嵌聚类表；顺序必须稳定（`prepare` 按此顺序写约束文件）
+    #[test]
+    fn 空参数回落内嵌聚类表() {
+        let 行表 = 解析聚类("  ").unwrap();
+        assert_eq!(行表.len(), 92);
+        assert_eq!(行表[0].roots, ["又", "ス", "マ", "癶"]);
     }
 
     #[test]

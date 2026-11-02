@@ -33,7 +33,7 @@ cargo run --release -- pipeline --keymap 字根键位表.txt --chaifen moling/�
 cargo run --release -- merge --keymap 字根键位表.txt --chaifen moling/拆分全表.txt --rules "还=人"
 cargo run --release -- diagnose --dir runs
 
-# 聚类重码分析：哪一行聚类压成大码代价最高（默认读 roots-cluster.txt）
+# 聚类重码分析：哪一簇压成大码代价最高（聚类表内嵌于 assets/roots_cluster.ron）
 cargo run --release -- clusters --per-row --schema moling
 
 # 权重空间探索：汇总一批 optimize 日志 → 表 + 平行坐标网页
