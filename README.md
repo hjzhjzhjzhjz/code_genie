@@ -30,30 +30,30 @@ cargo build --release
 | `optimize`（默认） | 跑模拟退火优化 | `code_genie -c config.toml optimize -d out --rounds 3` |
 | `resume` | 从 checkpoint 断点续算 | `code_genie resume -d out` |
 | `bench` | 压测 eval / 算子 / SA 吞吐 | `code_genie bench --iters 20000 --steps 200000` |
-| `encode` | 按 keymap 给拆分表编码 | `code_genie encode -k 字根键位表.txt -d input-division.txt` |
+| `encode` | 按 keymap 给拆分表编码 | `code_genie encode -k 字根键位表.txt -d 单字拆分.txt` |
 | `evaluate` | 评估现有方案指标 | `code_genie evaluate -k 字根键位表.txt` |
-| `export` | 导出测评码表（`字\t码`，简码在前） | `code_genie export -k 字根键位表.txt -c chaifen-all.txt -o 全码表.txt` |
+| `export` | 导出测评码表（`字\t码`，简码在前） | `code_genie export -k 字根键位表.txt -c 拆分全表.txt -o 全码表.txt` |
 | `chart` | 生成字根键位图（HTML） | `code_genie chart --keymap 字根键位表.txt` |
 | `assess` | 宇浩测评对比 + 方案档案 | `code_genie assess --dir runs --yuhao-dir yuhao-assess` |
-| `rime-convert` | 以星月方案包为底包只换码 | `code_genie rime-convert --base <星月底包> --output <算码目录> --chaifen chaifen-all.txt` |
+| `rime-convert` | 以星月方案包为底包只换码 | `code_genie rime-convert --base <星月底包> --output <算码目录> --chaifen 拆分全表.txt` |
 | `sentence` | 整句准确率（逐单元 + 连续码流）；词典吃 dict.yaml 或 TSV | `code_genie sentence --full-dict 完整码表.txt --corpus 语料.txt` |
-| `pipeline` | 逐字取码推导表（Markdown） | `code_genie pipeline --keymap 字根键位表.txt --chaifen chaifen-all.txt --top 5` |
-| `merge` | 字根归并对比 | `code_genie merge --keymap 字根键位表.txt --chaifen chaifen-all.txt --rules "还=人"` |
+| `pipeline` | 逐字取码推导表（Markdown） | `code_genie pipeline --keymap 字根键位表.txt --chaifen 拆分全表.txt --top 5` |
+| `merge` | 字根归并对比 | `code_genie merge --keymap 字根键位表.txt --chaifen 拆分全表.txt --rules "还=人"` |
 | `diagnose` | 批量诊断码表目录 | `code_genie diagnose --dir runs` |
 
 ## 输入文件
 
 | 文件 | 说明 | 格式 |
 |------|------|------|
-| `input-fixed.txt` | 固定 / 受限字根定义 | `字根名 [tab] 键位` |
-| `input-roots.txt` | 动态字根组定义 | `字根名1 字根名2 ...`（同组同行） |
-| `input-division.txt` | 汉字拆分表（优化用，通常只含常用字） | `汉字 [tab] 字根1 字根2 ... [tab] 频率` |
-| `chaifen-all.txt` | 全量拆分表（出码表用，约 12 万字） | 同上 |
+| `字根约束.txt` | 固定 / 受限字根定义 | `字根名 [tab] 键位` |
+| `动态字根.txt` | 动态字根组定义 | `字根名1 字根名2 ...`（同组同行） |
+| `单字拆分.txt` | 汉字拆分表（优化用，通常只含常用字） | `汉字 [tab] 字根1 字根2 ... [tab] 频率` |
+| `拆分全表.txt` | 全量拆分表（出码表用，约 12 万字） | 同上 |
 | `pair_equivalence.txt` | 键对当量表 | `键对 [tab] 当量值` |
 | `key_distribution.txt` | 键位分布目标 | `键位 [tab] 目标% [tab] 低惩罚 [tab] 高惩罚` |
 
-> 注意两份拆分表的写法差异：`input-division.txt` 里字根**已展开到码位**（`到 → 至.0 刂.0 刂.1`），
-> `chaifen-all.txt` 是**纯根名**（`到 → 至 刂`）。码表一律用后者按编码规则现算。
+> 注意两份拆分表的写法差异：`单字拆分.txt` 里字根**已展开到码位**（`到 → 至.0 刂.0 刂.1`），
+> `拆分全表.txt` 是**纯根名**（`到 → 至 刂`）。码表一律用后者按编码规则现算。
 
 ## 配置文件
 
@@ -61,10 +61,10 @@ cargo build --release
 
 ```toml
 [files]
-fixed = "input-fixed.txt"
-dynamic = "input-roots.txt"
-splits = "input-division.txt"          # 优化用（常用字，快）
-full_splits = "moling/chaifen-all.txt" # 全量拆分表（手动指定；留空 = 不生成完整码表）
+fixed = "字根约束.txt"
+dynamic = "动态字根.txt"
+splits = "单字拆分.txt"                # 优化用（常用字，快）
+full_splits = "moling/拆分全表.txt"    # 全量拆分表（手动指定；留空 = 不生成完整码表）
                                        # ⚠️ 必须与 splits 同一套根名体系，否则全量字会因缺字根被跳过
 
 [annealing]

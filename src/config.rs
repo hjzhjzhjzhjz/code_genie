@@ -739,9 +739,10 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             files: FilesConfig {
-                fixed: "input-fixed.txt".to_string(),
-                dynamic: "input-roots.txt".to_string(),
-                splits: "input-division.txt".to_string(),
+                // 与 src/prepare/names.rs 保持同一套产物名
+                fixed: crate::prepare::names::字根约束.to_string(),
+                dynamic: crate::prepare::names::动态字根.to_string(),
+                splits: crate::prepare::names::单字拆分.to_string(),
                 pair_equiv: "pair_equivalence.txt".to_string(),
                 key_dist: "key_distribution.txt".to_string(),
                 full_splits: String::new(),
@@ -928,9 +929,9 @@ mod tests {
 simple_levels = []
 
 [files]
-fixed = "input-fixed.txt"
-dynamic = "input-roots.txt"
-splits = "input-division.txt"
+fixed = "字根约束.txt"
+dynamic = "动态字根.txt"
+splits = "单字拆分.txt"
 pair_equiv = "pair_equivalence.txt"
 key_dist = "key_distribution.txt"
 

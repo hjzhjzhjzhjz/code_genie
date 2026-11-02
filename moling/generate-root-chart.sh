@@ -63,7 +63,7 @@ perl -CSDA -F, -lanE '
 
 echo "Writing $1/zigen-$SCHEMA.csv and $1/zigen-trainer-$SCHEMA.json ..."
 export ROOTS_TXT="$SOURCE/roots-$SCHEMA.txt"
-[ -f "$ROOTS_TXT" ] || ROOTS_TXT="$SOURCE/roots.txt"
+[ -f "$ROOTS_TXT" ] || ROOTS_TXT="$SOURCE/字根声韵.txt"
 export ROOTS_CLUSTER_TXT="$SOURCE/roots-cluster-$SCHEMA.txt"
 [ -f "$ROOTS_CLUSTER_TXT" ] || ROOTS_CLUSTER_TXT="$SOURCE/roots-cluster.txt"
 perl -CSDA -Mautodie -Mutf8 -lanE 'use List::Util qw/uniqstr/; use JSON::PP;
@@ -168,12 +168,12 @@ perl -CSDA -Mautodie -Mutf8 -lanE 'use List::Util qw/uniqstr/; use JSON::PP;
 }
 
 echo "Writing $1/chaifen.tsv ..."
-export CHAIFEN_TXT="$SOURCE/chaifen.txt"
-export CHAIFEN_ALL_TXT="$SOURCE/chaifen-all.txt"
+export CHAIFEN_TXT="$SOURCE/拆分表.txt"
+export CHAIFEN_ALL_TXT="$SOURCE/拆分全表.txt"
 [ -f "$CHAIFEN_ALL_TXT" ] || {
-    # 老的 ./optimize.sh 没有备份 ./chaifen-all.txt
-    echo "    !!! use './chaifen-all.txt' for '$1', may be inconsistent!" >&2;
-    CHAIFEN_ALL_TXT="chaifen-all.txt"
+    # 老的 ./optimize.sh 没有备份 ./拆分全表.txt
+    echo "    !!! use './拆分全表.txt' for '$1', may be inconsistent!" >&2;
+    CHAIFEN_ALL_TXT="拆分全表.txt"
 }
 perl -CSDA -F'\t' -lanE '$F[1]=~s/\s+//g; print "$F[0]\t$F[1]"' "$CHAIFEN_ALL_TXT" > "$1/chaifen.tsv"
 
@@ -394,12 +394,12 @@ curl -L -z "Yuniversus.woff" -o "Yuniversus.woff" 'https://shurufa.app/fonts/Yun
 
 VER=$(date +%Y.%m.%d)
 echo "Writing $1/$SCHEMA-$VER.html ..."
-export FULL_FREQ_TXT="$SOURCE/full-freq-$SCHEMA.txt"
-[ -f "$FULL_FREQ_TXT" ] || FULL_FREQ_TXT="$SOURCE/full-freq.txt"
+export FULL_FREQ_TXT="$SOURCE/全字频表-$SCHEMA.txt"
+[ -f "$FULL_FREQ_TXT" ] || FULL_FREQ_TXT="$SOURCE/全字频表.txt"
 [ -f "$FULL_FREQ_TXT" ] || {
-    FULL_FREQ_TXT="./full-freq-$SCHEMA.txt"
-    [ -f "$FULL_FREQ_TXT" ] || FULL_FREQ_TXT="./full-freq.txt"
-    # 老的 ./optimize.sh 没有备份 ./full-freq*.txt
+    FULL_FREQ_TXT="./全字频表-$SCHEMA.txt"
+    [ -f "$FULL_FREQ_TXT" ] || FULL_FREQ_TXT="./全字频表.txt"
+    # 老的 ./optimize.sh 没有备份 ./全字频表*.txt
     echo "    !!! use '$FULL_FREQ_TXT' for '$1', may be inconsistent!" >&2;
 }
 "$TYPER_ROOT/scripts/generate-roots-chart.pl" -e "$1/$SCHEMA.js" -t "${SCHEMA_NAME}輸入法字根表 $VER" -c "$FULL_FREQ_TXT" \

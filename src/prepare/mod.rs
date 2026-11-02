@@ -14,10 +14,11 @@
 //    同样的外部依赖），失败则给出「手动放到 --dir 下」的明确提示。
 //
 // `--from-step/--to-step` 用于分段调试（例如本机没有那份 JSON 时从第 1 步开始，
-// 复用已有的 `full-freq.txt`）；`--baseline-dir` 用于把产物与一份基线逐字节对照。
+// 复用已有的 `全字频表.txt`）；`--baseline-dir` 用于把产物与一份基线逐字节对照。
 // =========================================================================
 
 mod inputs;
+pub mod names;
 mod roots;
 mod schema;
 mod tables;
@@ -45,7 +46,8 @@ impl 上下文 {
     fn 新建(目录: &str, 方案: &'static 方案) -> Self {
         let 目录 = PathBuf::from(目录);
         // 对应 init.sh 末尾的 `for s in full-freq chars roots roots-cluster` 循环：
-        // 方案自己放了 `全字频表-<schema>.txt` 这类文件就用它，否则用默认名。
+        // 方案自己放了 `全字频表-<schema>.txt` 这类文件就用它，否则用默认名
+        // （`roots-cluster` 是人工维护的输入，不随产物一起改名）。
         let 解析 = |基名: &str, 默认: &str| {
             let 专用 = 目录.join(format!("{基名}-{}.txt", 方案.名));
             if 专用.exists() {
@@ -61,10 +63,10 @@ impl 上下文 {
             字根表: 方案
                 .字根表
                 .map(str::to_string)
-                .unwrap_or_else(|| 解析("roots", "roots.txt")),
+                .unwrap_or_else(|| 解析(names::字根声韵基名, names::字根声韵)),
             聚类表: 解析("roots-cluster", "roots-cluster.txt"),
-            全字频表: 解析("full-freq", "full-freq.txt"),
-            算码字集: 解析("chars", "chars.txt"),
+            全字频表: 解析(names::全字频表基名, names::全字频表),
+            算码字集: 解析(names::算码字集基名, names::算码字集),
             方案,
             目录,
         }
@@ -106,19 +108,19 @@ pub struct 参数 {
 
 /// 一次产出的文件清单，用于 `--baseline-dir` 对照
 const 产物清单: [&str; 13] = [
-    "full-freq.txt",
-    "chars.txt",
-    "freq.txt",
-    "chaifen.txt",
-    "chaifen-all.txt",
-    "chaifen_tw-all.txt",
-    "roots-freq.txt",
-    "roots-pinyin.txt",
-    "roots.txt",
-    "roots-fly-candidates.txt",
-    "input-fixed.txt",
-    "input-roots.txt",
-    "input-division.txt",
+    names::全字频表,
+    names::算码字集,
+    names::算码字频,
+    names::拆分表,
+    names::拆分全表,
+    names::拆分全表台,
+    names::字根频率,
+    names::字根读音,
+    names::字根声韵,
+    names::飞键候选,
+    names::字根约束,
+    names::动态字根,
+    names::单字拆分,
 ];
 
 /// 入口

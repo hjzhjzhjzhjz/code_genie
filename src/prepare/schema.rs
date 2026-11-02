@@ -129,7 +129,7 @@ pub const 灵明: 方案 = 方案 {
     土用杜音: false,
     口用vou音: false,
     笔画6并入5: true,
-    字根表: Some("roots-yuling.txt"),
+    字根表: Some("字根声韵-yuling.txt"),
 };
 
 /// 星陈（@朱宇浩）：只取大码与小码，不出补码。bash 版没有这套，

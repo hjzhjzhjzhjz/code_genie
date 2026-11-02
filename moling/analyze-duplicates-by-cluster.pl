@@ -20,7 +20,7 @@ use autodie;
 # 目录下由 ./generate-root-chart.sh 脚本生成的 roots.tsv 文件
 # 并去掉其中的大码。
 my $roots_file = schema_aware_file("roots", "txt");
-my $chaifen_file = "chaifen.txt";
+my $chaifen_file = "拆分表.txt";
 my $cluster_file = schema_aware_file("roots-cluster", "txt");
 my $max_dups = 9;
 

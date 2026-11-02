@@ -148,10 +148,24 @@ export USE_PINYIN_DU_FOR_TU USE_PINYIN_VOU_FOR_KOU USE_STROKE_5_FOR_6
 export ENABLE_SPACE_SHORTCODE PREFER_SPACE_SHORTCODE SHORTCODE_PROTECT_TOP_N DUP_WEIGHT_FOR_SHORTCODE
 
 ## 方案可以自行提供全字集字频文件、算码字集文件、字根小码补码表、字根聚类表
-for s in full-freq chars roots roots-cluster; do
-    v=$(echo $s | tr a-z A-Z)   # 大写，低版本 Bash 不支持 ${s^^}
-    v=${v//-/_}                 # - 换成 _
-    [ -f "$s-$SCHEMA.txt" ] && eval "${v}_TXT=$s-$SCHEMA.txt" || eval ": \${${v}_TXT:=$s.txt}"
-    export "${v}_TXT"
+## 产物名前缀与 src/prepare/names.rs 一致；roots-cluster 是人工维护的输入，名字保持原样。
+for s in 全字频表 算码字集 字根声韵; do
+    case $s in
+        全字频表) v=FULL_FREQ_TXT ;;
+        算码字集) v=CHARS_TXT ;;
+        字根声韵) v=ROOTS_TXT ;;
+    esac
+    if [ -f "$s-$SCHEMA.txt" ]; then
+        eval "${v}=$s-$SCHEMA.txt"
+    else
+        eval ": \${${v}:=$s.txt}"
+    fi
+    export "${v}"
 done
+if [ -f "roots-cluster-$SCHEMA.txt" ]; then
+    ROOTS_CLUSTER_TXT="roots-cluster-$SCHEMA.txt"
+else
+    : "${ROOTS_CLUSTER_TXT:=roots-cluster.txt}"
+fi
+export ROOTS_CLUSTER_TXT
 

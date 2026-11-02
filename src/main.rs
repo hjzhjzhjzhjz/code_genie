@@ -161,7 +161,7 @@ enum Commands {
         #[arg(short = 'k', long)]
         keymap: String,
 
-        /// 纯拆分表（chaifen.txt：字<TAB>根 根 …<TAB>频次）
+        /// 纯拆分表（拆分表.txt：字<TAB>根 根 …<TAB>频次）
         #[arg(short = 'c', long)]
         chaifen: String,
 
@@ -247,8 +247,8 @@ enum Commands {
         #[arg(long)]
         keymap: Option<String>,
 
-        /// 拆分表（chaifen-all.txt：字<TAB>根 根 …<TAB>频次）
-        #[arg(long, default_value = "chaifen-all.txt")]
+        /// 拆分表（拆分全表.txt：字<TAB>根 根 …<TAB>频次）
+        #[arg(long, default_value = crate::prepare::names::拆分全表)]
         chaifen: String,
 
         /// 输出目录
@@ -319,7 +319,7 @@ enum Commands {
         #[arg(long)]
         simple: Option<String>,
 
-        /// 同键组表 input-fixed.txt（可选），用来标出归并关系
+        /// 同键组表 字根约束.txt（可选），用来标出归并关系
         #[arg(long)]
         fixed: Option<String>,
 
@@ -2024,7 +2024,7 @@ fn run_optimize(
 /// 想生成 `完整码表.txt` 就在配置里显式写：
 /// ```toml
 /// [files]
-/// full_splits = "moling/chaifen-all.txt"
+/// full_splits = "moling/拆分全表.txt"
 /// ```
 /// 留空表示不生成。
 fn 全量拆分路径(cfg: &Config) -> Option<String> {

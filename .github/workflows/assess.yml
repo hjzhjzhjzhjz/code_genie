@@ -102,6 +102,12 @@ jobs:
             exit 1
           fi
 
+      # 拆分全表.txt / 字根约束.txt 等是 `code_genie prepare` 的产物，不入库，用前必须先重建。
+      - name: 生成码灵输入文件（code_genie prepare）
+        run: |
+          set -euo pipefail
+          ./target/release/code_genie prepare --dir moling
+
       # ---- 手动模式：只测给定的一份码表 ----
       - name: 导出码表
         if: github.event_name == 'workflow_dispatch' && inputs.run_id == ''
@@ -113,7 +119,7 @@ jobs:
           ARG=""
           if [ -n "$SIMPLE" ]; then ARG="--simple $SIMPLE"; fi
           ./target/release/code_genie export \
-            --keymap "$KEYMAP" --chaifen moling/chaifen-all.txt $ARG \
+            --keymap "$KEYMAP" --chaifen moling/拆分全表.txt $ARG \
             --output out-assess/全码表.txt
           wc -l < out-assess/全码表.txt
 
@@ -166,10 +172,10 @@ jobs:
         run: |
           set -e
           K=runs/s4-export/output-keymap.txt
-          C=moling/chaifen-all.txt
+          C=moling/拆分全表.txt
           S=runs/s4-export/output-simple-codes.txt
           ./target/release/code_genie pipeline --keymap "$K" --chaifen "$C" --simple "$S" \
-            --fixed moling/input-fixed.txt --chars "$CHARS" --top 5 --output 流水线.md
+            --fixed moling/字根约束.txt --chars "$CHARS" --top 5 --output 流水线.md
           args=()
           while IFS= read -r line; do
             [ -z "$line" ] && continue

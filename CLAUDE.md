@@ -21,16 +21,16 @@ cargo run --release -- -c config.toml optimize -d out --rounds 3
 # 断点续算 / 压测 / 编码 / 评估
 cargo run --release -- resume -d out
 cargo run --release -- bench --iters 20000 --steps 200000
-cargo run --release -- encode -k 字根键位表.txt -d input-division.txt -o 单字编码表.txt
+cargo run --release -- encode -k 字根键位表.txt -d 单字拆分.txt -o 单字编码表.txt
 cargo run --release -- evaluate -k 字根键位表.txt
 
 # 出码表 / Rime 方案 / 测评 / 诊断
-cargo run --release -- export -k 字根键位表.txt -c moling/chaifen-all.txt -o 全码表.txt
-cargo run --release -- rime-convert --base <星月底包> --output <算码目录> --chaifen moling/chaifen-all.txt
+cargo run --release -- export -k 字根键位表.txt -c moling/拆分全表.txt -o 全码表.txt
+cargo run --release -- rime-convert --base <星月底包> --output <算码目录> --chaifen moling/拆分全表.txt
 cargo run --release -- assess --dir runs --yuhao-dir yuhao-assess
 cargo run --release -- sentence --full-dict pkg.full.dict.yaml --corpus 语料.txt
-cargo run --release -- pipeline --keymap 字根键位表.txt --chaifen moling/chaifen-all.txt --top 5
-cargo run --release -- merge --keymap 字根键位表.txt --chaifen moling/chaifen-all.txt --rules "还=人"
+cargo run --release -- pipeline --keymap 字根键位表.txt --chaifen moling/拆分全表.txt --top 5
+cargo run --release -- merge --keymap 字根键位表.txt --chaifen moling/拆分全表.txt --rules "还=人"
 cargo run --release -- diagnose --dir runs
 cargo run --release -- chart --keymap 字根键位表.txt
 
@@ -95,9 +95,9 @@ cargo test --release
 
 ### 字根分类
 
-1. **固定字根**: 单键映射，从 `input-fixed.txt` 加载，不参与优化
-2. **有约束字根**: 多键选择（也在 `input-fixed.txt` 中定义），作为 `RootGroup` 参与优化但键位有约束
-3. **动态字根**: 需要优化分配，从 `input-roots.txt` 加载，同行字根为一组
+1. **固定字根**: 单键映射，从 `字根约束.txt` 加载，不参与优化
+2. **有约束字根**: 多键选择（也在 `字根约束.txt` 中定义），作为 `RootGroup` 参与优化但键位有约束
+3. **动态字根**: 需要优化分配，从 `动态字根.txt` 加载，同行字根为一组
 
 ### 简码系统
 
@@ -133,10 +133,10 @@ cargo test --release
 
 | 文件 | 格式 |
 |------|------|
-| `input-fixed.txt` | `字根名 [tab] 键位`（单键=固定，多键=约束） |
-| `input-roots.txt` | `字根名1 字根名2 ...`（同行为一组，空格分隔） |
-| `input-division.txt` | `汉字 [tab] 字根1 字根2 ... [tab] 频率`（字根**已展开到码位**：`至.0 刂.0 刂.1`） |
-| `chaifen-all.txt` | 同上格式，但字根是**纯根名**（`至 刂`），全量约 12 万字，供出码表用 |
+| `字根约束.txt` | `字根名 [tab] 键位`（单键=固定，多键=约束） |
+| `动态字根.txt` | `字根名1 字根名2 ...`（同行为一组，空格分隔） |
+| `单字拆分.txt` | `汉字 [tab] 字根1 字根2 ... [tab] 频率`（字根**已展开到码位**：`至.0 刂.0 刂.1`） |
+| `拆分全表.txt` | 同上格式，但字根是**纯根名**（`至 刂`），全量约 12 万字，供出码表用 |
 | `pair_equivalence.txt` | `键对 [tab] 当量值` |
 | `key_distribution.txt` | `键位 [tab] 目标% [tab] 低惩罚 [tab] 高惩罚` |
 
@@ -148,10 +148,10 @@ cargo test --release
 
 ```toml
 [files]
-fixed = "input-fixed.txt"
-dynamic = "input-roots.txt"
-splits = "input-division.txt"          # 优化用（常用字，快）
-full_splits = "moling/chaifen-all.txt" # 全量拆分表（手动指定；留空 = 不生成完整码表）
+fixed = "字根约束.txt"
+dynamic = "动态字根.txt"
+splits = "单字拆分.txt"                # 优化用（常用字，快）
+full_splits = "moling/拆分全表.txt"    # 全量拆分表（手动指定；留空 = 不生成完整码表）
                                        # ⚠️ 必须与 splits 同一套根名体系，否则全量字会因缺字根被跳过
 pair_equiv = "pair_equivalence.txt"    # 字根对当量表
 key_dist = "key_distribution.txt"      # 用指分布目标

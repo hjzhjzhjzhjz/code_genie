@@ -16,7 +16,7 @@ on:
       chaifen:
         description: 纯拆分表（仓库内路径）
         required: true
-        default: moling/chaifen-all.txt
+        default: moling/拆分全表.txt
         type: string
       mapping:
         description: 字根映射表（仓库内路径，留空表示不用）
@@ -55,6 +55,12 @@ jobs:
         run: |
           set -o pipefail
           cargo build --release 2>&1 | tee build.log
+
+      # 拆分全表.txt / 字根约束.txt 等是 `code_genie prepare` 的产物，不入库，用前必须先重建。
+      - name: 生成码灵输入文件（code_genie prepare）
+        run: |
+          set -euo pipefail
+          ./target/release/code_genie prepare --dir moling
 
       - name: 导出码表
         env:

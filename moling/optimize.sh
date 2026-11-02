@@ -116,20 +116,23 @@ if [ -d "$BAK" ]; then
 else
     files="$CONFIG"
     [ -f "init-$SCHEMA.sh" ] && files+=" init-$SCHEMA.sh"
-    for f in chars full-freq roots roots-fly roots-cluster \
-        input-division input-fixed input-roots \
-        key_distribution pair_equivalence; do
+    # 产物（中文名，与 src/prepare/names.rs 一致）
+    for f in 算码字集 全字频表 字根声韵 单字拆分 字根约束 动态字根; do
+        [ -f "$f-$SCHEMA.txt" ] && files+=" $f-$SCHEMA.txt" || files+=" $f.txt"
+    done
+    # 人工维护的输入，名字保持原样
+    for f in roots-fly roots-cluster key_distribution pair_equivalence; do
         [ -f "$f-$SCHEMA.txt" ] && files+=" $f-$SCHEMA.txt" || files+=" $f.txt"
     done
 
     mkdir -p "$BAK"
     # backup configuration for later review
-    cp chaifen*.txt \
+    cp 拆分*.txt \
        charAbsoluteFrequency*.json \
-       freq.txt \
+       算码字频.txt \
        init.sh \
-       roots-freq.txt \
-       roots-pinyin.txt \
+       字根频率.txt \
+       字根读音.txt \
        $files \
        "$BAK/"
 fi

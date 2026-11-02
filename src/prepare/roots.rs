@@ -11,18 +11,19 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
 
+use crate::prepare::names;
 use crate::prepare::schema::方案;
 use crate::prepare::text::{self, 数值字段};
 use crate::prepare::上下文;
 
-/// 步骤 5：从万象拼音词典取字根读音，生成 `roots-pinyin.txt`
+/// 步骤 5：从万象拼音词典取字根读音，生成 `字根读音.txt`
 ///
 /// 排序 `LC_ALL=C sort -u -k1,1 -k3,3nr -k2,2`：字根升序、词频降序、读音升序，
 /// 并按这三个键去重（同一个字根保留排序最靠前的那条读音）。
 pub fn 步骤5_字根读音(上: &上下文) -> Result<(), String> {
-    println!("(5) 从万象拼音词典 chars.dict.yaml 生成字根读音 roots-pinyin.txt ...");
+    println!("(5) 从万象拼音词典 chars.dict.yaml 生成字根读音 字根读音.txt ...");
     let 根集: HashSet<String> = 上
-        .读("roots-freq.txt")?
+        .读(names::字根频率)?
         .into_iter()
         .filter_map(|行| 行.split_whitespace().next().map(str::to_string))
         .collect();
@@ -77,7 +78,7 @@ pub fn 步骤5_字根读音(上: &上下文) -> Result<(), String> {
     for (根, 拼音, 计数) in 行集 {
         出.push_str(&format!("{根}\t{拼音}\t{计数}\n"));
     }
-    上.写("roots-pinyin.txt", &出)
+    上.写(names::字根读音, &出)
 }
 
 /// `/^([^\d\s]+)/`：取前导的「非数字、非空白」串
@@ -100,10 +101,10 @@ fn 排除读音(根: &str, 拼音: &str) -> bool {
     (根 == "長" || 根 == "长") && 拼音.starts_with("zh")
 }
 
-/// 步骤 6：把读音折成「声母+韵腹」的声韵码表 `roots.txt`
+/// 步骤 6：把读音折成「声母+韵腹」的声韵码表 `字根声韵.txt`
 pub fn 步骤6_字根声韵码(上: &上下文) -> Result<(), String> {
-    println!("(6) 从 roots-pinyin.txt 修正并生成字根声码韵码表 roots.txt ...");
-    if 上.字根表 != "roots.txt" {
+    println!("(6) 从 字根读音.txt 修正并生成字根声码韵码表 字根声韵.txt ...");
+    if 上.字根表 != names::字根声韵 {
         println!("    !!! 使用方案自行提供的字根声码韵码表 {} ...", 上.字根表);
         let 路径 = 上.路径(&上.字根表);
         let 已有 = std::fs::metadata(&路径)
@@ -122,7 +123,7 @@ pub fn 步骤6_字根声韵码(上: &上下文) -> Result<(), String> {
 
     let mut 声韵码: HashMap<String, String> = HashMap::new();
     let mut 读音: HashMap<String, String> = HashMap::new();
-    for 行 in 上.读("roots-pinyin.txt")? {
+    for 行 in 上.读(names::字根读音)? {
         let 列: Vec<&str> = 行.split_whitespace().collect();
         if 列.len() < 2 || 声韵码.contains_key(列[0]) {
             continue;
@@ -141,13 +142,13 @@ pub fn 步骤6_字根声韵码(上: &上下文) -> Result<(), String> {
         声韵码.insert(列[0].to_string(), format!("{声母}{韵腹}"));
     }
 
-    // 常用字集（注意是 chars.txt，不是算码字集）
-    let mut 常用: HashSet<String> = 上.读("chars.txt")?.into_iter().collect();
+    // 常用字集（注意是 算码字集.txt，不是算码字集）
+    let mut 常用: HashSet<String> = 上.读(names::算码字集)?.into_iter().collect();
     常用.insert("戸".to_string()); // 特殊处理，保持 hu 音
 
     let mut 出 = String::with_capacity(声韵码.len() * 16);
     let mut 表: Vec<(String, String, String)> = Vec::new();
-    for 行 in 上.读("roots-freq.txt")? {
+    for 行 in 上.读(names::字根频率)? {
         let 列: Vec<&str> = 行.split_whitespace().collect();
         if 列.is_empty() {
             continue;
@@ -182,7 +183,7 @@ pub fn 步骤6_字根声韵码(上: &上下文) -> Result<(), String> {
     for (根, 码, 拼音) in &表 {
         出.push_str(&format!("{根}\t{码}\t{拼音}\n"));
     }
-    上.写("roots.txt", &出)
+    上.写(names::字根声韵, &出)
 }
 
 /// `s/[^aeuio]//`：删掉第一个非韵母字符
@@ -381,18 +382,18 @@ struct 冲突对 {
     合计: f64,
 }
 
-/// 步骤 7：分析首根冲突，给出飞键（AEUIO）字根候选 `roots-fly-candidates.txt`
+/// 步骤 7：分析首根冲突，给出飞键（AEUIO）字根候选 `飞键候选.txt`
 ///
 /// 只看多根字：按「首根之后的尾序列」分组，组内不同的首根互相冲突。
 /// 三个截断条件：冲突概率 `< 0.01` 直接跳过；已选满 50 个终止；
 /// 某字根已连着 4 个冲突根时不再选它（AEUIO 只有 5 个位置）。
 pub fn 步骤7_飞键候选(上: &上下文) -> Result<(), String> {
-    println!("(7) 分析首根冲突情况，为选择飞键字根提供参考，写入 roots-fly-candidates.txt ...");
+    println!("(7) 分析首根冲突情况，为选择飞键字根提供参考，写入 飞键候选.txt ...");
 
     let mut 尾表: BTreeMap<String, BTreeMap<String, i64>> = BTreeMap::new();
     let mut 根频: BTreeMap<String, [i64; 4]> = BTreeMap::new();
     let mut 总频: i64 = 0;
-    for 行 in 上.读("chaifen.txt")? {
+    for 行 in 上.读(names::拆分表)? {
         let 列: Vec<&str> = 行.split('\t').collect();
         if 列.len() < 3 {
             continue;
@@ -516,7 +517,7 @@ pub fn 步骤7_飞键候选(上: &上下文) -> Result<(), String> {
             p, 条.首值, q, 条.次值, 条.合计, a, b
         ));
     }
-    上.写("roots-fly-candidates.txt", &出)
+    上.写(names::飞键候选, &出)
 }
 
 fn 格式字根(根: &str, 值: f64, 根频: &BTreeMap<String, [i64; 4]>, 总: f64) -> String {

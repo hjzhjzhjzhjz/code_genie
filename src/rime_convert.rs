@@ -40,7 +40,7 @@ use std::path::{Path, PathBuf};
 
 /// 字根 → 键位串（如 `白` → `Fk`），取自算码输出的字根键位表
 pub(crate) type 字根表 = HashMap<String, String>;
-/// 字 → 拆分根序列，取自 `chaifen-all.txt`
+/// 字 → 拆分根序列，取自 `拆分全表.txt`
 type 拆分表 = HashMap<String, Vec<String>>;
 
 /// `重写拆分表` 的产出：(字→根们, 改写行数, 原样保留行数)
@@ -57,7 +57,7 @@ pub struct 参数 {
     pub 算码目录: String,
     /// 字根键位表；`None` 时按 `output-keymap.txt` → `roots.tsv` 顺序自动找
     pub 键位文件: Option<String>,
-    /// 拆分表（`chaifen-all.txt`：字\t根 根\t频次）
+    /// 拆分表（`拆分全表.txt`：字\t根 根\t频次）
     pub 拆分文件: String,
     /// 输出目录
     pub 输出目录: String,

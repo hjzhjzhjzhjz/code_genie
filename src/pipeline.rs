@@ -27,7 +27,7 @@ fn 码位名(位: 码位) -> &'static str {
     }
 }
 
-/// 读 input-fixed.txt：每一行是共享同一组键位的字根，也就是「同键组」
+/// 读 字根约束.txt：每一行是共享同一组键位的字根，也就是「同键组」
 fn 读同键组(path: &str) -> HashMap<String, Vec<String>> {
     let 文本 = std::fs::read_to_string(path).unwrap_or_default();
     let mut 表: HashMap<String, Vec<String>> = HashMap::new();

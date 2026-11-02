@@ -10,24 +10,25 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
 
+use crate::prepare::names;
 use crate::prepare::text::{self, 数值字段};
 use crate::prepare::上下文;
 
 const 简体字频网址: &str = "https://ceping.shurufa.app/data/charAbsoluteFrequencySC.json";
 const 繁体字频网址: &str = "https://ceping.shurufa.app/data/charAbsoluteFrequencyTC.json";
 
-/// 步骤 0：生成全字集字频表 `full-freq.txt`
+/// 步骤 0：生成全字集字频表 `全字频表.txt`
 ///
 /// 混合模式（`USE_MIXED_FREQ != 0`）取「简体字频」与「繁体字频 × 权重」的较大值，
 /// 这样简繁各自的高频顺序都保留；纯简体模式直接透传 `beiyu-char-freq.txt`。
 pub fn 步骤0_全字频表(上: &上下文) -> Result<(), String> {
-    if 上.全字频表 != "full-freq.txt" {
+    if 上.全字频表 != names::全字频表 {
         println!("(0) 使用方案自行提供的字频表 {} ...", 上.全字频表);
         return Ok(());
     }
 
     if 上.方案.混合字频权重 == 0.0 {
-        println!("(0) 生成简体字频表 full-freq.txt ...");
+        println!("(0) 生成简体字频表 全字频表.txt ...");
         let mut 输出 = String::new();
         for 行 in 上.读("beiyu-char-freq.txt")? {
             let 列: Vec<&str> = 行.split_whitespace().collect();
@@ -39,11 +40,11 @@ pub fn 步骤0_全字频表(上: &上下文) -> Result<(), String> {
             输出.push_str(列[1]);
             输出.push('\n');
         }
-        return 上.写("full-freq.txt", &输出);
+        return 上.写(names::全字频表, &输出);
     }
 
     println!(
-        "(0) 生成简繁混合字频表 full-freq.txt ，繁体字频权重={} ...",
+        "(0) 生成简繁混合字频表 全字频表.txt ，繁体字频权重={} ...",
         上.方案.混合字频权重
     );
     let 简体 = 读字频json(上, "charAbsoluteFrequencySC.json", 简体字频网址)?;
@@ -66,7 +67,7 @@ pub fn 步骤0_全字频表(上: &上下文) -> Result<(), String> {
         // Perl: print "$_\t", ceil($h->{$_})
         输出.push_str(&format!("{字}\t{}\n", 值.ceil()));
     }
-    上.写("full-freq.txt", &输出)
+    上.写(names::全字频表, &输出)
 }
 
 fn 读字频json(上: &上下文, 名: &str, 网址: &str) -> Result<HashMap<String, f64>, String> {
@@ -100,12 +101,12 @@ fn 下载(目录: &Path, 网址: &str, 名: &str) -> Result<(), String> {
     }
 }
 
-/// 步骤 1：从 `yuhao_charsets.lua` 提取简繁常用字符集 `chars.txt`
+/// 步骤 1：从 `yuhao_charsets.lua` 提取简繁常用字符集 `算码字集.txt`
 ///
 /// Perl 侧是 `(/\[\[/ .. eof) && /^\p{Han}$/`：从首个含 `[[` 的行起，只保留
 /// 「整行恰好一个汉字」的行，最后 `LC_ALL=C sort -u`。
 pub fn 步骤1_字符集(上: &上下文) -> Result<(), String> {
-    println!("(1) 从 yuhao_charsets.lua 生成简繁常用字符集 chars.txt ...");
+    println!("(1) 从 yuhao_charsets.lua 生成简繁常用字符集 算码字集.txt ...");
     let mut 字表: Vec<String> = Vec::new();
     let mut 已开始 = false;
     for 行 in 上.读("yuhao_charsets.lua")? {
@@ -125,19 +126,19 @@ pub fn 步骤1_字符集(上: &上下文) -> Result<(), String> {
     字表.sort();
     字表.dedup();
     let 输出: String = 字表.iter().map(|s| format!("{s}\n")).collect();
-    上.写("chars.txt", &输出)?;
-    if 上.算码字集 != "chars.txt" {
+    上.写(names::算码字集, &输出)?;
+    if 上.算码字集 != names::算码字集 {
         println!("    !!! 使用方案自行提供的算码字集 {} ...", 上.算码字集);
     }
     Ok(())
 }
 
-/// 步骤 2：按算码字符集过滤字频表，生成 `freq.txt`
+/// 步骤 2：按算码字符集过滤字频表，生成 `算码字频.txt`
 ///
 /// 未出现在字频表里的字符补 `\t0` 追加在末尾（码点序），并向 stderr 告警。
 pub fn 步骤2_算码字频(上: &上下文) -> Result<(), String> {
     println!(
-        "(2) 从字频表 {} 生成算码字符集的字频表 freq.txt ...",
+        "(2) 从字频表 {} 生成算码字符集的字频表 算码字频.txt ...",
         上.全字频表
     );
     let mut 剩余: HashSet<String> = 上
@@ -168,19 +169,19 @@ pub fn 步骤2_算码字频(上: &上下文) -> Result<(), String> {
     for 字 in 缺 {
         输出.push_str(&format!("{字}\t0\n"));
     }
-    上.写("freq.txt", &输出)
+    上.写(names::算码字频, &输出)
 }
 
-/// 步骤 3：从宇浩星陈拆分表生成 `chaifen.txt`（算码字集）与
-/// `chaifen-all.txt` / `chaifen_tw-all.txt`（全字集）
+/// 步骤 3：从宇浩星陈拆分表生成 `拆分表.txt`（算码字集）与
+/// `拆分全表.txt` / `拆分全表-台.txt`（全字集）
 pub fn 步骤3_拆分表(上: &上下文) -> Result<(), String> {
     println!(
-        "(3) 从宇浩星陈方案的大陆字形拆分表 yustar_chaifen.dict.yaml 生成算码字符集的拆分表 chaifen.txt 和 全字集拆分表 chaifen-all.txt ..."
+        "(3) 从宇浩星陈方案的大陆字形拆分表 yustar_chaifen.dict.yaml 生成算码字符集的拆分表 拆分表.txt 和 全字集拆分表 拆分全表.txt ..."
     );
 
-    // 算码版：只保留 freq.txt 里的字，且要求表里一个都不缺
+    // 算码版：只保留 算码字频.txt 里的字，且要求表里一个都不缺
     let mut 频: HashMap<String, String> = HashMap::new();
-    for 行 in 上.读("freq.txt")? {
+    for 行 in 上.读(names::算码字频)? {
         let 列: Vec<&str> = 行.split_whitespace().collect();
         if 列.len() >= 2 {
             频.insert(列[0].to_string(), 列[1].to_string());
@@ -196,7 +197,7 @@ pub fn 步骤3_拆分表(上: &上下文) -> Result<(), String> {
         let 名单: Vec<&str> = 缺.iter().map(|s| s.as_str()).collect();
         return Err(format!("No chaifen found for {}", 名单.join(" ")));
     }
-    写拆分表(&上.路径("chaifen.txt"), &mut 行表)?;
+    写拆分表(&上.路径(names::拆分表), &mut 行表)?;
 
     // 全字集版：字频缺失按 0，首列允许多字符（可能是变体选择符）
     let mut 全频: HashMap<String, String> = HashMap::new();
@@ -206,13 +207,16 @@ pub fn 步骤3_拆分表(上: &上下文) -> Result<(), String> {
             全频.insert(列[0].to_string(), 列[1].to_string());
         }
     }
-    for 名 in ["chaifen", "chaifen_tw"] {
-        let 文件 = format!("yustar_{名}.dict.yaml");
-        if !上.路径(&文件).exists() {
+    // 大陆字形 → 拆分全表.txt，台湾字形 → 拆分全表-台.txt
+    for (源文件, 产物) in [
+        ("yustar_chaifen.dict.yaml", names::拆分全表),
+        ("yustar_chaifen_tw.dict.yaml", names::拆分全表台),
+    ] {
+        if !上.路径(源文件).exists() {
             continue;
         }
-        let mut 表 = 解析拆分表(上, &文件, true, true, |字| 全频.get(字).cloned())?;
-        写拆分表(&上.路径(&format!("{名}-all.txt")), &mut 表)?;
+        let mut 表 = 解析拆分表(上, 源文件, true, true, |字| 全频.get(字).cloned())?;
+        写拆分表(&上.路径(产物), &mut 表)?;
     }
     Ok(())
 }
@@ -335,14 +339,14 @@ fn 写拆分表(路径: &Path, 行表: &mut [(String, String, String)]) -> Resul
     text::写文本(路径, &出)
 }
 
-/// 步骤 4：从 `chaifen-all.txt` 统计字根频率，生成 `roots-freq.txt`
+/// 步骤 4：从 `拆分全表.txt` 统计字根频率，生成 `字根频率.txt`
 ///
 /// 分母是「字频 × 根数」的累加；同一个字根在一次拆分里出现两次就算两次。
 pub fn 步骤4_字根频率(上: &上下文) -> Result<(), String> {
-    println!("(4) 从 chaifen-all.txt 生成字根频率表 roots-freq.txt ...");
+    println!("(4) 从 拆分全表.txt 生成字根频率表 字根频率.txt ...");
     let mut 根频: HashMap<String, i64> = HashMap::new();
     let mut 总: i64 = 0;
-    for 行 in 上.读("chaifen-all.txt")? {
+    for 行 in 上.读(names::拆分全表)? {
         let 列: Vec<&str> = 行.split('\t').collect();
         let 频: i64 = 列
             .get(2)
@@ -366,7 +370,7 @@ pub fn 步骤4_字根频率(上: &上下文) -> Result<(), String> {
         // Perl: printf "%s\t%.8f\n", $_, 100 * $h{$_} / $n
         出.push_str(&format!("{根}\t{:.8}\n", 100.0 * 频 / 总));
     }
-    上.写("roots-freq.txt", &出)
+    上.写(names::字根频率, &出)
 }
 
 #[cfg(test)]

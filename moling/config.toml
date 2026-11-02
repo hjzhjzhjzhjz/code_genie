@@ -6,9 +6,9 @@
 # 📂 文件路径配置
 # -------------------------------------------------------------------------
 [files]
-fixed = "input-fixed.txt"        # 固定字根文件
-dynamic = "input-roots.txt"      # 动态字根文件
-splits = "input-division.txt"    # 拆分表文件
+fixed = "字根约束.txt"           # 固定字根与各码位约束
+dynamic = "动态字根.txt"         # 动态字根组
+splits = "单字拆分.txt"          # 单字拆分表
 pair_equiv = "pair_equivalence.txt"  # 字根对当量文件
 key_dist = "key_distribution.txt"    # 用指分布文件
 

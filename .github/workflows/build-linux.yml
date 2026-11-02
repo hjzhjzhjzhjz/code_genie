@@ -75,7 +75,7 @@ jobs:
           print("config.toml 已生成（[files] 指向 moling/）")
           PY
 
-      # input-fixed/input-roots/input-division/roots 等是 `code_genie prepare` 的产物，不入库，
+      # 字根约束/动态字根/单字拆分/字根声韵 等是 `code_genie prepare` 的产物，不入库，
       # 打包与后续步骤需要它们，必须先重建。原先的 moling/prepare-inputs.sh（bash + 内嵌 Perl）
       # 已由 Rust 子命令取代，路径不再要求先 cd 到 moling/。
       - name: 生成码灵输入文件（code_genie prepare）
@@ -83,14 +83,14 @@ jobs:
           set -euo pipefail
           ./target/release/code_genie prepare --dir moling 2>&1 | tee prepare-inputs.log
           echo "--- 产物校验 ---"
-          # input-roots.txt 由第 (11) 步生成为**空文件**（字根全在 input-fixed 里），
+          # 动态字根.txt 由第 (11) 步生成为**空文件**（字根全在 字根约束.txt 里），
           # 只校验存在性；其余三个必须有内容。
-          for f in input-fixed.txt input-division.txt roots.txt; do
+          for f in 字根约束.txt 单字拆分.txt 字根声韵.txt; do
             [ -s "moling/$f" ] || { echo "❌ $f 缺失或为空"; exit 1; }
           done
-          [ -e "moling/input-roots.txt" ] || { echo "❌ input-roots.txt 缺失"; exit 1; }
-          sha256sum moling/input-fixed.txt moling/input-roots.txt \
-                    moling/input-division.txt moling/roots.txt \
+          [ -e "moling/动态字根.txt" ] || { echo "❌ 动态字根.txt 缺失"; exit 1; }
+          sha256sum moling/字根约束.txt moling/动态字根.txt \
+                    moling/单字拆分.txt moling/字根声韵.txt \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: 功能冒烟（全子命令 + 真实数据跑通导出）
@@ -104,7 +104,7 @@ jobs:
           echo "--- 导出冒烟（真实数据）---"
           $CG -c config.toml export \
             --keymap runs/s4-export/output-keymap.txt \
-            --chaifen moling/chaifen-all.txt \
+            --chaifen moling/拆分全表.txt \
             --output /tmp/全码表.txt
           wc -l < /tmp/全码表.txt
 
@@ -127,9 +127,9 @@ jobs:
           shutil.copy2("target/release/code_genie", pkg / "code_genie")
           os.chmod(pkg / "code_genie", 0o755)
 
-          required = ["moling/input-fixed.txt", "moling/input-roots.txt",
-                      "moling/input-division.txt", "moling/pair_equivalence.txt",
-                      "moling/key_distribution.txt", "moling/chaifen-all.txt",
+          required = ["moling/字根约束.txt", "moling/动态字根.txt",
+                      "moling/单字拆分.txt", "moling/pair_equivalence.txt",
+                      "moling/key_distribution.txt", "moling/拆分全表.txt",
                       "codegenie-s4.jsonc"]
           missing = [f for f in required if not pathlib.Path(f).exists()]
           if missing:
@@ -204,7 +204,7 @@ jobs:
               "                                          [annealing] threads / total_steps）",
               "  中途按 Ctrl-C 会写 checkpoint，之后",
               "  ./code_genie resume -d out              断点续算",
-              "  ./code_genie export -k out/字根键位表.txt -c moling/chaifen-all.txt -o 全码表.txt",
+              "  ./code_genie export -k out/字根键位表.txt -c moling/拆分全表.txt -o 全码表.txt",
               "                                          导出码表（有简码表加 -s）",
               "  ./code_genie chart -k out/字根键位表.txt -o 字根图.html",
               "                                          字根图",

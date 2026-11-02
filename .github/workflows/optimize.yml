@@ -183,8 +183,8 @@ jobs:
         with:
           workspaces: "."
 
-      # files_dir=moling 时输入取 moling/ 下的文件，而 input-fixed/input-roots/
-      # input-division/roots 等是 `code_genie prepare` 的产物、不入库，必须先重建，
+      # files_dir=moling 时输入取 moling/ 下的文件，而 字根约束/动态字根/
+      # 单字拆分/字根声韵 等是 `code_genie prepare` 的产物、不入库，必须先重建，
       # 否则下游 src/main.rs 的 must() 会 exit(1)。原先的 prepare-inputs.sh 已由
       # Rust 子命令取代；这里用 cargo run 是因为本步早于后面的 cargo build。
       - name: 生成码灵输入文件（code_genie prepare）
@@ -192,10 +192,10 @@ jobs:
         run: |
           set -euo pipefail
           cargo run --quiet --release -- prepare --dir moling 2>&1 | tee prepare-inputs.log
-          for f in input-fixed.txt input-division.txt roots.txt; do
+          for f in 字根约束.txt 单字拆分.txt 字根声韵.txt; do
             [ -s "moling/$f" ] || { echo "::error::$f 缺失或为空"; exit 1; }
           done
-          [ -e "moling/input-roots.txt" ] || { echo "::error::input-roots.txt 缺失"; exit 1; }
+          [ -e "moling/动态字根.txt" ] || { echo "::error::动态字根.txt 缺失"; exit 1; }
 
       - name: 生成 config.toml
         run: |
@@ -332,7 +332,7 @@ jobs:
           fi
           ./target/release/code_genie export \
             --keymap "$OUT_DIR/字根键位表.txt" \
-            --chaifen moling/chaifen-all.txt \
+            --chaifen moling/拆分全表.txt \
             $SIMPLE_ARG \
             --output "$OUT_DIR/全码表.txt"
           echo "--- 前 4 行 ---"
@@ -350,7 +350,7 @@ jobs:
             fi
             ./target/release/code_genie export \
               --keymap "$d/字根键位表.txt" \
-              --chaifen moling/chaifen-all.txt \
+              --chaifen moling/拆分全表.txt \
               $THREAD_ARG \
               --output "$d/全码表.txt"
             echo "  $(basename "$d"): $(wc -l < "$d/全码表.txt") 行"

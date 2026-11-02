@@ -1,8 +1,8 @@
 // =========================================================================
-// 📥 prepare 步骤 8–13：生成 input-fixed / input-roots / input-division
+// 📥 prepare 步骤 8–13：生成 字根约束 / 动态字根 / 单字拆分
 // =========================================================================
 //
-// 前四步（8–11）按 `>>` 语义逐步追加到 `input-fixed.txt`，因此单独跑某一步时
+// 前四步（8–11）按 `>>` 语义逐步追加到 `字根约束.txt`，因此单独跑某一步时
 // 会接在已有内容后面——与 bash 版一致。第 12 步按方案的编码规则把「字根序列」
 // 展开成「码位序列」，第 13 步在开启简码时把 `.A/.S/.Y` 改写成 `.0/.1/.2`。
 // =========================================================================
@@ -10,6 +10,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
+use crate::prepare::names;
 use crate::prepare::schema::{方案, 编码规则, 韵码来源};
 use crate::prepare::text::{self, 数值字段};
 use crate::prepare::上下文;
@@ -19,16 +20,16 @@ const 左声母: &str = "qwrtsdfgzxcvb";
 /// 右手声母
 const 右声母: &str = "yphjklnm";
 
-/// 步骤 8：大码约束（字根聚类 + 字根频率分档），覆盖写 `input-fixed.txt`
+/// 步骤 8：大码约束（字根聚类 + 字根频率分档），覆盖写 `字根约束.txt`
 pub fn 步骤8_大码约束(上: &上下文) -> Result<(), String> {
-    println!("(8) 生成码灵输入文件 input-fixed.txt, 大码约束 ...");
+    println!("(8) 生成码灵输入文件 字根约束.txt, 大码约束 ...");
     if 上.聚类表 != "roots-cluster.txt" {
         println!("    !!! 使用方案自行提供的字根聚类表 {} ...", 上.聚类表);
     }
 
     let 方案 = 上.方案;
     let mut 根频: HashMap<String, f64> = HashMap::new();
-    for 行 in 上.读("roots-freq.txt")? {
+    for 行 in 上.读(names::字根频率)? {
         let 列: Vec<&str> = 行.split_whitespace().collect();
         if 列.len() >= 2 {
             根频.insert(列[0].to_string(), 数值字段(列[1]));
@@ -101,7 +102,7 @@ pub fn 步骤8_大码约束(上: &上下文) -> Result<(), String> {
         出.push_str(&format!("# freq={频:.8}\n"));
         出.push_str(&format!("{}.A\t{}\n", 列[0], text::打散(方案.分档键位(频))));
     }
-    上.写("input-fixed.txt", &出)
+    上.写(names::字根约束, &出)
 }
 
 /// `^\s*一\s+f` 且 `ALL_ROOT_KEYS` 里没有 f 时跳过该行
@@ -120,9 +121,9 @@ fn 跳过一列约束(行: &str, 低频键位: &str) -> bool {
     匹配 && !低频键位.to_ascii_lowercase().contains('f')
 }
 
-/// 步骤 9：声码与韵码约束（追加到 `input-fixed.txt`）
+/// 步骤 9：声码与韵码约束（追加到 `字根约束.txt`）
 pub fn 步骤9_声韵约束(上: &上下文) -> Result<(), String> {
-    println!("(9) 添加码灵输入文件 input-fixed.txt, 声码和韵码约束 ...");
+    println!("(9) 添加码灵输入文件 字根约束.txt, 声码和韵码约束 ...");
     let 方案 = 上.方案;
     let 笔画 = if 方案.韵码 == 韵码来源::首笔 {
         Some(加载笔画表(上)?)
@@ -190,12 +191,12 @@ pub fn 步骤9_声韵约束(上: &上下文) -> Result<(), String> {
     }
 
     出.push_str(&尾段);
-    上.追加("input-fixed.txt", &出)
+    上.追加(names::字根约束, &出)
 }
 
 /// 步骤 10：飞键约束（`roots-fly.txt` 里每个字根占满 AEUIO）
 pub fn 步骤10_飞键约束(上: &上下文) -> Result<(), String> {
-    println!("(10) 添加码灵输入文件 input-fixed.txt, 飞键约束 ...");
+    println!("(10) 添加码灵输入文件 字根约束.txt, 飞键约束 ...");
     let mut 出 = String::new();
     for 行 in 上.读("roots-fly.txt")? {
         if 行.trim_start().starts_with('#') {
@@ -205,18 +206,18 @@ pub fn 步骤10_飞键约束(上: &上下文) -> Result<(), String> {
             出.push_str(&format!("{根}.U\ta e u i o\n"));
         }
     }
-    上.追加("input-fixed.txt", &出)
+    上.追加(names::字根约束, &出)
 }
 
-/// 步骤 11：`input-roots.txt` 是空文件（字根全部定义在 input-fixed 里）
+/// 步骤 11：`动态字根.txt` 是空文件（字根全部定义在 `字根约束.txt` 里）
 pub fn 步骤11_空字根表(上: &上下文) -> Result<(), String> {
-    println!("(11) 生成空的 input-roots.txt, 所有字根已定义于 input-fixed.txt ...");
-    上.写("input-roots.txt", "")
+    println!("(11) 生成空的 动态字根.txt, 所有字根已定义于 字根约束.txt ...");
+    上.写(names::动态字根, "")
 }
 
-/// 步骤 12：按编码规则把拆分展开成码位序列 `input-division.txt`
+/// 步骤 12：按编码规则把拆分展开成码位序列 `单字拆分.txt`
 pub fn 步骤12_编码展开(上: &上下文) -> Result<(), String> {
-    println!("(12) 生成码灵输入文件 input-division.txt ...");
+    println!("(12) 生成码灵输入文件 单字拆分.txt ...");
     let 方案 = 上.方案;
 
     let mut 码表: HashMap<String, String> = HashMap::new();
@@ -238,7 +239,7 @@ pub fn 步骤12_编码展开(上: &上下文) -> Result<(), String> {
     }
 
     let mut 出 = String::new();
-    for 行 in 上.读("chaifen.txt")? {
+    for 行 in 上.读(names::拆分表)? {
         let 列: Vec<&str> = 行.split('\t').collect();
         if 列.len() < 3 {
             continue;
@@ -255,7 +256,7 @@ pub fn 步骤12_编码展开(上: &上下文) -> Result<(), String> {
         let 序列 = 展开(&根, &码表, &飞键, 方案);
         出.push_str(&format!("{}\t{}\t{}\n", 列[0], 序列.join(" "), 列[2]));
     }
-    上.写("input-division.txt", &出)
+    上.写(names::单字拆分, &出)
 }
 
 /// 按方案展开码位序列（截断到 `MAX_CODE_LEN` 在展开**之后**做）
@@ -358,9 +359,9 @@ pub fn 步骤13_简码码位(上: &上下文, 配置: Option<&Path>) -> Result<(
         return Ok(());
     }
     println!(
-        "(13) 替换 input-fixed.txt 和 input-division.txt 中的 .A, .S, .Y  为 .0, .1, .2 以让码灵能计算简码 ..."
+        "(13) 替换 字根约束.txt 和 单字拆分.txt 中的 .A, .S, .Y  为 .0, .1, .2 以让码灵能计算简码 ..."
     );
-    for 名 in ["input-fixed.txt", "input-division.txt"] {
+    for 名 in [names::字根约束, names::单字拆分] {
         let 路径 = 上.路径(名);
         // 整段读入整段替换，保留原有行尾（Perl 的 `-i -lpE` 不改变 \r\n）
         let 文本 = std::fs::read_to_string(&路径)
