@@ -81,7 +81,7 @@ jobs:
         run: |
           mkdir -p yuhao-assess/public/data yuhao-assess/public/texts
           cp yuhao-data/*.json yuhao-assess/public/data/
-          cp yuhao-text/literature.txt yuhao-assess/public/texts/literature.txt
+          cp yuhao-data/literature.txt yuhao-assess/public/texts/literature.txt
           ls -1 yuhao-assess/public/data
           wc -c < yuhao-assess/public/texts/literature.txt
 
@@ -215,7 +215,7 @@ jobs:
         run: |
           set -e
           shopt -s nullglob
-          cp 工具/fill-continuous.mts yuhao-assess/scripts/
+          cp fill-continuous.mts yuhao-assess/scripts/
           if [ ! -d 方案档案 ]; then
             echo "::warning::没有方案档案，跳过"
             exit 0

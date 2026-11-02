@@ -150,7 +150,7 @@ jobs:
           (pkg / "yuhao-assess" / "public" / "texts").mkdir(parents=True, exist_ok=True)
           for j in pathlib.Path("yuhao-data").glob("*.json"):
               shutil.copy2(j, pkg / "yuhao-assess" / "public" / "data" / j.name)
-          shutil.copy2("yuhao-text/literature.txt",
+          shutil.copy2("yuhao-data/literature.txt",
                        pkg / "yuhao-assess" / "public" / "texts" / "literature.txt")
 
           shutil.copy2("config.toml", pkg / "config.toml")

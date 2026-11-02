@@ -87,7 +87,7 @@ jobs:
           MAXLEN: ${{ inputs.max_len }}
         run: |
           set -o pipefail
-          ARGS="--full-dict $FULL --corpus yuhao-text/literature.txt --limit $LIMIT --max-len $MAXLEN --dump 整句中间 --out 整句.md"
+          ARGS="--full-dict $FULL --corpus yuhao-data/literature.txt --limit $LIMIT --max-len $MAXLEN --dump 整句中间 --out 整句.md"
           if [ -n "$SHORT" ]; then ARGS="$ARGS --short-dict $SHORT"; fi
           if [ -n "$WORDS" ]; then ARGS="$ARGS --words-dict $WORDS"; fi
           ./target/release/code_genie sentence $ARGS 2>&1 | tee sentence.log
