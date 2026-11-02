@@ -183,7 +183,16 @@ pub fn load_splits(path: &str) -> Result<Vec<(char, Vec<String>, u64)>, String> 
     Ok(res)
 }
 
+/// 内嵌当量表：编译期把 `assets/当量表.txt` 打进二进制。
+///
+/// 数据源为宇浩星陈的 2116 条键对当量（含标点键）。这样即使外部当量表文件缺失，
+/// 也不会退化成「全 0 当量」导致评分失真——`pair_equiv` 留空即用本表。
+const 内嵌当量表: &str = include_str!("../assets/当量表.txt");
+
 /// 加载字根对当量表
+///
+/// 数据来源优先级：`path` 非空且文件存在 → 读文件；否则 → 用内嵌当量表。
+/// 因此配置里 `pair_equiv = ""` 就表示「用内嵌表」，外部文件仍可覆盖。
 ///
 /// # 返回值
 /// - 31x31 当量矩阵
@@ -191,13 +200,17 @@ pub fn load_pair_equivalence(
     path: &str,
 ) -> Result<[[f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE], String> {
     let mut table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
-    // #5：缺失当量文件返回 Err（当量项将恒为 0、评分失真）；由调用方决定告警/退出。
-    let content = fs::read_to_string(path).map_err(|e| {
-        format!(
-            "无法读取当量文件 {}: {}（当量项将恒为 0，评分失真，请检查 files.pair_equiv）",
-            path, e
-        )
-    })?;
+    let content: std::borrow::Cow<str> = if path.trim().is_empty() {
+        std::borrow::Cow::Borrowed(内嵌当量表)
+    } else {
+        match fs::read_to_string(path) {
+            Ok(s) => std::borrow::Cow::Owned(s),
+            Err(e) => {
+                eprintln!("⚠️ 读当量表 {} 失败（{}），改用内嵌当量表", path, e);
+                std::borrow::Cow::Borrowed(内嵌当量表)
+            }
+        }
+    };
     for line in content.lines() {
         let line = line.trim();
         if line.is_empty() {
@@ -416,19 +429,32 @@ pub fn keymap_to_assignment(
     Ok((assignment, filled))
 }
 
+/// 内嵌用指分布：编译期把 `assets/用指分布.txt` 打进二进制。
+///
+/// 46 个键位的目标使用率与上下惩罚系数。外部文件缺失时回落到本表，避免退化成默认 0
+/// 导致分布评分失真——`key_dist` 留空即用本表。
+const 内嵌用指分布: &str = include_str!("../assets/用指分布.txt");
+
 /// 加载键位分布配置
+///
+/// 数据来源优先级：`path` 非空且文件存在 → 读文件；否则 → 用内嵌用指分布。
+/// 配置里 `key_dist = ""` 即表示「用内嵌表」。
 ///
 /// # 返回值
 /// - 31 个键位的分布配置
 pub fn load_key_distribution(path: &str) -> Result<[KeyDistConfig; EQUIV_TABLE_SIZE], String> {
     let mut cfg = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-    // #5：缺失分布文件返回 Err（分布项将用默认值、评分失真）；由调用方决定告警/退出。
-    let content = fs::read_to_string(path).map_err(|e| {
-        format!(
-            "无法读取用指分布文件 {}: {}（分布项将用默认值，评分失真，请检查 files.key_dist）",
-            path, e
-        )
-    })?;
+    let content: std::borrow::Cow<str> = if path.trim().is_empty() {
+        std::borrow::Cow::Borrowed(内嵌用指分布)
+    } else {
+        match fs::read_to_string(path) {
+            Ok(s) => std::borrow::Cow::Owned(s),
+            Err(e) => {
+                eprintln!("⚠️ 读用指分布 {} 失败（{}），改用内嵌用指分布", path, e);
+                std::borrow::Cow::Borrowed(内嵌用指分布)
+            }
+        }
+    };
     for line in content.lines() {
         let line = line.trim();
         if line.is_empty() {
@@ -601,5 +627,67 @@ mod keymap_assignment_tests {
                 prop_assert!(group_allowed[gi].contains(&asg[gi]));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod 内嵌当量表_tests {
+    use super::*;
+
+    #[test]
+    fn 空路径走内嵌当量表且非全零() {
+        let t = load_pair_equivalence("").unwrap();
+        assert!(
+            t.iter().flatten().any(|&v| v != 0.0),
+            "内嵌当量表不应全 0（否则当量评分失真）"
+        );
+    }
+
+    #[test]
+    fn 内嵌与读文件逐项一致() {
+        let p = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/当量表.txt");
+        let 内嵌 = load_pair_equivalence("").unwrap();
+        let 文件 = load_pair_equivalence(p).unwrap();
+        assert_eq!(内嵌, 文件);
+    }
+
+    #[test]
+    fn 缺失文件回落内嵌() {
+        let t = load_pair_equivalence("不存在的路径/当量表.txt").unwrap();
+        assert!(t.iter().flatten().any(|&v| v != 0.0));
+    }
+}
+
+#[cfg(test)]
+mod 内嵌用指分布_tests {
+    use super::*;
+
+    fn 快照(cfg: &[KeyDistConfig; EQUIV_TABLE_SIZE]) -> Vec<(f64, f64, f64)> {
+        cfg.iter()
+            .map(|c| (c.target_rate, c.low_penalty, c.high_penalty))
+            .collect()
+    }
+
+    #[test]
+    fn 空路径走内嵌用指分布且非全默认() {
+        let cfg = load_key_distribution("").unwrap();
+        assert!(
+            cfg.iter().any(|c| c.target_rate != 0.0),
+            "内嵌用指分布不应全为默认 0（否则分布评分失真）"
+        );
+    }
+
+    #[test]
+    fn 内嵌与读文件逐项一致() {
+        let p = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/用指分布.txt");
+        let 内嵌 = load_key_distribution("").unwrap();
+        let 文件 = load_key_distribution(p).unwrap();
+        assert_eq!(快照(&内嵌), 快照(&文件));
+    }
+
+    #[test]
+    fn 缺失文件回落内嵌() {
+        let cfg = load_key_distribution("不存在的路径/用指分布.txt").unwrap();
+        assert!(cfg.iter().any(|c| c.target_rate != 0.0));
     }
 }
