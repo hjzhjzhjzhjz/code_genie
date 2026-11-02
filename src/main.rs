@@ -38,6 +38,7 @@ mod pipeline;
 mod prepare;
 mod rime_convert;
 mod root_chart;
+mod run;
 mod schedule;
 mod sentence;
 mod simple;
@@ -107,6 +108,60 @@ enum Commands {
         /// SA 吞吐基准的步数
         #[arg(long, default_value_t = 200000)]
         steps: usize,
+    },
+
+    /// 跑一轮完整优化：备份输入 → prepare → optimize/resume，写 COMMENT.txt 与日志
+    ///
+    /// `moling/optimize.sh` 的原生子命令实现（那个脚本只剩这一层事务没进 Rust）。
+    #[command(name = "run")]
+    Run {
+        /// 工作目录：prepare/optimize 的 cwd，config*.toml 与产物都在这里
+        #[arg(long = "dir", default_value = "moling")]
+        dir: String,
+
+        /// 方案名：moling（魔靈）/ yuling（靈明）/ yustar（星陳）
+        #[arg(long, default_value = "moling")]
+        schema: String,
+
+        /// 上游素材目录；缺省按 `<dir>/yuhao-data` → `<dir>/../yuhao-data` 自动探测
+        #[arg(long = "data-dir")]
+        data_dir: Option<String>,
+
+        /// 输出目录；缺省 `<schema>-output/output-<时间戳>`（相对工作目录）
+        #[arg(short = 'd', long = "output-dir")]
+        output_dir: Option<String>,
+
+        /// 断点续算：走 resume 而不是 optimize（必须配合 -d 指定既有目录）
+        #[arg(long)]
+        resume: bool,
+
+        /// 一句话备注，追加写入 `<OUT>/COMMENT.txt`；缺省时交互式提问
+        #[arg(long)]
+        comment: Option<String>,
+
+        /// 跳过 prepare，直接用工作目录里已有的产物
+        #[arg(long = "no-prepare")]
+        no_prepare: bool,
+
+        /// 只打印将执行的命令，不建目录、不写备注、不备份、不跑
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+
+        /// macOS 上不在命令前套 caffeinate（默认会套，防长时间退火时休眠）
+        #[arg(long = "no-caffeinate")]
+        no_caffeinate: bool,
+
+        /// 从既有 output 目录播种（转给 optimize）
+        #[arg(long = "seed-dir")]
+        seed_dir: Option<String>,
+
+        /// 从单个 keymap 文件播种（转给 optimize）
+        #[arg(long = "seed-keymap")]
+        seed_keymap: Option<String>,
+
+        /// 复用尺度文件（转给 optimize）
+        #[arg(long)]
+        scale: Option<String>,
     },
 
     /// 根据 keymap 为汉字编码
@@ -571,6 +626,45 @@ fn main() {
         return;
     }
 
+    // run 是 prepare + optimize 的外层事务，两个子命令都由它再调一遍自己，
+    // 所以父进程不需要加载配置（配置在工作目录里，由子进程按 -c 解释）
+    if let Some(Commands::Run {
+        dir,
+        schema,
+        data_dir,
+        output_dir,
+        resume,
+        comment,
+        no_prepare,
+        dry_run,
+        no_caffeinate,
+        seed_dir,
+        seed_keymap,
+        scale,
+    }) = &cli.command
+    {
+        let 参 = run::参数 {
+            工作目录: dir.clone(),
+            方案: schema.clone(),
+            素材目录: data_dir.clone(),
+            输出目录: output_dir.clone(),
+            续算: *resume,
+            备注: comment.clone(),
+            跳过准备: *no_prepare,
+            试运行: *dry_run,
+            不防休眠: *no_caffeinate,
+            轮数: cli.rounds,
+            播种目录: seed_dir.clone(),
+            播种键位: seed_keymap.clone(),
+            尺度: scale.clone(),
+        };
+        if let Err(e) = run::run(&参) {
+            eprintln!("❌ {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
+
     // clusters 只用 prepare 的数据文件，同样不依赖主配置
     if let Some(Commands::Clusters {
         schema,
@@ -846,6 +940,7 @@ fn main() {
         Some(Commands::Clusters { .. }) => unreachable!("clusters 已在加载配置前处理"),
         Some(Commands::Zigen { .. }) => unreachable!("zigen 已在加载配置前处理"),
         Some(Commands::Explore { .. }) => unreachable!("explore 已在加载配置前处理"),
+        Some(Commands::Run { .. }) => unreachable!("run 已在加载配置前处理"),
         None => run_optimize_rounds(&cfg, &cli.config, None, None, None, None, cli.rounds),
     }
 }

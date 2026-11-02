@@ -71,8 +71,14 @@ pub fn 步骤0_全字频表(上: &上下文) -> Result<(), String> {
 }
 
 fn 读字频json(上: &上下文, 名: &str, 网址: &str) -> Result<HashMap<String, f64>, String> {
-    // 素材目录（`yuhao-data/`）里通常已有这两份 JSON；没有才下载，且下到素材目录
-    let 路径 = crate::data_dir::找(&上.目录, 名).unwrap_or_else(|| 上.素材目录.join(名));
+    // 素材目录（`yuhao-data/`）里通常已有这两份 JSON；没有才下载，且下到素材目录。
+    // 回落用 `上.素材目录`：`--data-dir` 显式指定时不能被自动探测覆盖。
+    let 本地 = 上.路径(名);
+    let 路径 = if 本地.is_file() {
+        本地
+    } else {
+        上.素材目录.join(名)
+    };
     if !路径.exists() {
         println!("    下载 {名} ...");
         下载(&上.素材目录, 网址, 名)?;
@@ -215,7 +221,10 @@ pub fn 步骤3_拆分表(上: &上下文) -> Result<(), String> {
         ("yustar_chaifen.dict.yaml", names::拆分全表),
         ("yustar_chaifen_tw.dict.yaml", names::拆分全表台),
     ] {
-        if !上.路径(源文件).exists() {
+        // 台湾字形拆分表是可选的，缺了就只出大陆版。注意判断的是**素材目录**里
+        // 有没有这个源头文件，而不是产物目录——`yustar_chaifen_tw.dict.yaml`
+        // 从来不在产物目录里。
+        if 上.源路径(源文件).is_none() {
             continue;
         }
         let mut 表 = 解析拆分表(上, 源文件, true, true, |字| 全频.get(字).cloned())?;

@@ -89,12 +89,26 @@ impl 上下文 {
         self.目录.join(名)
     }
 
-    pub fn 读(&self, 名: &str) -> Result<Vec<String>, String> {
-        // 产物只写 `--dir`，但上游素材在 `yuhao-data/` 里：先看本地，再回落素材目录
-        if let Some(p) = crate::data_dir::找(&self.目录, 名) {
-            return text::读行(&p);
+    /// 源文件的实际位置：先看产物目录，再看素材目录
+    ///
+    /// 上游素材（`yustar_chaifen*.dict.yaml` 这类）只在素材目录里，产物只在
+    /// `--dir` 里，两者同名的情况以 `--dir` 为准。
+    pub fn 源路径(&self, 名: &str) -> Option<PathBuf> {
+        let 本地 = self.路径(名);
+        if 本地.is_file() {
+            return Some(本地);
         }
-        text::读行(&self.路径(名))
+        let 素材 = self.素材目录.join(名);
+        素材.is_file().then_some(素材)
+    }
+
+    pub fn 读(&self, 名: &str) -> Result<Vec<String>, String> {
+        // 回落必须用 `self.素材目录`（可能是 `--data-dir` 显式指定的），不能重新
+        // `data_dir::定位`——那样会无视手工指定的目录。
+        match self.源路径(名) {
+            Some(p) => text::读行(&p),
+            None => text::读行(&self.路径(名)),
+        }
     }
 
     pub fn 写(&self, 名: &str, 内容: &str) -> Result<(), String> {
