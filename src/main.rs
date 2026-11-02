@@ -156,20 +156,28 @@ enum Commands {
         dir: String,
     },
 
-    /// 导出测评用码表（字<TAB>码，简码在前、全码在后）
+    /// 导出测评用码表（字<TAB>码，简码在前、全码在后），并统计全码长 / 动重
     #[command(name = "export")]
     ExportTable {
-        /// 键位映射文件（字根键位表.txt）
+        /// 键位映射文件（字根键位表.txt / output-keymap.txt）
         #[arg(short = 'k', long)]
         keymap: String,
 
-        /// 纯拆分表（拆分表.txt：字<TAB>根 根 …<TAB>频次）
+        /// 拆分表（拆分表.txt 或 拆分全表.txt：字<TAB>根 根 …<TAB>频次）
         #[arg(short = 'c', long)]
         chaifen: String,
 
         /// 简码表（简码表.txt，可选）
         #[arg(short = 's', long)]
         simple: Option<String>,
+
+        /// 方案名：moling（魔靈）/ yuling（靈明）/ yustar（星陳），决定取码规则
+        #[arg(long, default_value = "moling")]
+        schema: String,
+
+        /// 覆盖方案自带的最大码长（默认取方案值，三套方案都是 4）
+        #[arg(long = "max-code-len")]
+        max_code_len: Option<usize>,
 
         /// 输出文件
         #[arg(short = 'o', long, default_value = "全码表.txt")]
@@ -621,8 +629,23 @@ fn main() {
             keymap,
             chaifen,
             simple,
+            schema,
+            max_code_len,
             output,
-        }) => export_table::run(&keymap, &chaifen, simple.as_deref(), &output),
+        }) => {
+            let 参 = export_table::参数 {
+                键位: &keymap,
+                拆分: &chaifen,
+                简码: simple.as_deref(),
+                输出: &output,
+                方案: &schema,
+                最大码长: max_code_len,
+            };
+            if let Err(e) = export_table::run(&参) {
+                eprintln!("❌ {}", e);
+                std::process::exit(1);
+            }
+        }
         Some(Commands::Chart {
             keymap,
             mapping,

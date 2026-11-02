@@ -7,7 +7,8 @@
 //
 //   roots.tsv      → `chart`（`root_chart::生成字根表`，同一套 keymap 解析与排序键）
 //   chaifen.tsv    → `拆分全表.txt` 去掉频次列，`loader` 直接读原表
-//   mabiao.tsv     → `output.rs` 的「合并码表.txt」（简码在前、全码在后），`export` 同源
+//   mabiao.tsv     → `export`（`export_table`，支持 `--schema` 三套取码规则，
+//                                并打印全码长 / 动重）
 //   *.js / *.html  → 依赖外部 typer 仓库的 perl 脚本，不搬
 //
 // 这里只补 Rust 侧真正没有、且有下游消费者的三样：
