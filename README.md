@@ -34,7 +34,7 @@ cargo build --release
 | `evaluate` | 评估现有方案指标 | `code_genie evaluate -k 字根键位表.txt` |
 | `export` | 导出测评码表（`字\t码`，简码在前） | `code_genie export -k 字根键位表.txt -c 拆分全表.txt -o 全码表.txt` |
 | `chart` | 生成字根键位图（HTML） | `code_genie chart --keymap 字根键位表.txt` |
-| `assess` | 宇浩测评对比 + 方案档案 | `code_genie assess --dir runs --yuhao-dir yuhao-assess` |
+| `assess` | 宇浩测评对比 + 方案档案；`--qualify` 只列达标方案 | `code_genie assess --dir runs --yuhao-dir yuhao-assess --qualify` |
 | `rime-convert` | 以星月方案包为底包只换码 | `code_genie rime-convert --base <星月底包> --output <算码目录> --chaifen 拆分全表.txt` |
 | `sentence` | 整句准确率（逐单元 + 连续码流）；词典吃 dict.yaml 或 TSV | `code_genie sentence --full-dict 完整码表.txt --corpus 语料.txt` |
 | `pipeline` | 逐字取码推导表（Markdown） | `code_genie pipeline --keymap 字根键位表.txt --chaifen 拆分全表.txt --top 5` |
@@ -43,6 +43,7 @@ cargo build --release
 | `clusters` | 聚类重码分析：某一行聚类压成一个大码，要付出多少重码 | `code_genie clusters --per-row` |
 | `zigen` | 字形变体表：`zigen-<方案>.csv` + `roots-mapping.tsv` + `zigen-trainer-<方案>.json` | `code_genie zigen --schema moling --source moling` |
 | `prepare` | 从上游 yaml/lua/csv 数据加工出优化器输入文件（13 步） | `code_genie prepare --dir moling` |
+| `explore` | 权重空间探索：汇总一批 optimize 日志，出平行坐标网页 | `code_genie explore test-*.log --html batch-test-weights.html` |
 
 ## 输入文件
 

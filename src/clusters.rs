@@ -14,7 +14,7 @@
 //   code_genie clusters --cluster "卯 {卯左}"     只看指定这一簇
 //
 // 编码规则直接复用 `prepare::inputs::展开`（含飞键、回头码、声韵位），与优化器实际
-// 出码同口径。`moling/analyze-duplicates-by-cluster.pl` 那套是简化版（只展开大码 +
+// 出码同口径。已删的 `moling/analyze-duplicates-by-cluster.pl` 那套是简化版（只展开大码 +
 // 声韵，不认飞键），两者数值不可比，本模块不追求与它逐字节一致。
 
 use std::collections::{HashMap, HashSet};

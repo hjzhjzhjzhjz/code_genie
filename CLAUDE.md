@@ -36,6 +36,9 @@ cargo run --release -- diagnose --dir runs
 # 聚类重码分析：哪一行聚类压成大码代价最高（默认读 roots-cluster.txt）
 cargo run --release -- clusters --per-row --schema moling
 
+# 权重空间探索：汇总一批 optimize 日志 → 表 + 平行坐标网页
+cargo run --release -- explore test-*.log --table batch-test-weights.txt --html batch-test-weights.html
+
 # 字形变体表（字根键位表 → zigen csv / 字根映射 / 背字根卡组）
 cargo run --release -- zigen --schema moling --keymap runs/s4-export/output-keymap.txt --source moling --out zigen-out
 cargo run --release -- chart --keymap 字根键位表.txt
@@ -65,7 +68,7 @@ cargo test --release
 
 | 模块 | 职责 |
 |------|------|
-| `main.rs` | CLI 入口（clap），16 个子命令的分发、多轮播种、尺度解析、收尾保存编排 |
+| `main.rs` | CLI 入口（clap），17 个子命令的分发、多轮播种、尺度解析、收尾保存编排 |
 | `prepare/` | `prepare` 子命令：把上游 yaml/lua/csv 数据加工成优化器输入文件（13 步，逐字节等价重写原 `moling/prepare-inputs.sh`）；`schema.rs` 存三套方案的参数表。上游素材（`yustar_chaifen*.dict.yaml`、`yuhao_charsets.lua`、`yuhao-zigens.csv`、`chars.dict.yaml`、`beiyu-char-freq.txt`、`charAbsoluteFrequency*.json`）统一放在仓库根的 `yuhao-data/`，产物只写 `--dir` |
 | `data_dir.rs` | 素材目录定位：`<dir>/yuhao-data` → `<dir>/../yuhao-data` → `<dir>`（最后一项兼容素材平铺在 `--dir` 下的老布局）；`prepare`/`zigen` 找素材都走它 |
 | `annealing.rs` | 混合优化算法核心：4 种初始化策略、multi-start + hill climb 热身、冲突导向邻域搜索、SA 主循环 |
@@ -83,10 +86,11 @@ cargo test --release
 | `rime_convert.rs` | 以星月方案包为底包，只重算 chaifen/full/words/quick/short/roots 六张表的码 |
 | `sentence.rs` | 整句准确率：逐单元首候选 + 连续码流解码；词典吃 dict.yaml 或纯 TSV；可调外部 librime 解码器 |
 | `pipeline.rs` | 逐字取码推导表（Markdown）与字根归并对比 |
+| `explore.rs` | 权重空间探索：读一批 `optimize` 日志里自己打印的「全码权重 / 输出目录」，汇总各轮 `summary.txt` 的线程指标，出 TSV + Plotly 平行坐标 HTML（20 根轴：5 权重 + 5 指标 × 最小/首选/最大）；取代已删的 `moling/analyze-results-of-batch-test-weights.sh` |
 | `zigen.rs` | 字形变体表：`zigen-<方案>.csv`（`rime-convert` 写字根提示时读它）、`roots-mapping.tsv`（`chart -m` 用）、`zigen-trainer-<方案>.json`（背字根用）；取代 `moling/generate-root-chart.sh` 里纯数据的三步，其余产物 Rust 侧已有同口径实现 |
 | `clusters.rs` | 聚类重码分析：复用 `prepare::inputs::展开` 得到码位序列，按五种取码法（去第 0~3 码、全码）统计动重/静重/组数；`--per-row` 逐行代入聚类表与基线做差 |
 | `diagnose.rs` | 批量诊断码表目录（重码、当量、分布、选重） |
-| `assess.rs` | 调 yuhao-assess 跑测评、出对比表、生成可导入网页版的方案档案 |
+| `assess.rs` | 调 yuhao-assess 跑测评、出对比表、生成可导入网页版的方案档案；`--qualify` 按阈值（通用重码率 ≤0.00031、常用国字 ≤0.00028、动态选重 <0.0020、速度当量 <1.270）筛合格方案，取代已删的 `moling/compare-optimization-results.sh` |
 | `handfeel.rs` | 手感指标：速度当量、动态选重、同指连击率、换手率 |
 | `root_chart.rs` | 字根键位图（HTML） |
 | `checkpoint.rs` | 断点续算：线程检查点、元信息、原子写、历史归档 |

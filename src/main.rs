@@ -28,6 +28,7 @@ mod context;
 mod data_dir;
 mod diagnose;
 mod evaluator;
+mod explore;
 mod export_table;
 mod fsutil;
 mod handfeel;
@@ -241,6 +242,11 @@ enum Commands {
         /// 方案档案里的版本号（留空用当天日期）
         #[arg(long, default_value = "")]
         version: String,
+
+        /// 额外打印「合格方案」：按 compare-optimization-results.sh 的阈值
+        /// （通用重码率 ≤0.00031、常用国字 ≤0.00028、动态选重 <0.0020、速度当量 <1.270）筛选并按重码率排序
+        #[arg(long)]
+        qualify: bool,
     },
 
     /// 以星月方案包为底包，只把词典里的码换掉，其余（文件名/schema/lua/词表）原样沿用
@@ -430,6 +436,27 @@ enum Commands {
         config: Option<String>,
     },
 
+    /// 权重空间探索：汇总一批 optimize 日志，出平行坐标网页
+    /// （取代 `moling/analyze-results-of-batch-test-weights.sh`）
+    #[command(name = "explore")]
+    Explore {
+        /// 输入日志（通常是同一份配置、每次换一套全码权重跑出来的 `test-*.log`）
+        #[arg(value_name = "日志", num_args = 1..)]
+        logs: Vec<String>,
+
+        /// 汇总表输出（TSV）
+        #[arg(long = "table", default_value = "batch-test-weights.txt")]
+        table: String,
+
+        /// 平行坐标网页输出（HTML，需联网加载 Plotly）
+        #[arg(long = "html", default_value = "batch-test-weights.html")]
+        html: String,
+
+        /// 网页标题
+        #[arg(long, default_value = "算码权重空间探索")]
+        title: String,
+    },
+
     /// 聚类重码分析：某一行聚类压成一个大码，要付出多少重码
     #[command(name = "clusters")]
     Clusters {
@@ -565,6 +592,27 @@ fn main() {
             逐行: *per_row,
         };
         if let Err(e) = clusters::run(&参) {
+            eprintln!("❌ {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    // explore 只读 optimize 日志与 summary.txt，同样不依赖主配置
+    if let Some(Commands::Explore {
+        logs,
+        table,
+        html,
+        title,
+    }) = &cli.command
+    {
+        let 参 = explore::参数 {
+            日志: logs.clone(),
+            表: table.clone(),
+            网页: html.clone(),
+            标题: title.clone(),
+        };
+        if let Err(e) = explore::run(&参) {
             eprintln!("❌ {}", e);
             std::process::exit(1);
         }
@@ -764,6 +812,7 @@ fn main() {
             profile,
             author,
             version,
+            qualify,
         }) => assess::run(
             table.as_deref(),
             dir.as_deref(),
@@ -775,6 +824,7 @@ fn main() {
             profile.as_deref(),
             &author,
             &version,
+            qualify,
         ),
         Some(Commands::Optimize {
             output_dir,
@@ -795,6 +845,7 @@ fn main() {
         Some(Commands::Prepare { .. }) => unreachable!("prepare 已在加载配置前处理"),
         Some(Commands::Clusters { .. }) => unreachable!("clusters 已在加载配置前处理"),
         Some(Commands::Zigen { .. }) => unreachable!("zigen 已在加载配置前处理"),
+        Some(Commands::Explore { .. }) => unreachable!("explore 已在加载配置前处理"),
         None => run_optimize_rounds(&cfg, &cli.config, None, None, None, None, cli.rounds),
     }
 }
