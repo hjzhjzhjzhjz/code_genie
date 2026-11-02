@@ -182,7 +182,7 @@ fn greedy_balance_init(ctx: &OptContext, cfg: &Config, rng: &mut ThreadRng) -> V
         let best = if candidates.is_empty() {
             allowed[0]
         } else {
-            candidates[rng.gen_range(0..candidates.len())]
+            candidates[rng.random_range(0..candidates.len())]
         };
 
         assignment[gi] = best;
@@ -201,7 +201,7 @@ fn frequency_greedy_init(ctx: &OptContext, rng: &mut ThreadRng) -> Vec<u8> {
     let mut group_info: Vec<(usize, f64)> = (0..n)
         .map(|gi| {
             let weight = ctx.group_to_chars[gi].len() as f64;
-            let noise = 1.0 + rng.gen::<f64>() * 0.25;
+            let noise = 1.0 + rng.random::<f64>() * 0.25;
             (gi, weight * noise)
         })
         .collect();
@@ -266,7 +266,7 @@ fn random_valid_init(ctx: &OptContext, rng: &mut ThreadRng) -> Vec<u8> {
     let mut assignment = vec![0u8; n];
     for gi in 0..n {
         let allowed = &ctx.groups[gi].allowed_keys;
-        assignment[gi] = allowed[rng.gen_range(0..allowed.len())];
+        assignment[gi] = allowed[rng.random_range(0..allowed.len())];
     }
     assignment
 }
@@ -371,10 +371,10 @@ fn try_resolve_conflict(
 
     // 有效窗口 = min(sample_window, 列表长度)
     let window = sample_window.min(collisions.len());
-    let idx = rng.gen_range(0..window);
+    let idx = rng.random_range(0..window);
     let (g1, g2, _) = collisions[idx];
 
-    let groups_to_try = if rng.gen_bool(0.5) {
+    let groups_to_try = if rng.random_bool(0.5) {
         vec![g1, g2]
     } else {
         vec![g2, g1]
@@ -394,7 +394,7 @@ fn try_resolve_conflict(
             continue;
         }
 
-        let new_key = other_keys[rng.gen_range(0..other_keys.len())];
+        let new_key = other_keys[rng.random_range(0..other_keys.len())];
         if evaluator.try_move(ctx, assignment, gi, new_key, temp, rng) {
             return true;
         }
@@ -416,14 +416,14 @@ fn try_key_reorganization(
         return false;
     }
 
-    let k1 = assignment[rng.gen_range(0..n)];
+    let k1 = assignment[rng.random_range(0..n)];
     let groups_on_k1: Vec<usize> = find_groups_on_key(ctx, assignment, k1);
 
     if groups_on_k1.is_empty() {
         return false;
     }
 
-    let gi = groups_on_k1[rng.gen_range(0..groups_on_k1.len())];
+    let gi = groups_on_k1[rng.random_range(0..groups_on_k1.len())];
     let allowed = &ctx.groups[gi].allowed_keys;
 
     let other_keys: Vec<u8> = allowed.iter().filter(|&&k| k != k1).copied().collect();
@@ -432,7 +432,7 @@ fn try_key_reorganization(
         return false;
     }
 
-    let new_key = other_keys[rng.gen_range(0..other_keys.len())];
+    let new_key = other_keys[rng.random_range(0..other_keys.len())];
     evaluator.try_move(ctx, assignment, gi, new_key, temp, rng)
 }
 
@@ -511,7 +511,7 @@ fn try_triple_swap(
     let new_score = evaluator.get_score(ctx);
     let delta = new_score - old_score;
 
-    if delta <= 0.0 || rng.gen::<f64>() < (-delta / temp).exp() {
+    if delta <= 0.0 || rng.random::<f64>() < (-delta / temp).exp() {
         if needs_simple {
             evaluator.commit_simple();
         }
@@ -572,9 +572,9 @@ pub(crate) fn try_full_key_swap(
         return false;
     }
     // 选两个当前被占用、且键位不同的键
-    let g1 = rng.gen_range(0..n);
+    let g1 = rng.random_range(0..n);
     let k1 = assignment[g1];
-    let g2 = rng.gen_range(0..n);
+    let g2 = rng.random_range(0..n);
     let k2 = assignment[g2];
     if k1 == k2 {
         return false;
@@ -629,7 +629,7 @@ pub(crate) fn try_full_key_swap(
     let new_score = evaluator.get_score(ctx);
     let delta = new_score - old_score;
 
-    if delta <= 0.0 || rng.gen::<f64>() < (-delta / temp).exp() {
+    if delta <= 0.0 || rng.random::<f64>() < (-delta / temp).exp() {
         if needs_simple {
             evaluator.commit_simple();
         }
@@ -722,8 +722,8 @@ fn enhanced_hill_climb(
             }
             4..=6 => {
                 if n >= 2 {
-                    let r1 = rng.gen_range(0..n);
-                    let r2 = rng.gen_range(0..n - 1);
+                    let r1 = rng.random_range(0..n);
+                    let r2 = rng.random_range(0..n - 1);
                     let r2 = if r2 >= r1 { r2 + 1 } else { r2 };
                     let k1 = assignment[r1];
                     let k2 = assignment[r2];
@@ -741,9 +741,9 @@ fn enhanced_hill_climb(
             7 => try_triple_swap(ctx, &mut assignment, &mut evaluator, zero_temp, rng),
             8 => try_key_reorganization(ctx, &mut assignment, &mut evaluator, zero_temp, rng),
             _ => {
-                let r = rng.gen_range(0..n);
+                let r = rng.random_range(0..n);
                 let allowed = &ctx.groups[r].allowed_keys;
-                let new_k = allowed[rng.gen_range(0..allowed.len())];
+                let new_k = allowed[rng.random_range(0..allowed.len())];
                 evaluator.try_move(ctx, &mut assignment, r, new_k, zero_temp, rng)
             }
         };
@@ -898,7 +898,7 @@ fn coordinate_descent(ctx: &OptContext, init: Vec<u8>, disable_simple: bool) -> 
 // =========================================================================
 
 pub fn multi_start_init(ctx: &OptContext, cfg: &Config, thread_id: usize) -> Vec<u8> {
-    let mut rng = thread_rng();
+    let mut rng = rand::rng();
     let n = ctx.num_groups;
     if n == 0 {
         return vec![];
@@ -1052,7 +1052,7 @@ pub fn simulated_annealing_resumable(
     checkpoint_interval: usize,
     seed: Option<&[u8]>,
 ) -> SaResult {
-    let mut rng = thread_rng();
+    let mut rng = rand::rng();
 
     let mut assignment;
     let start_step: usize;
@@ -1505,7 +1505,7 @@ pub fn simulated_annealing_resumable(
         // 每步恰好提议一次邻域移动；`proposal_accepted` 记录本步是否被（含概率）接受，用于窗口接受率。
         let mut proposal_accepted = false;
         let did_conflict = if conflict_enabled {
-            let r = rng.gen::<f64>();
+            let r = rng.random::<f64>();
             if r < conflict_prob && !collisions.is_empty() {
                 proposal_accepted = try_resolve_conflict(
                     ctx,
@@ -1530,12 +1530,12 @@ pub fn simulated_annealing_resumable(
 
             // 整键互换（大邻域）：低概率触发，用于跳出单组 swap/move 的局部最优。
             let fks_prob = cfg.annealing.full_key_swap_probability;
-            if fks_prob > 0.0 && n_groups >= 2 && rng.gen::<f64>() < fks_prob {
+            if fks_prob > 0.0 && n_groups >= 2 && rng.random::<f64>() < fks_prob {
                 proposal_accepted =
                     try_full_key_swap(ctx, &mut assignment, &mut evaluator, temp, &mut rng);
-            } else if rng.gen::<f64>() < swap_prob && n_groups >= 2 {
-                let r1 = rng.gen_range(0..n_groups);
-                let r2 = rng.gen_range(0..n_groups - 1);
+            } else if rng.random::<f64>() < swap_prob && n_groups >= 2 {
+                let r1 = rng.random_range(0..n_groups);
+                let r2 = rng.random_range(0..n_groups - 1);
                 let r2 = if r2 >= r1 { r2 + 1 } else { r2 };
 
                 let k1 = assignment[r1];
@@ -1549,14 +1549,14 @@ pub fn simulated_annealing_resumable(
                 } else {
                     let r = r1;
                     let allowed = &ctx.groups[r].allowed_keys;
-                    let new_k = allowed[rng.gen_range(0..allowed.len())];
+                    let new_k = allowed[rng.random_range(0..allowed.len())];
                     proposal_accepted =
                         evaluator.try_move(ctx, &mut assignment, r, new_k, temp, &mut rng);
                 }
             } else {
-                let r = rng.gen_range(0..n_groups);
+                let r = rng.random_range(0..n_groups);
                 let allowed = &ctx.groups[r].allowed_keys;
-                let new_k = allowed[rng.gen_range(0..allowed.len())];
+                let new_k = allowed[rng.random_range(0..allowed.len())];
                 proposal_accepted =
                     evaluator.try_move(ctx, &mut assignment, r, new_k, temp, &mut rng);
             }
@@ -1654,7 +1654,7 @@ pub fn simulated_annealing_resumable(
                 for &gi in groups.iter().take(n_perturb) {
                     let allowed = &ctx.groups[gi].allowed_keys;
                     if allowed.len() > 1 {
-                        let new_k = allowed[rng.gen_range(0..allowed.len())];
+                        let new_k = allowed[rng.random_range(0..allowed.len())];
                         evaluator.try_move(
                             ctx,
                             &mut assignment,
@@ -1667,8 +1667,8 @@ pub fn simulated_annealing_resumable(
                 }
             } else {
                 for _ in 0..n_perturb {
-                    let r1 = rng.gen_range(0..n_groups);
-                    let r2 = rng.gen_range(0..n_groups);
+                    let r1 = rng.random_range(0..n_groups);
+                    let r2 = rng.random_range(0..n_groups);
                     if r1 != r2 {
                         let ka = assignment[r1];
                         let kb = assignment[r2];
@@ -1781,6 +1781,18 @@ pub fn simulated_annealing_resumable(
             window_start_step = step;
             win_accepted = 0;
             win_proposed = 0;
+        }
+
+        // === 收敛采样：每 1% 步数输出一行结构化数据，供 `tools/画收敛曲线.py` 解析 ===
+        //
+        // 与上面 5% 一次的人工汇报解耦：汇报行是给人看的（字段多、列对齐、随简码开关变宽），
+        // 采样行只保留画曲线要用的四个数，格式固定、key=value，改汇报格式不会打断脚本。
+        // 40M 步的默认配置下约 100 个采样点，足以看出收敛趋势与后期震荡。
+        if thread_id == 0 && step % (steps / 100).max(1) == 0 {
+            println!(
+                "   [T0] 采样 step={} 得分={:.6} 当前={:.6} 温度={:.6}",
+                step, best_score, current_score, temp
+            );
         }
 
         // === 周期对账：每 M 步用全量重算覆盖增量值，纠正浮点/整型漂移（需求 15.4/15.5）===
@@ -1944,7 +1956,6 @@ mod conflict_tests {
     use crate::context::OptContext;
     use crate::types::{KeyDistConfig, RootGroup, ScaleConfig, SimpleCodeConfig, EQUIV_TABLE_SIZE};
     use proptest::prelude::*;
-    use rand::thread_rng;
     use std::collections::HashMap;
 
     /// 构建最小 OptContext：每个频率对应一个动态组，每组含 1 个字根、1 个单部件汉字。
@@ -1990,7 +2001,7 @@ mod conflict_tests {
         #[test]
         fn prop1_sampling_window_bounds(window in 0usize..12) {
             let ctx = make_ctx(&FREQS, &ALLOWED);
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
 
             // 空冲突列表 + 任意 window → false 且 assignment 不变
             let mut a = vec![0u8; FREQS.len()];
@@ -2058,7 +2069,7 @@ mod conflict_tests {
     #[test]
     fn test_window_zero_and_empty_return_false() {
         let ctx = make_ctx(&FREQS, &ALLOWED);
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let mut a = vec![0u8; FREQS.len()];
         let before = a.clone();
         let mut ev = Evaluator::new(&ctx, &a);

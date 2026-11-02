@@ -323,7 +323,7 @@ pub fn keymap_to_assignment(
             None => {
                 let allowed = &ctx.groups[gi].allowed_keys;
                 // allowed 恒非空（由 load_fixed 保证）
-                assignment[gi] = allowed[rng.gen_range(0..allowed.len())];
+                assignment[gi] = allowed[rng.random_range(0..allowed.len())];
                 filled += 1;
             }
         }
@@ -388,7 +388,7 @@ mod keymap_assignment_tests {
     use crate::context::OptContext;
     use crate::types::{ScaleConfig, SimpleCodeConfig, WeightConfig, EQUIV_TABLE_SIZE};
     use proptest::prelude::*;
-    use rand::{thread_rng, Rng};
+    use rand::Rng;
 
     /// 由一组 `RootGroup` 构造最小 OptContext（不启用简码）。
     fn make_ctx_from_groups(groups: Vec<RootGroup>) -> OptContext {
@@ -448,7 +448,7 @@ mod keymap_assignment_tests {
             allowed_keys: vec![0, 1, 2],
         }];
         let ctx = make_ctx_from_groups(groups);
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let mut m: HashMap<String, u8> = HashMap::new();
         m.insert("a".to_string(), 0);
         m.insert("b".to_string(), 1);
@@ -463,7 +463,7 @@ mod keymap_assignment_tests {
             allowed_keys: vec![0, 1, 2],
         }];
         let ctx = make_ctx_from_groups(groups);
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let mut m: HashMap<String, u8> = HashMap::new();
         m.insert("不在任何组的固定根".to_string(), 99); // 非法键但被跳过
         let (asg, filled) = keymap_to_assignment(&ctx, &m, &mut rng).unwrap();
@@ -478,12 +478,12 @@ mod keymap_assignment_tests {
         #[test]
         fn prop_full_coverage_legal(group_allowed in groups_strategy()) {
             let ctx = make_ctx(&group_allowed);
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
             let mut root_to_key: HashMap<String, u8> = HashMap::new();
             let mut chosen = vec![0u8; group_allowed.len()];
             for gi in 0..group_allowed.len() {
                 let allowed = &group_allowed[gi];
-                let k = allowed[rng.gen_range(0..allowed.len())];
+                let k = allowed[rng.random_range(0..allowed.len())];
                 chosen[gi] = k;
                 root_to_key.insert(format!("g{gi}"), k);
             }
@@ -499,7 +499,7 @@ mod keymap_assignment_tests {
         #[test]
         fn prop_illegal_key_rejected(group_allowed in groups_strategy(), pick in 0usize..100) {
             let ctx = make_ctx(&group_allowed);
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
             let gi = pick % group_allowed.len();
             let mut root_to_key: HashMap<String, u8> = HashMap::new();
             // 99 永不在 allowed_keys（⊆ [0,3]）内 → 必为非法
@@ -512,13 +512,13 @@ mod keymap_assignment_tests {
         fn prop_partial_fill(group_allowed in groups_strategy(), mask in any::<u64>()) {
             let n = group_allowed.len();
             let ctx = make_ctx(&group_allowed);
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
             let mut root_to_key: HashMap<String, u8> = HashMap::new();
             let mut covered = 0usize;
             for gi in 0..n {
                 if (mask >> gi) & 1 == 1 {
                     let allowed = &group_allowed[gi];
-                    let k = allowed[rng.gen_range(0..allowed.len())];
+                    let k = allowed[rng.random_range(0..allowed.len())];
                     root_to_key.insert(format!("g{gi}"), k);
                     covered += 1;
                 }

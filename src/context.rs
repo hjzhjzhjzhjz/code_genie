@@ -1070,7 +1070,7 @@ mod candidate_set_tests {
     use crate::evaluator::Evaluator;
     use crate::types::{RootGroup, ScaleConfig, SimpleCodeConfig, WeightConfig, EQUIV_TABLE_SIZE};
     use proptest::prelude::*;
-    use rand::{thread_rng, Rng};
+    use rand::Rng;
 
     /// 构建启用简码的最小 OptContext：每个频率对应一个动态组（1 字根、1 单部件汉字）。
     /// 简码级别留空（候选字集合的选取仅依赖字频与覆盖率阈值，与简码指令无关），
@@ -1297,10 +1297,10 @@ mod candidate_set_tests {
             let snapshot_cov = ctx.simple_actual_coverage;
             let mut assignment = vec![0u8; freqs.len()];
             let mut ev = Evaluator::new(&ctx, &assignment);
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
             for _ in 0..16 {
-                let r = rng.gen_range(0..freqs.len());
-                let new_key = ctx.groups[r].allowed_keys[rng.gen_range(0..3)];
+                let r = rng.random_range(0..freqs.len());
+                let new_key = ctx.groups[r].allowed_keys[rng.random_range(0..3)];
                 ev.try_move(&ctx, &mut assignment, r, new_key, 1.0, &mut rng);
             }
             prop_assert_eq!(&ctx.simple_candidate_chars, &snapshot);

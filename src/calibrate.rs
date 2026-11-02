@@ -132,13 +132,13 @@ pub fn auto_temperature(ctx: &OptContext, init: &[u8], rng: &mut impl Rng) -> Op
     let mut sum = 0.0f64;
     let mut cnt = 0usize;
     for _ in 0..SAMPLES {
-        let gi = rng.gen_range(0..n);
+        let gi = rng.random_range(0..n);
         let allowed = &ctx.groups[gi].allowed_keys;
         if allowed.len() < 2 {
             continue;
         }
         let old = init[gi];
-        let new = allowed[rng.gen_range(0..allowed.len())];
+        let new = allowed[rng.random_range(0..allowed.len())];
         if new == old {
             continue;
         }

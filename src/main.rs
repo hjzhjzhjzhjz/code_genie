@@ -1112,13 +1112,13 @@ fn run_bench(cfg: &Config, iters: usize, steps: usize) {
     {
         let mut ev = Evaluator::new(&ctx, &assign);
         let mut a = assign.clone();
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let t = Instant::now();
         let mut acc = 0usize;
         for _ in 0..iters {
-            let gi = rng.gen_range(0..n);
+            let gi = rng.random_range(0..n);
             let allowed = &ctx.groups[gi].allowed_keys;
-            let nk = allowed[rng.gen_range(0..allowed.len())];
+            let nk = allowed[rng.random_range(0..allowed.len())];
             if ev.try_move(&ctx, &mut a, gi, nk, bench_temp, &mut rng) {
                 acc += 1;
             }
@@ -1137,12 +1137,12 @@ fn run_bench(cfg: &Config, iters: usize, steps: usize) {
         {
             let mut ev = Evaluator::new(&ctx, &assign);
             let mut a = assign.clone();
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             let t = Instant::now();
             let mut acc = 0usize;
             for _ in 0..iters {
-                let r1 = rng.gen_range(0..n);
-                let r2 = rng.gen_range(0..n - 1);
+                let r1 = rng.random_range(0..n);
+                let r2 = rng.random_range(0..n - 1);
                 let r2 = if r2 >= r1 { r2 + 1 } else { r2 };
                 let k1 = a[r1];
                 let k2 = a[r2];
@@ -1167,7 +1167,7 @@ fn run_bench(cfg: &Config, iters: usize, steps: usize) {
         {
             let mut ev = Evaluator::new(&ctx, &assign);
             let mut a = assign.clone();
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             let t = Instant::now();
             let mut acc = 0usize;
             for _ in 0..iters {
@@ -1187,7 +1187,7 @@ fn run_bench(cfg: &Config, iters: usize, steps: usize) {
 
     // 5) 自动调温（一次性探测）
     let auto = {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let t = Instant::now();
         let r = auto_temperature(&ctx, &assign, &mut rng);
         let dt = t.elapsed().as_secs_f64();
@@ -2252,7 +2252,7 @@ fn run_optimize(
     let sa_cfg = {
         let mut c = cfg.clone();
         let init = annealing::deterministic_init(&ctx, cfg);
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         match auto_temperature(&ctx, &init, &mut rng) {
             Some((t0, t1)) => {
                 c.annealing.temp_start = t0;
@@ -2324,7 +2324,7 @@ fn run_optimize(
     let seeds: Vec<Vec<u8>> = if seed_paths.is_empty() {
         Vec::new()
     } else {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut v = Vec::with_capacity(seed_paths.len());
         for p in &seed_paths {
             let map = must(loader::load_keymap(p, &cfg.files.splits));

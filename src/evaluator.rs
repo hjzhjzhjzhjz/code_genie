@@ -3231,7 +3231,7 @@ impl Evaluator {
         let new_score = self.get_score(ctx);
         let delta = new_score - old_score;
 
-        if delta <= 0.0 || rng.gen::<f64>() < (-delta / temp).exp() {
+        if delta <= 0.0 || rng.random::<f64>() < (-delta / temp).exp() {
             if needs_simple {
                 self.commit_simple();
             }
@@ -3343,7 +3343,7 @@ impl Evaluator {
         let new_score = self.get_score(ctx);
         let delta = new_score - old_score;
 
-        if delta <= 0.0 || rng.gen::<f64>() < (-delta / temp).exp() {
+        if delta <= 0.0 || rng.random::<f64>() < (-delta / temp).exp() {
             if needs_simple {
                 self.commit_simple();
             }
@@ -3388,7 +3388,6 @@ mod first_candidate_tests {
         WeightConfig, EQUIV_TABLE_SIZE,
     };
     use proptest::prelude::*;
-    use rand::thread_rng;
     use std::collections::HashMap;
 
     // 后端选择日志行（需求 12.2/12.3/12.4/12.6）：数字均来自运行时参数。
@@ -3535,7 +3534,7 @@ mod first_candidate_tests {
         assert!(!ev.simple_active, "简码关闭时 simple_active 应为 false");
         assert!(ev.simple_eval.is_none(), "简码关闭时不应有简码评估器");
 
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         for step in 0..3000usize {
             let r = step % n;
             let nk = (step % 4) as u8;
@@ -3569,7 +3568,7 @@ mod first_candidate_tests {
             let n = freqs.len();
             let mut assignment = vec![0u8; n];
             let mut ev = Evaluator::new(&ctx, &assignment);
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
 
             // 初始状态即应与从头重算一致
             let expected0 = expected_first_candidates(&ctx, &assignment);
@@ -5346,7 +5345,7 @@ mod rollback_roundtrip_tests {
         };
 
         check(&ev);
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         for step in 0..2000usize {
             let r = step % n;
             let nk = (step % 2) as u8;
@@ -5400,7 +5399,7 @@ mod rollback_roundtrip_tests {
         };
 
         assert_dist_matches(&assignment, &ev);
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         for step in 0..3000usize {
             let r = step % n;
             let nk = (step % 2) as u8;
@@ -5855,7 +5854,6 @@ mod hot_path_no_full_rebuild_tests {
         SimpleCodeStep, WeightConfig, EQUIV_TABLE_SIZE,
     };
     use proptest::prelude::*;
-    use rand::thread_rng;
     use std::collections::HashMap;
 
     /// 构建启用简码、含 3 个级别、参数化分配模式 / 每级编码数 / 候选覆盖率的最小 OptContext。
@@ -5973,10 +5971,10 @@ mod hot_path_no_full_rebuild_tests {
         assert!(ev.simple_eval.is_some() && ev.simple_active, "简码应已激活");
 
         let baseline = ev.full_rebuild_calls();
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
 
         // 找一个确有简码影响的组，从键 0 移到键 1。
-        // temp = +∞ ⟹ exp(-delta/temp) = 1.0 > rng.gen()∈[0,1)，与 rng 无关地必然接受。
+        // temp = +∞ ⟹ exp(-delta/temp) = 1.0 > rng.random()∈[0,1)，与 rng 无关地必然接受。
         let r = (0..n_groups)
             .find(|&g| ev.has_simple_impact(&ctx, g))
             .expect("应存在受简码影响的组");
@@ -6028,10 +6026,10 @@ mod hot_path_no_full_rebuild_tests {
         assert!(ev.has_simple_impact(&ctx, 0), "组0移动应触发简码增量路径");
 
         let baseline = ev.full_rebuild_calls();
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
 
         // 把组0 从键0 移到键1 ⟹ 三字同键，重码频率从 1 暴涨到 100001，delta>0。
-        // temp = f64::MIN_POSITIVE ⟹ exp(-delta/temp) = 0.0，rng.gen()∈[0,1) 不可能 < 0 ⟹ 必然拒绝。
+        // temp = f64::MIN_POSITIVE ⟹ exp(-delta/temp) = 0.0，rng.random()∈[0,1) 不可能 < 0 ⟹ 必然拒绝。
         let rejected = !ev.try_move(&ctx, &mut assignment, 0, 1, f64::MIN_POSITIVE, &mut rng);
         assert!(
             rejected,
@@ -6087,7 +6085,7 @@ mod hot_path_no_full_rebuild_tests {
             prop_assert!(ev.simple_eval.is_some() && ev.simple_active, "激活后简码应启用");
 
             let baseline = ev.full_rebuild_calls();
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
 
             let mut accepted = 0usize;
             let mut rejected = 0usize;
@@ -7934,7 +7932,6 @@ mod targets_proptest {
         WeightConfig, EQUIV_TABLE_SIZE,
     };
     use proptest::prelude::*;
-    use rand::thread_rng;
     use std::collections::HashMap;
 
     /// 5 个动态组，每组 1 根 1 字，允许 4 个键。
@@ -8204,7 +8201,7 @@ mod targets_proptest {
             prop_assume!(ev.get_metrics(&ctx).collision_count >= 1);
 
             let 旧键 = assignment[0];
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
             // 温度极高：若无硬约束必定接受，故拒绝只能来自 _max
             let 接受 = ev.try_move(&ctx, &mut assignment, 0, 新键, 1e12, &mut rng);
 
@@ -8228,7 +8225,7 @@ mod targets_proptest {
             let mut assignment: Vec<u8> = vec![0, 1, 2, 3, 0];
             let mut ev = Evaluator::new(&ctx, &assignment);
 
-            let mut rng = thread_rng();
+            let mut rng = rand::rng();
             // 温度极高 → 接受概率 ≈ 1，若被拒只可能是硬约束误判
             let 接受 = ev.try_move(&ctx, &mut assignment, 0, 新键, 1e12, &mut rng);
             prop_assert!(接受, "全部 _max=0 时不应因硬约束拒绝");
