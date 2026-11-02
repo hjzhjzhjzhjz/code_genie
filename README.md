@@ -41,6 +41,7 @@ cargo build --release
 | `merge` | 字根归并对比 | `code_genie merge --keymap 字根键位表.txt --chaifen 拆分全表.txt --rules "还=人"` |
 | `diagnose` | 批量诊断码表目录 | `code_genie diagnose --dir runs` |
 | `clusters` | 聚类重码分析：某一行聚类压成一个大码，要付出多少重码 | `code_genie clusters --per-row` |
+| `zigen` | 字形变体表：`zigen-<方案>.csv` + `roots-mapping.tsv` + `zigen-trainer-<方案>.json` | `code_genie zigen --schema moling --source moling` |
 
 ## 输入文件
 
@@ -140,6 +141,7 @@ src/
 ├── sentence.rs      # 整句准确率（内置 Viterbi / 外部 librime）
 ├── pipeline.rs      # 取码推导表 + 字根归并对比
 ├── clusters.rs      # 聚类重码分析（复用 prepare 的编码展开）
+├── zigen.rs         # 字形变体表（zigen csv / 字根映射 / zigen-trainer 卡组）
 ├── diagnose.rs      # 码表诊断
 ├── assess.rs        # 宇浩测评对比 + 方案档案
 ├── handfeel.rs      # 手感指标（速度当量、选重、同指连击）

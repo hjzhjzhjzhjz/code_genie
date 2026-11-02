@@ -41,6 +41,7 @@ mod sentence;
 mod simple;
 mod types;
 mod validate;
+mod zigen;
 
 use crate::annealing::{simulated_annealing_resumable, SaResult};
 use crate::calibrate::{auto_temperature, calibrate_scales};
@@ -446,6 +447,30 @@ enum Commands {
         #[arg(long)]
         per_row: bool,
     },
+
+    /// 字形变体表：生成 zigen-<方案>.csv / roots-mapping.tsv / zigen-trainer-<方案>.json
+    #[command(name = "zigen")]
+    Zigen {
+        /// 方案名：只用于拼产物文件名
+        #[arg(long, default_value = "moling")]
+        schema: String,
+
+        /// 字根键位表（output-keymap.txt 或 字根键位表.txt）
+        #[arg(long, default_value = "output-keymap.txt")]
+        keymap: String,
+
+        /// 源目录：取 yuhao-zigens.csv / 字根声韵.txt / roots-cluster.txt
+        #[arg(long, default_value = ".")]
+        source: String,
+
+        /// 输出目录
+        #[arg(long, default_value = ".")]
+        out: String,
+
+        /// 字根数与 yuhao-zigens.csv 不一致时按失败退出（原脚本行为）
+        #[arg(long)]
+        strict: bool,
+    },
 }
 
 // =========================================================================
@@ -523,6 +548,29 @@ fn main() {
             逐行: *per_row,
         };
         if let Err(e) = clusters::run(&参) {
+            eprintln!("❌ {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    // zigen 同理：只读 prepare 的产物与上游 csv，不依赖主配置
+    if let Some(Commands::Zigen {
+        schema,
+        keymap,
+        source,
+        out,
+        strict,
+    }) = &cli.command
+    {
+        let 参 = zigen::参数 {
+            方案: schema.clone(),
+            键位文件: keymap.clone(),
+            源目录: source.clone(),
+            输出目录: out.clone(),
+            严格: *strict,
+        };
+        if let Err(e) = zigen::run(&参) {
             eprintln!("❌ {}", e);
             std::process::exit(1);
         }
@@ -714,6 +762,7 @@ fn main() {
         // prepare 在加载配置之前就已返回，这里只是让 match 完备
         Some(Commands::Prepare { .. }) => unreachable!("prepare 已在加载配置前处理"),
         Some(Commands::Clusters { .. }) => unreachable!("clusters 已在加载配置前处理"),
+        Some(Commands::Zigen { .. }) => unreachable!("zigen 已在加载配置前处理"),
         None => run_optimize_rounds(&cfg, &cli.config, None, None, None, None, cli.rounds),
     }
 }

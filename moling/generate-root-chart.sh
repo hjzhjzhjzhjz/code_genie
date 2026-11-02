@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# 说明：本脚本的纯数据产物已由 `code_genie` 覆盖，不必再跑前半段：
+#   roots.tsv / chaifen.tsv / mabiao.tsv  → `code_genie chart` / `export`
+#   roots-mapping.tsv / zigen-*.csv / zigen-trainer-*.json → `code_genie zigen`
+# 仅剩「调 $TYPER_ROOT 的 perl 脚本出 .js 与 .html」这一段没有 Rust 替代。
 
 set -euo pipefail
 shopt -s failglob
