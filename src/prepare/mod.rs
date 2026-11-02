@@ -17,12 +17,12 @@
 // 复用已有的 `全字频表.txt`）；`--baseline-dir` 用于把产物与一份基线逐字节对照。
 // =========================================================================
 
-mod inputs;
+pub(crate) mod inputs;
 pub mod names;
 mod roots;
-mod schema;
+pub(crate) mod schema;
 mod tables;
-mod text;
+pub(crate) mod text;
 
 use std::path::{Path, PathBuf};
 

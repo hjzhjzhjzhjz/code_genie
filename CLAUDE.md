@@ -32,6 +32,9 @@ cargo run --release -- sentence --full-dict pkg.full.dict.yaml --corpus 语料.t
 cargo run --release -- pipeline --keymap 字根键位表.txt --chaifen moling/拆分全表.txt --top 5
 cargo run --release -- merge --keymap 字根键位表.txt --chaifen moling/拆分全表.txt --rules "还=人"
 cargo run --release -- diagnose --dir runs
+
+# 聚类重码分析：哪一行聚类压成大码代价最高（默认读 roots-cluster.txt）
+cargo run --release -- clusters --per-row --schema moling
 cargo run --release -- chart --keymap 字根键位表.txt
 
 # 从上游 yaml/lua/csv 数据重新生成优化器输入文件（原 moling/prepare-inputs.sh）
@@ -44,7 +47,7 @@ cargo test --release
 ```
 
 全局参数：`-c/--config`（默认 `config.toml`）、`--rounds N`（多轮播种，默认 1）。
-子命令共 14 个：`optimize`(默认) / `resume` / `prepare` / `bench` / `encode` / `evaluate` /
+子命令共 15 个：`optimize`(默认) / `resume` / `prepare` / `clusters` / `bench` / `encode` / `evaluate` /
 `export` / `chart` / `assess` / `rime-convert` / `sentence` / `pipeline` / `merge` / `diagnose`。
 
 ## 核心架构
@@ -59,7 +62,7 @@ cargo test --release
 
 | 模块 | 职责 |
 |------|------|
-| `main.rs` | CLI 入口（clap），14 个子命令的分发、多轮播种、尺度解析、收尾保存编排 |
+| `main.rs` | CLI 入口（clap），15 个子命令的分发、多轮播种、尺度解析、收尾保存编排 |
 | `prepare/` | `prepare` 子命令：把上游 yaml/lua/csv 数据加工成优化器输入文件（13 步，逐字节等价重写原 `moling/prepare-inputs.sh`）；`schema.rs` 存三套方案的参数表 |
 | `annealing.rs` | 混合优化算法核心：4 种初始化策略、multi-start + hill climb 热身、冲突导向邻域搜索、SA 主循环 |
 | `context.rs` | `OptContext` 构建所有优化数据：字根组、汉字信息、当量表、简码配置、反向索引 |
@@ -76,6 +79,7 @@ cargo test --release
 | `rime_convert.rs` | 以星月方案包为底包，只重算 chaifen/full/words/quick/short/roots 六张表的码 |
 | `sentence.rs` | 整句准确率：逐单元首候选 + 连续码流解码；词典吃 dict.yaml 或纯 TSV；可调外部 librime 解码器 |
 | `pipeline.rs` | 逐字取码推导表（Markdown）与字根归并对比 |
+| `clusters.rs` | 聚类重码分析：复用 `prepare::inputs::展开` 得到码位序列，按五种取码法（去第 0~3 码、全码）统计动重/静重/组数；`--per-row` 逐行代入聚类表与基线做差 |
 | `diagnose.rs` | 批量诊断码表目录（重码、当量、分布、选重） |
 | `assess.rs` | 调 yuhao-assess 跑测评、出对比表、生成可导入网页版的方案档案 |
 | `handfeel.rs` | 手感指标：速度当量、动态选重、同指连击率、换手率 |

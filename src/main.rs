@@ -22,6 +22,7 @@ mod assess;
 mod bucket_store;
 mod calibrate;
 mod checkpoint;
+mod clusters;
 mod config;
 mod context;
 mod diagnose;
@@ -413,6 +414,38 @@ enum Commands {
         #[arg(long)]
         config: Option<String>,
     },
+
+    /// 聚类重码分析：某一行聚类压成一个大码，要付出多少重码
+    #[command(name = "clusters")]
+    Clusters {
+        /// 方案名：moling（魔靈）/ yuling（靈明）/ yustar（星陳），决定编码规则
+        #[arg(long, default_value = "moling")]
+        schema: String,
+
+        /// 纯根名拆分表（字<TAB>根 根 …<TAB>频次）
+        #[arg(long, default_value = crate::prepare::names::拆分表)]
+        chaifen: String,
+
+        /// 字根声韵表（根<TAB>声韵<TAB>拼音）
+        #[arg(long, default_value = crate::prepare::names::字根声韵)]
+        roots: String,
+
+        /// 飞键根表；文件不存在按无飞键处理
+        #[arg(long, default_value = "roots-fly.txt")]
+        fly: String,
+
+        /// 聚类表路径，或直接写 "根1 根2 ; 根3 根4"
+        #[arg(long, default_value = "roots-cluster.txt")]
+        cluster: String,
+
+        /// 明细只列超过这么多重的组（全码那一档不受限）
+        #[arg(long = "max-dups", default_value_t = 9)]
+        max_dups: usize,
+
+        /// 逐行代入聚类表，与「全不聚类」基线做差
+        #[arg(long)]
+        per_row: bool,
+    },
 }
 
 // =========================================================================
@@ -463,6 +496,33 @@ fn main() {
             配置: config.clone(),
         };
         if let Err(e) = prepare::run(&参) {
+            eprintln!("❌ {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    // clusters 只用 prepare 的数据文件，同样不依赖主配置
+    if let Some(Commands::Clusters {
+        schema,
+        chaifen,
+        roots,
+        fly,
+        cluster,
+        max_dups,
+        per_row,
+    }) = &cli.command
+    {
+        let 参 = clusters::参数 {
+            方案: schema.clone(),
+            拆分表: chaifen.clone(),
+            字根声韵: roots.clone(),
+            飞键: fly.clone(),
+            聚类: cluster.clone(),
+            最多重数: *max_dups,
+            逐行: *per_row,
+        };
+        if let Err(e) = clusters::run(&参) {
             eprintln!("❌ {}", e);
             std::process::exit(1);
         }
@@ -653,6 +713,7 @@ fn main() {
         Some(Commands::Bench { iters, steps }) => run_bench(&cfg, iters, steps),
         // prepare 在加载配置之前就已返回，这里只是让 match 完备
         Some(Commands::Prepare { .. }) => unreachable!("prepare 已在加载配置前处理"),
+        Some(Commands::Clusters { .. }) => unreachable!("clusters 已在加载配置前处理"),
         None => run_optimize_rounds(&cfg, &cli.config, None, None, None, None, cli.rounds),
     }
 }

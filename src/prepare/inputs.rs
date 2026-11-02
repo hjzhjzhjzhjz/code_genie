@@ -260,7 +260,10 @@ pub fn 步骤12_编码展开(上: &上下文) -> Result<(), String> {
 }
 
 /// 按方案展开码位序列（截断到 `MAX_CODE_LEN` 在展开**之后**做）
-fn 展开(
+///
+/// 返回槽位标签（`根.A` / `根.S` / `根.Y` / `根.U`），聚类重码分析直接复用这一份，
+/// 保证与优化器实际出码同口径。
+pub(crate) fn 展开(
     根: &[&str],
     码表: &HashMap<String, String>,
     飞键: &HashSet<String>,
