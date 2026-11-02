@@ -12,8 +12,8 @@ shopt -s failglob
 if [ "$FULL_FREQ_TXT" = full-freq.txt ]; then
     if [ "$USE_MIXED_FREQ" -a "$USE_MIXED_FREQ" != 0 ]; then
         echo "(0) 生成简繁混合字频表 full-freq.txt ，繁体字频权重=$USE_MIXED_FREQ ..."
-        [ -f charAbsoluteFrequencySC.json ] || curl -O https://ceping.shurufa.app/data/charAbsoluteFrequencySC.json
-        [ -f charAbsoluteFrequencyTC.json ] || curl -O https://ceping.shurufa.app/data/charAbsoluteFrequencyTC.json
+        [ -f charAbsoluteFrequencySC.json ] || curl -O --fail --retry 3 --retry-delay 2 https://ceping.shurufa.app/data/charAbsoluteFrequencySC.json
+        [ -f charAbsoluteFrequencyTC.json ] || curl -O --fail --retry 3 --retry-delay 2 https://ceping.shurufa.app/data/charAbsoluteFrequencyTC.json
 
         USE_MIXED_FREQ="$USE_MIXED_FREQ" perl -CSDA -Mautodie -Mutf8 -lE 'use JSON::PP; use POSIX; use List::Util qw/max/;
             sub read_file {
