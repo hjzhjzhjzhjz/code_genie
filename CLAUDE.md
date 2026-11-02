@@ -16,7 +16,7 @@ cargo build --release
 cargo run --release
 
 # 使用指定配置文件 + 多轮播种
-cargo run --release -- -c config.toml optimize -d out --rounds 3
+cargo run --release -- -c config.ron optimize -d out --rounds 3
 
 # 断点续算 / 压测 / 编码 / 评估
 cargo run --release -- resume -d out
@@ -52,7 +52,7 @@ cargo check
 cargo test --release
 ```
 
-全局参数：`-c/--config`（默认 `config.toml`）、`--rounds N`（多轮播种，默认 1）。
+全局参数：`-c/--config`（默认 `config.ron`）、`--rounds N`（多轮播种，默认 1）。
 子命令共 16 个：`optimize`(默认) / `resume` / `prepare` / `clusters` / `zigen` / `bench` / `encode` / `evaluate` /
 `export` / `chart` / `assess` / `rime-convert` / `sentence` / `pipeline` / `merge` / `diagnose`。
 
@@ -154,76 +154,68 @@ cargo test --release
 | `pair_equivalence.txt` | `键对 [tab] 当量值` |
 | `key_distribution.txt` | `键位 [tab] 目标% [tab] 低惩罚 [tab] 高惩罚` |
 
-## 配置文件 (config.toml)
+## 配置文件 (config.ron)
 
-从 `config.toml.example` 复制为 `config.toml` 使用。
+从 `config.ron.example` 复制为 `config.ron` 使用。
 
 关键配置项：
 
-```toml
-[files]
-fixed = "字根约束.txt"
-dynamic = "动态字根.txt"
-splits = "单字拆分.txt"                # 优化用（常用字，快）
-full_splits = "moling/拆分全表.txt"    # 全量拆分表（手动指定；留空 = 不生成完整码表）
-                                       # ⚠️ 必须与 splits 同一套根名体系，否则全量字会因缺字根被跳过
-pair_equiv = "pair_equivalence.txt"    # 字根对当量表
-key_dist = "key_distribution.txt"      # 用指分布目标
-
-[annealing]
-threads = 12              # 并行线程数
-total_steps = 2000000     # 总迭代步数
-# 温度不手工配置：运行时按初态采样 |Δscore| 自动标定 t_start / t_end
-comfort_progress = 0.5   # 舒适区在降温曲线上的位置（0~1）：0.5 = 曲线正中
-comfort_width = 0.15      # 舒适区宽度（高斯 sigma）
-comfort_slowdown = 0.7    # 舒适区减速因子 (0-1)
-swap_probability = 0.35   # 交换操作概率
-min_improve_steps_ratio = 0.1  # 无改进触发重热的步数比例
-perturb_interval_ratio = 0.05  # 扰动间隔比例（0=关闭）
-perturb_strength = 0.03        # 扰动强度（0=关闭）
-perturb_trigger_temp_ratio = 0.01  # 扰动触发阈值 = 舒适区温度 × 本比例
-perturb_temp_multiplier = 2.0      # 扰动时温度倍率
-perturb_collision_pairs_limit = 10 # 扰动优先采样的冲突对上限
-reheat_factor = 1.3            # 重热倍率（1.0=关闭）
-conflict_probability = 0.25    # 冲突导向算子概率（0=关闭）
-full_key_swap_probability = 0.01   # 整键互换算子概率（0=关闭）
-checkpoint_interval_ratio = 0.05   # checkpoint 间隔（占 total_steps 比例）
-
-[keys]
-allowed = "qwertyuiopasdfghjklzxcvbnm"
-display_order = "qwertyuiopasdfghjklzxcvbnm"
-
-[weights.full_code]
-collision_count = 0.19   # 重码数权重
-collision_rate = 0.3     # 重码率权重
-equivalence = 0.3        # 当量权重
-equiv_cv = 0.01          # 当量变异系数权重
-distribution = 0.2       # 分布偏差权重
-
-[weights.simple_code]
-enabled = true
-full_code_weight = 0.6   # 全码目标总权重
-simple_code_weight = 0.4 # 简码目标总权重
-collision_count = 0.1    # 简码重码数权重
-collision_rate = 0.3     # 简码重码率权重
-freq = 0.2               # 频率覆盖权重
-equiv = 0.2              # 当量权重
-dist = 0.2               # 分布偏差权重
-
-[[simple_levels]]
-level = 1
-code_num = 1             # 该级别分配的简码数
-rules = ["Aa"]           # 取码规则
-
-[[simple_levels]]
-level = 2
-code_num = 1
-rules = ["AaBa"]
-
-[[simple_levels]]
-level = 3
-code_num = 0             # 0 = 不分配该级别简码
-rules = ["AaAbZz", "AaBaZz"]  # 多候选规则
+```ron
+(
+    files: (
+        fixed: "字根约束.txt",
+        dynamic: "动态字根.txt",
+        splits: "单字拆分.txt",                // 优化用（常用字，快）
+        full_splits: "moling/拆分全表.txt",    // 全量拆分表（留空 = 不生成完整码表）
+                                               // ⚠️ 必须与 splits 同一套根名体系
+        pair_equiv: "pair_equivalence.txt",    // 字根对当量表
+        key_dist: "key_distribution.txt",      // 用指分布目标
+    ),
+    annealing: (
+        threads: 12,              // 并行线程数
+        total_steps: 2000000,     // 总迭代步数
+        // 温度不手工配置：运行时按初态采样 |Δscore| 自动标定 t_start / t_end
+        comfort_progress: 0.5,    // 舒适区在降温曲线上的位置（0~1）：0.5 = 曲线正中
+        comfort_width: 0.15,      // 舒适区宽度（高斯 sigma）
+        comfort_slowdown: 0.7,    // 舒适区减速因子 (0-1)
+        swap_probability: 0.35,   // 交换操作概率
+        min_improve_steps_ratio: 0.1,      // 无改进触发重热的步数比例
+        perturb_interval_ratio: 0.05,      // 扰动间隔比例（0=关闭）
+        perturb_strength: 0.03,            // 扰动强度（0=关闭）
+        reheat_factor: 1.3,                // 重热倍率（1.0=关闭）
+        conflict_probability: 0.25,        // 冲突导向算子概率（0=关闭）
+        full_key_swap_probability: 0.01,   // 整键互换算子概率（0=关闭）
+        checkpoint_interval_ratio: 0.05,   // checkpoint 间隔（占 total_steps 比例）
+    ),
+    keys: (
+        allowed: "qwertyuiopasdfghjklzxcvbnm",
+        display_order: "qwertyuiopasdfghjklzxcvbnm",
+    ),
+    weights: (
+        full_code: (
+            collision_count: 0.19,   // 重码数权重
+            collision_rate: 0.3,     // 重码率权重
+            equivalence: 0.3,        // 当量权重
+            equiv_cv: 0.01,          // 当量变异系数权重
+            distribution: 0.2,       // 分布偏差权重
+        ),
+        simple_code: (
+            enabled: true,
+            full_code_weight: 0.6,   // 全码目标总权重
+            simple_code_weight: 0.4, // 简码目标总权重
+            collision_count: 0.1,
+            collision_rate: 0.3,
+            freq: 0.2,
+            equiv: 0.2,
+            dist: 0.2,
+        ),
+    ),
+    simple_levels: [
+        (level: 1, code_num: 1, rules: ["Aa"]),                  // 该级简码数 / 取码规则
+        (level: 2, code_num: 1, rules: ["AaBa"]),
+        (level: 3, code_num: 0, rules: ["AaAbZz", "AaBaZz"]),    // 0 = 不分配该级
+    ],
+)
 ```
 
 ## 性能优化要点
@@ -252,7 +244,7 @@ rules = ["AaAbZz", "AaBaZz"]  # 多候选规则
 - `汇总.txt`: 各线程结果排名汇总
 - `尺度.json`: 固化缩放因子（供 `--scale` 复用）
 - `checkpoint/`: 断点续算数据（Ctrl-C 自动落盘）
-- `inputs/`: 本次运行所用输入文件的备份（含 config.toml）
+- `inputs/`: 本次运行所用输入文件的备份（含 config.ron）
 - `thread-XX/`: 每个线程的独立输出子目录（包含上述同名文件）
 
 > 旧版本产出的 `output-keymap.txt` / `output-encode.txt` / `output-simple-codes.txt` /

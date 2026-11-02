@@ -135,7 +135,7 @@ pub struct 参数 {
     /// 基线目录：给了就逐字节对照产物
     pub 基线目录: Option<String>,
     /// 读 `[weights.simple_code].enabled` 的配置文件；缺省在 `--dir` 下按
-    /// `config-<schema>.toml` → `config.toml` 的顺序找
+    /// `config-<schema>.ron` → `config.ron` 的顺序找
     pub 配置: Option<String>,
 }
 
@@ -198,16 +198,16 @@ pub fn run(参: &参数) -> Result<(), String> {
     Ok(())
 }
 
-/// 定位配置文件（`config-<schema>.toml` 优先，其次 `config.toml`）
+/// 定位配置文件（`config-<schema>.ron` 优先，其次 `config.ron`）
 fn 解析配置(参: &参数, 上: &上下文) -> Option<PathBuf> {
     if let Some(p) = &参.配置 {
         return Some(PathBuf::from(p));
     }
-    let 专用 = 上.目录.join(format!("config-{}.toml", 上.方案.名));
+    let 专用 = 上.目录.join(format!("config-{}.ron", 上.方案.名));
     if 专用.exists() {
         return Some(专用);
     }
-    let 默认 = 上.目录.join("config.toml");
+    let 默认 = 上.目录.join("config.ron");
     默认.exists().then_some(默认)
 }
 

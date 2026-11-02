@@ -63,16 +63,16 @@ jobs:
         with:
           node-version: 22
 
-      - name: 生成 config.toml（新版无配置直接退出，冒烟与包内共用）
+      - name: 生成 config.ron（新版无配置直接退出，冒烟与包内共用）
         run: |
           python3 - <<'PY'
           import pathlib, re
-          cfg = pathlib.Path("config.toml.example").read_text(encoding="utf-8")
+          cfg = pathlib.Path("config.ron.example").read_text(encoding="utf-8")
           for name in ["fixed", "dynamic", "splits", "pair_equiv", "key_dist"]:
-              cfg = re.sub(rf'(?m)^({name}\s*=\s*")([^"]*)(")',
+              cfg = re.sub(rf'(?m)^(\s*{name}:\s*")([^"]*)(")',
                            rf'\g<1>moling/\g<2>\g<3>', cfg)
-          pathlib.Path("config.toml").write_text(cfg, encoding="utf-8")
-          print("config.toml 已生成（[files] 指向 moling/）")
+          pathlib.Path("config.ron").write_text(cfg, encoding="utf-8")
+          print("config.ron 已生成（[files] 指向 moling/）")
           PY
 
       # 字根约束/动态字根/单字拆分/字根声韵 等是 `code_genie prepare` 的产物，不入库，
@@ -102,7 +102,7 @@ jobs:
           echo "--- 子命令清单（应含全部功能）---"
           $CG --help
           echo "--- 导出冒烟（真实数据）---"
-          $CG -c config.toml export \
+          $CG -c config.ron export \
             --keymap runs/s4-export/output-keymap.txt \
             --chaifen moling/拆分全表.txt \
             --output /tmp/全码表.txt
@@ -153,7 +153,7 @@ jobs:
           shutil.copy2("yuhao-data/literature.txt",
                        pkg / "yuhao-assess" / "public" / "texts" / "literature.txt")
 
-          shutil.copy2("config.toml", pkg / "config.toml")
+          shutil.copy2("config.ron", pkg / "config.ron")
 
           准备 = """#!/usr/bin/env bash
           # 宇浩测评环境准备：需要 Node.js 22+ 与 pnpm 9（npm i -g pnpm@9）
@@ -199,8 +199,8 @@ jobs:
               "快速开始",
               "  chmod +x code_genie 宇浩测评*.sh",
               "  ./code_genie --help                     查看全部子命令",
-              "  ./code_genie -c config.toml optimize -d out",
-              "                                          退火优化（改 config.toml 的",
+              "  ./code_genie -c config.ron optimize -d out",
+              "                                          退火优化（改 config.ron 的",
               "                                          [annealing] threads / total_steps）",
               "  中途按 Ctrl-C 会写 checkpoint，之后",
               "  ./code_genie resume -d out              断点续算",
@@ -251,7 +251,7 @@ jobs:
           (cd /tmp/yh && pnpm install --frozen-lockfile 2>&1 | tail -n 3)
           mkdir -p /tmp/assess-dir
           cp /tmp/全码表.txt /tmp/assess-dir/
-          ./target/release/code_genie -c config.toml assess \
+          ./target/release/code_genie -c config.ron assess \
             --dir /tmp/assess-dir \
             --scheme codegenie-s4.jsonc \
             --yuhao-dir /tmp/yh \

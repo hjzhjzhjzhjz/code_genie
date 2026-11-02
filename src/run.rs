@@ -44,7 +44,7 @@ use crate::prepare::{names, schema};
 
 /// 命令行参数
 pub struct 参数 {
-    /// 工作目录：`prepare`/`optimize` 的 cwd，`config*.toml` 与产物都在这里
+    /// 工作目录：`prepare`/`optimize` 的 cwd，`config*.ron` 与产物都在这里
     pub 工作目录: String,
     /// 方案名，见 [`schema::取`]
     pub 方案: String,
@@ -229,18 +229,18 @@ fn 绝对化(p: &Path) -> PathBuf {
     std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
-/// `config-<方案>.toml` 优先，其次 `config.toml`（与 `init.sh`、`prepare` 同口径）
+/// `config-<方案>.ron` 优先，其次 `config.ron`
 fn 选配置(工作: &Path, 方案名: &str) -> Result<String, String> {
-    let 专用 = format!("config-{方案名}.toml");
+    let 专用 = format!("config-{方案名}.ron");
     if 工作.join(&专用).is_file() {
         return Ok(专用);
     }
-    let 默认 = "config.toml".to_string();
+    let 默认 = "config.ron".to_string();
     if 工作.join(&默认).is_file() {
         return Ok(默认);
     }
     Err(format!(
-        "{} 下既没有 {专用} 也没有 config.toml",
+        "{} 下既没有 {专用} 也没有 config.ron",
         工作.display()
     ))
 }
@@ -672,11 +672,11 @@ mod tests {
     #[test]
     fn 配置优先方案专用文件() {
         let 目录 = 临时目录("cfg");
-        std::fs::write(目录.join("config.toml"), "a").unwrap();
-        assert_eq!(选配置(&目录, "yustar").unwrap(), "config.toml");
+        std::fs::write(目录.join("config.ron"), "a").unwrap();
+        assert_eq!(选配置(&目录, "yustar").unwrap(), "config.ron");
 
-        std::fs::write(目录.join("config-yustar.toml"), "b").unwrap();
-        assert_eq!(选配置(&目录, "yustar").unwrap(), "config-yustar.toml");
+        std::fs::write(目录.join("config-yustar.ron"), "b").unwrap();
+        assert_eq!(选配置(&目录, "yustar").unwrap(), "config-yustar.ron");
         std::fs::remove_dir_all(&目录).ok();
     }
 
@@ -684,7 +684,7 @@ mod tests {
     fn 配置都不存在时报错() {
         let 目录 = 临时目录("nocfg");
         let 错 = 选配置(&目录, "moling").unwrap_err();
-        assert!(错.contains("config.toml"), "{错}");
+        assert!(错.contains("config.ron"), "{错}");
         std::fs::remove_dir_all(&目录).ok();
     }
 
@@ -710,7 +710,7 @@ mod tests {
         std::fs::create_dir_all(&工作).unwrap();
         std::fs::create_dir_all(&素材).unwrap();
 
-        std::fs::write(工作.join("config.toml"), "").unwrap();
+        std::fs::write(工作.join("config.ron"), "").unwrap();
         std::fs::write(工作.join("字根声韵.txt"), "默认").unwrap();
         std::fs::write(工作.join("字根声韵-yustar.txt"), "专用").unwrap();
         for 名 in ["拆分表.txt", "拆分全表.txt", "拆分全表-台.txt"] {
@@ -719,7 +719,7 @@ mod tests {
         std::fs::write(工作.join("roots-cluster.txt"), "").unwrap();
         std::fs::write(素材.join("charAbsoluteFrequencySC.json"), "{}").unwrap();
 
-        let 清单 = 待备份清单(&工作, &素材, "config.toml", "yustar");
+        let 清单 = 待备份清单(&工作, &素材, "config.ron", "yustar");
         let 名们: Vec<String> = 清单
             .iter()
             .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
@@ -765,10 +765,10 @@ mod tests {
         let mut 参 = 参数样例();
         参.轮数 = 3;
         参.播种目录 = Some("old".to_string());
-        let 文 = 优化任务(自身, "config.toml", "out-1", &参).渲染();
+        let 文 = 优化任务(自身, "config.ron", "out-1", &参).渲染();
         assert_eq!(
             文,
-            "code_genie -c config.toml --rounds 3 optimize -d out-1 --seed-dir old"
+            "code_genie -c config.ron --rounds 3 optimize -d out-1 --seed-dir old"
         );
     }
 
@@ -781,8 +781,8 @@ mod tests {
         参.轮数 = 5;
         参.播种目录 = Some("old".to_string());
         参.尺度 = Some("尺度.json".to_string());
-        let 文 = 优化任务(自身, "config.toml", "out-1", &参).渲染();
-        assert_eq!(文, "code_genie -c config.toml resume -d out-1");
+        let 文 = 优化任务(自身, "config.ron", "out-1", &参).渲染();
+        assert_eq!(文, "code_genie -c config.ron resume -d out-1");
     }
 
     #[test]

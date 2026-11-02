@@ -90,7 +90,7 @@ impl 方案 {
     }
 }
 
-/// 魔灵（@qq3qq）：仓库默认方案，`moling/config.toml` 用它
+/// 魔灵（@qq3qq）：仓库默认方案，`moling/config.ron` 用它
 pub const 魔灵: 方案 = 方案 {
     名: "moling",
     名称: "魔靈",

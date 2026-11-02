@@ -66,7 +66,7 @@ use crate::types::{
 #[command(name = "CodeGenie", about = "字根编码优化器", version)]
 struct Cli {
     /// 配置文件路径
-    #[arg(short = 'c', long, default_value = "config.toml")]
+    #[arg(short = 'c', long, default_value = "config.ron")]
     config: String,
 
     /// 多轮播种：连续跑 N 轮，第 2 轮起用上一轮输出目录自播种并复用其尺度（默认 1 = 单轮）。
@@ -116,7 +116,7 @@ enum Commands {
     /// 原 `moling/optimize.sh` 的 Rust 实现（该脚本已删除，功能完全由本子命令取代）。
     #[command(name = "run")]
     Run {
-        /// 工作目录：prepare/optimize 的 cwd，config*.toml 与产物都在这里
+        /// 工作目录：prepare/optimize 的 cwd，config*.ron 与产物都在这里
         #[arg(long = "dir", default_value = "moling")]
         dir: String,
 
@@ -523,7 +523,7 @@ enum Commands {
         baseline_dir: Option<String>,
 
         /// 读取 `[weights.simple_code].enabled` 的配置文件；缺省在 --dir 下
-        /// 按 `config-<schema>.toml` → `config.toml` 的顺序自动查找
+        /// 按 `config-<schema>.ron` → `config.ron` 的顺序自动查找
         #[arg(long)]
         config: Option<String>,
     },
@@ -1052,7 +1052,7 @@ fn main() {
 
 /// 基准测试：压测目标函数评估、邻域算子（含新增 full_key_swap）、自动调温与 SA 吞吐。
 ///
-/// 用法：`cargo run --release -- -c config.toml.example bench [--iters N] [--steps N]`
+/// 用法：`cargo run --release -- -c config.ron bench [--iters N] [--steps N]`
 fn run_bench(cfg: &Config, iters: usize, steps: usize) {
     println!("=== CodeGenie 基准测试 ===");
     println!("  迭代: {}    SA 步数: {}", iters, steps);
@@ -2751,8 +2751,8 @@ fn backup_inputs(cfg: &Config, cli_config_path: &str, output_dir: &str) {
         eprintln!("⚠️ 创建 inputs 目录失败: {}", e);
         return;
     }
-    // config 文件固定备份为 config.toml，确保 resume 能用硬编码路径找到它。
-    let dst = format!("{}/config.toml", inputs_dir);
+    // config 文件固定备份为 config.ron，确保 resume 能用硬编码路径找到它。
+    let dst = format!("{}/config.ron", inputs_dir);
     if let Err(e) = fsutil::copy_with_backup(cli_config_path, &dst) {
         eprintln!("⚠️ 备份输入文件 {} 失败: {}", cli_config_path, e);
     }
@@ -2797,7 +2797,7 @@ fn run_resume(dir: &str) {
 
     // 2) 从备份的 inputs/ 读取配置与输入（只读，需求 7.2/7.3）。
     let inputs_dir = format!("{}/inputs", dir);
-    let config_path = format!("{}/config.toml", inputs_dir);
+    let config_path = format!("{}/config.ron", inputs_dir);
     // #1：resume 同样不能静默回退默认配置，解析失败直接报错退出。
     let mut cfg = match Config::load_from_path(&config_path) {
         Ok(c) => c,
@@ -2941,7 +2941,7 @@ mod backup_tests {
         std::fs::create_dir_all(&out).unwrap();
 
         let files = [
-            ("config.toml", "config-content"),
+            ("config.ron", "config-content"),
             ("input-fixed.txt", "fixed-content"),
             ("input-roots.txt", "roots-content"),
             ("input-division.txt", "division-content"),
@@ -2964,7 +2964,7 @@ mod backup_tests {
             .join("key_distribution.txt")
             .to_string_lossy()
             .to_string();
-        let config_path = src.join("config.toml").to_string_lossy().to_string();
+        let config_path = src.join("config.ron").to_string_lossy().to_string();
 
         backup_inputs(&cfg, &config_path, &out.to_string_lossy());
 
@@ -2983,9 +2983,9 @@ mod backup_tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// config 文件名非 config.toml 时，备份后应固定叫 config.toml，确保 resume 能找到它。
+    /// config 文件名非 config.ron 时，备份后应固定叫 config.ron，确保 resume 能找到它。
     #[test]
-    fn backup_inputs_renames_config_to_config_toml() {
+    fn backup_inputs_renames_config_to_config_ron() {
         let base = std::env::temp_dir().join(format!("cg_backup_rename_{}", std::process::id()));
         let src = base.join("src");
         let out = base.join("output-test");
@@ -2993,7 +2993,7 @@ mod backup_tests {
         std::fs::create_dir_all(&out).unwrap();
 
         // config 文件使用非默认名称
-        let custom_config = "my-custom-config.toml";
+        let custom_config = "my-custom-config.ron";
         std::fs::write(src.join(custom_config), "custom-config-content").unwrap();
         std::fs::write(src.join("input-fixed.txt"), "fixed").unwrap();
         std::fs::write(src.join("input-roots.txt"), "roots").unwrap();
@@ -3018,9 +3018,9 @@ mod backup_tests {
         backup_inputs(&cfg, &config_path, &out.to_string_lossy());
 
         let inputs = out.join("inputs");
-        // 固定备份为 config.toml，内容与源文件一致
-        let dst = inputs.join("config.toml");
-        assert!(dst.exists(), "备份的 config 文件应命名为 config.toml");
+        // 固定备份为 config.ron，内容与源文件一致
+        let dst = inputs.join("config.ron");
+        assert!(dst.exists(), "备份的 config 文件应命名为 config.ron");
         assert_eq!(
             std::fs::read_to_string(&dst).unwrap(),
             "custom-config-content"

@@ -16,24 +16,26 @@ use crate::types::{
 // =========================================================================
 
 /// 主配置结构体
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
     pub files: FilesConfig,
     pub keys: KeysConfig,
     pub weights: WeightsConfig,
     pub annealing: AnnealingConfig,
     pub simple_levels: Vec<SimpleLevelConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scale: Option<ScaleConfigToml>, // 可选，缺失则完全依赖 calibrate
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub targets: Option<TargetsConfig>, // 可选，缺失则使用默认（disabled）
     /// 固定简码映射（需求 21）：顶层内联表 `[fixed_simple_codes]`，形如 `"不" = "u"`、
     /// `"了" = "a_"`。键为汉字、值为字面简码串（可选以 `_` 结尾表示空格上屏）。
     /// 缺失时为 None。用 `BTreeMap` 保证遍历顺序确定。
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fixed_simple_codes: Option<BTreeMap<String, String>>,
 }
 
 /// 文件路径配置
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FilesConfig {
     pub fixed: String,
     pub dynamic: String,
@@ -48,7 +50,7 @@ pub struct FilesConfig {
 }
 
 /// 键位配置
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct KeysConfig {
     pub allowed: String,
     pub display_order: String,
@@ -62,14 +64,14 @@ fn default_termination_keys() -> String {
 }
 
 /// 权重配置
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WeightsConfig {
     pub full_code: FullCodeWeights,
     pub simple_code: SimpleCodeWeights,
 }
 
 /// 全码权重
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FullCodeWeights {
     pub collision_count: f64,
     pub collision_rate: f64,
@@ -79,7 +81,7 @@ pub struct FullCodeWeights {
 }
 
 /// 简码权重
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SimpleCodeWeights {
     pub enabled: bool,
     pub full_code_weight: f64,
@@ -146,7 +148,7 @@ fn default_simple_protect_top_n() -> usize {
 }
 
 /// 模拟退火参数配置
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AnnealingConfig {
     pub threads: usize,
     pub total_steps: usize,
@@ -317,18 +319,18 @@ impl Default for SimpleCodeTargets {
 }
 
 /// 简码级别配置（TOML 格式）
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SimpleLevelConfig {
     pub level: usize,
     pub code_num: usize,
     pub rules: Vec<String>,
     /// 上屏键序列（需求 20）：字符串，按优先级列出上屏键（字母为主键盘键、`_` 为空格）。
     /// 缺省为空串（自动上屏）。`_` 只允许在首或尾。
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit_keys: Option<String>,
     /// 【已废弃】是否空格上屏（需求 20.10 兼容）：仅当未配置 `commit_keys` 时生效，
     /// `Some(true)` 映射为 `commit_keys="_"`、`Some(false)` 映射为 `commit_keys=""`，并打废弃告警。
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub space_commit: Option<bool>,
     /// 上屏键异手过滤（需求 37）：为真时退火出简仅用与核心末键异手的字母上屏键与 `_`。缺省 false。
     #[serde(default)]
@@ -345,7 +347,7 @@ pub struct TargetsConfig {
 }
 
 /// TOML 可选 scale 配置（所有字段 Option<f64>，对应 [scale] 段）
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct ScaleConfigToml {
     pub collision_count: Option<f64>,
     pub collision_rate: Option<f64>,
@@ -372,7 +374,7 @@ impl Config {
         let content =
             fs::read_to_string(path).map_err(|e| format!("无法读取配置文件 {}: {}", path, e))?;
         let config: Self =
-            toml::from_str(&content).map_err(|e| format!("配置文件解析失败 {}: {}", path, e))?;
+            ron::from_str(&content).map_err(|e| format!("配置文件解析失败 {}: {}", path, e))?;
         println!("✅ 已加载配置文件: {}", path);
         Ok(config)
     }
@@ -1414,5 +1416,18 @@ dist_max = 8.0
         cfg2.weights.simple_code.simple_activation_reheat = 3.0;
         cfg2.validate_simple_activation();
         assert_eq!(cfg2.weights.simple_code.simple_activation_reheat, 3.0);
+    }
+
+    #[test]
+    fn ron_配置往返一致() {
+        // 序列化再解析回来，验证 RON 路径与结构体定义一致（含默认字段）
+        let cfg = Config::default();
+        let ron_text = ron::ser::to_string_pretty(&cfg, ron::ser::PrettyConfig::default()).unwrap();
+        let back: Config = ron::from_str(&ron_text).expect("RON 解析失败");
+        assert_eq!(back.annealing.total_steps, cfg.annealing.total_steps);
+        assert_eq!(
+            back.weights.full_code.collision_count,
+            cfg.weights.full_code.collision_count
+        );
     }
 }
