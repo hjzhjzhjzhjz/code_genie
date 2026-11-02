@@ -31,3 +31,6 @@ moling/飞键候选.txt
 moling/字根约束.txt
 moling/动态字根.txt
 moling/单字拆分.txt
+
+# 本地优化存档（某次退火的本地留档，不入库，仅本地参考）
+runs/0.0220-0.1113/
