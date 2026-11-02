@@ -32,6 +32,7 @@ mod handfeel;
 mod loader;
 mod output;
 mod pipeline;
+mod prepare;
 mod rime_convert;
 mod root_chart;
 mod schedule;
@@ -382,6 +383,36 @@ enum Commands {
         #[arg(long)]
         summary: Option<String>,
     },
+
+    /// 从上游 yaml/lua/csv 数据加工出优化器要的输入文件
+    /// （`moling/prepare-inputs.sh` 的原生子命令实现，共 13 个步骤）
+    #[command(name = "prepare")]
+    Prepare {
+        /// 工作目录，相当于脚本里的 cwd
+        #[arg(long, default_value = "moling")]
+        dir: String,
+
+        /// 方案名：moling（魔靈）/ yuling（靈明）/ yustar（星陳）
+        #[arg(long, default_value = "moling")]
+        schema: String,
+
+        /// 起始步骤（0~13），用于分段调试
+        #[arg(long = "from-step", default_value_t = 0)]
+        from_step: usize,
+
+        /// 结束步骤（0~13）
+        #[arg(long = "to-step", default_value_t = 13)]
+        to_step: usize,
+
+        /// 基线目录：给了就把产物与之逐字节对照，有差异即报错
+        #[arg(long = "baseline-dir")]
+        baseline_dir: Option<String>,
+
+        /// 读取 `[weights.simple_code].enabled` 的配置文件；缺省在 --dir 下
+        /// 按 `config-<schema>.toml` → `config.toml` 的顺序自动查找
+        #[arg(long)]
+        config: Option<String>,
+    },
 }
 
 // =========================================================================
@@ -412,6 +443,31 @@ fn or_warn_default<T: Default>(r: Result<T, String>) -> T {
 
 fn main() {
     let cli = Cli::parse();
+
+    // prepare 不依赖主配置（它跑在输入文件还不存在的时候），因此在加载 config 之前先处理
+    if let Some(Commands::Prepare {
+        dir,
+        schema,
+        from_step,
+        to_step,
+        baseline_dir,
+        config,
+    }) = &cli.command
+    {
+        let 参 = prepare::参数 {
+            目录: dir.clone(),
+            方案: schema.clone(),
+            从步骤: *from_step,
+            到步骤: *to_step,
+            基线目录: baseline_dir.clone(),
+            配置: config.clone(),
+        };
+        if let Err(e) = prepare::run(&参) {
+            eprintln!("❌ {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
 
     // 加载配置（#1：解析失败直接报错退出，不再静默回退默认配置）
     let cfg = match Config::load_from_path(&cli.config) {
@@ -595,6 +651,8 @@ fn main() {
             cli.rounds,
         ),
         Some(Commands::Bench { iters, steps }) => run_bench(&cfg, iters, steps),
+        // prepare 在加载配置之前就已返回，这里只是让 match 完备
+        Some(Commands::Prepare { .. }) => unreachable!("prepare 已在加载配置前处理"),
         None => run_optimize_rounds(&cfg, &cli.config, None, None, None, None, cli.rounds),
     }
 }

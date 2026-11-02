@@ -75,22 +75,22 @@ jobs:
           print("config.toml 已生成（[files] 指向 moling/）")
           PY
 
-      # input-fixed/input-roots/input-division/roots 等是 prepare-inputs.sh 的产物，不入库，
-      # 打包与后续步骤需要它们，必须先重建。脚本全程相对路径（第 8 行 . ./init.sh），
-      # 所以 working-directory 必须是 moling/。
-      - name: 生成码灵输入文件（prepare-inputs.sh）
-        working-directory: moling
+      # input-fixed/input-roots/input-division/roots 等是 `code_genie prepare` 的产物，不入库，
+      # 打包与后续步骤需要它们，必须先重建。原先的 moling/prepare-inputs.sh（bash + 内嵌 Perl）
+      # 已由 Rust 子命令取代，路径不再要求先 cd 到 moling/。
+      - name: 生成码灵输入文件（code_genie prepare）
         run: |
           set -euo pipefail
-          bash prepare-inputs.sh 2>&1 | tee prepare-inputs.log
+          ./target/release/code_genie prepare --dir moling 2>&1 | tee prepare-inputs.log
           echo "--- 产物校验 ---"
-          # input-roots.txt 由脚本第 (11) 步生成为**空文件**（字根全在 input-fixed 里），
+          # input-roots.txt 由第 (11) 步生成为**空文件**（字根全在 input-fixed 里），
           # 只校验存在性；其余三个必须有内容。
           for f in input-fixed.txt input-division.txt roots.txt; do
-            [ -s "$f" ] || { echo "❌ $f 缺失或为空"; exit 1; }
+            [ -s "moling/$f" ] || { echo "❌ $f 缺失或为空"; exit 1; }
           done
-          [ -e input-roots.txt ] || { echo "❌ input-roots.txt 缺失"; exit 1; }
-          sha256sum input-fixed.txt input-roots.txt input-division.txt roots.txt \
+          [ -e "moling/input-roots.txt" ] || { echo "❌ input-roots.txt 缺失"; exit 1; }
+          sha256sum moling/input-fixed.txt moling/input-roots.txt \
+                    moling/input-division.txt moling/roots.txt \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: 功能冒烟（全子命令 + 真实数据跑通导出）
@@ -133,7 +133,7 @@ jobs:
                       "codegenie-s4.jsonc"]
           missing = [f for f in required if not pathlib.Path(f).exists()]
           if missing:
-              raise SystemExit("缺少打包所需文件（应在 prepare-inputs.sh 步骤生成）："
+              raise SystemExit("缺少打包所需文件（应在 code_genie prepare 步骤生成）："
                                + ", ".join(missing))
 
           for f in required:

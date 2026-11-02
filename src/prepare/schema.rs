@@ -1,0 +1,167 @@
+// =========================================================================
+// 🧩 prepare 的方案参数表
+// =========================================================================
+//
+// 对应 `moling/init.sh` 里的 `case "$SCHEMA" in ...)` 分支：每个方案由一组
+// 常量构成（编码规则、韵码来源、字频混合权重、键位分档、声韵修正开关……）。
+// 这些值是方案的**定义**而非本地可调参数，因此写进代码而不是 TOML；
+// 构建链要换方案只需 `--schema <名>`。
+//
+// 与 bash 版的差异：bash 支持 moling/moqing/xiaoming/yaoling/yueling/yuling
+// 六套，这里只实现仓库实际使用与需要对照的三套（魔灵/灵明/星陈）。
+// `moqing`（三码）、`xiaoming`（五码）的声码韵码分支未移植，传入会明确报错。
+// =========================================================================
+
+/// 单字编码规则（对应 bash 版的 `ENCODE_RULE`）
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum 编码规则 {
+    /// 魔灵：A1A2A3AzSzYz，二根字回头码 A1A2S2S1Y1
+    魔灵,
+    /// 灵明：单根 ASY / 多根 A1S1A2A3AzSzYz（≥4 根且首根有声母时跳第三根）
+    灵明,
+    /// 星陈：只取 A/S 两位（1 根 A1S1S1、2 根 A1A2S2S1、3 根 A1A2A3S3、≥4 根 A1A2A3A末）
+    星陈,
+}
+
+/// 补码（韵码）来源（对应 bash 版的 `USE_VOWEL` 与方案分支）
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum 韵码来源 {
+    /// 取字根首笔笔画（`USE_VOWEL=0`），笔画还要按左右声母做手感重映射
+    首笔,
+    /// 取字根韵腹（`USE_VOWEL=1`），灵明走这条
+    韵腹,
+    /// 不出补码（星陈只取 A/S）
+    无,
+}
+
+/// 一套方案的全部生成参数
+pub struct 方案 {
+    /// 方案名（命令行 `--schema` 的取值）
+    pub 名: &'static str,
+    /// 方案中文名，仅用于日志
+    pub 名称: &'static str,
+    pub 编码规则: 编码规则,
+    pub 韵码: 韵码来源,
+    /// `USE_MIXED_FREQ`：繁体字频权重，0 表示只用简体字频
+    pub 混合字频权重: f64,
+    /// `MAX_CODE_LEN`
+    pub 最大码长: usize,
+    /// `TOP_ROOT_FREQ` / `TOP_ROOT_KEYS`
+    pub 高频字根频率: f64,
+    pub 高频字根键位: &'static str,
+    /// `HOT_ROOT_FREQ` / `HOT_ROOT_KEYS`
+    pub 中频字根频率: f64,
+    pub 中频字根键位: &'static str,
+    /// `ALL_ROOT_KEYS`
+    pub 低频字根键位: &'static str,
+    /// `OPTIMIZE_KEY_<声母>` 重映射表
+    pub 优化键: &'static [(char, char)],
+    /// `OPTIMIZE_KEYS`：交给退火优化、不写死约束的声母集合。
+    /// 现有三套方案都是空串（即全部写死），非空时本子命令不支持。
+    pub 优化声母集: &'static str,
+    /// `USE_PINYIN_DU_FOR_TU`：字根「土」是否取「杜」音 du
+    pub 土用杜音: bool,
+    /// `USE_PINYIN_VOU_FOR_KOU`：字根「口」是否取 vou 音
+    pub 口用vou音: bool,
+    /// `USE_STROKE_5_FOR_6`：笔画 6 是否并入 5
+    pub 笔画6并入5: bool,
+    /// 方案自带的字根表文件名；`None` 表示沿用 `roots.txt`
+    pub 字根表: Option<&'static str>,
+}
+
+impl 方案 {
+    /// `OPTIMIZE_KEY_<声母>` 查表
+    pub fn 优化键(&self, 声母: char) -> Option<char> {
+        self.优化键
+            .iter()
+            .find(|(源, _)| *源 == 声母)
+            .map(|(_, 目标)| *目标)
+    }
+
+    /// 字根频率分档选键位串
+    pub fn 分档键位(&self, 频率: f64) -> &'static str {
+        if 频率 >= self.高频字根频率 {
+            self.高频字根键位
+        } else if 频率 >= self.中频字根频率 {
+            self.中频字根键位
+        } else {
+            self.低频字根键位
+        }
+    }
+}
+
+/// 魔灵（@qq3qq）：仓库默认方案，`moling/config.toml` 用它
+pub const 魔灵: 方案 = 方案 {
+    名: "moling",
+    名称: "魔靈",
+    编码规则: 编码规则::魔灵,
+    韵码: 韵码来源::首笔,
+    混合字频权重: 0.1,
+    最大码长: 4,
+    高频字根频率: 2.5,
+    高频字根键位: "sdfghjkl",
+    中频字根频率: 1.5,
+    中频字根键位: "wr sdfghjkl vnm",
+    低频字根键位: "qwrtyp sdfghjkl xcvbnm",
+    优化键: &[('0', 'w'), ('y', 'k'), ('z', 'v')],
+    优化声母集: "",
+    土用杜音: true,
+    口用vou音: false,
+    笔画6并入5: true,
+    字根表: None,
+};
+
+/// 灵明（@朱宇浩）：`USE_VOWEL=1`，韵码取韵腹，字根表由脚本初始化生成
+pub const 灵明: 方案 = 方案 {
+    名: "yuling",
+    名称: "靈明",
+    编码规则: 编码规则::灵明,
+    韵码: 韵码来源::韵腹,
+    混合字频权重: 1.0,
+    最大码长: 4,
+    高频字根频率: 2.5,
+    高频字根键位: "sdfghjkl",
+    中频字根频率: 1.5,
+    中频字根键位: "wr sdfghjkl vnm",
+    低频字根键位: "qwrtyp sdfghjkl xcvbnm",
+    优化键: &[('0', 'j'), ('q', 'k'), ('z', 'v')],
+    优化声母集: "",
+    土用杜音: false,
+    口用vou音: false,
+    笔画6并入5: true,
+    字根表: Some("roots-yuling.txt"),
+};
+
+/// 星陈（@朱宇浩）：只取大码与小码，不出补码。bash 版没有这套，
+/// 取码规则见 `export_table::取码序列`。
+pub const 星陈: 方案 = 方案 {
+    名: "yustar",
+    名称: "星陳",
+    编码规则: 编码规则::星陈,
+    韵码: 韵码来源::无,
+    混合字频权重: 0.1,
+    最大码长: 4,
+    高频字根频率: 2.5,
+    高频字根键位: "sdfghjkl",
+    中频字根频率: 1.5,
+    中频字根键位: "wr sdfghjkl vnm",
+    低频字根键位: "qwrtyp sdfghjkl xcvbnm",
+    优化键: &[],
+    优化声母集: "",
+    土用杜音: false,
+    口用vou音: false,
+    笔画6并入5: true,
+    字根表: None,
+};
+
+/// 按名字取方案
+pub fn 取(名: &str) -> Result<&'static 方案, String> {
+    match 名 {
+        "moling" => Ok(&魔灵),
+        "yuling" => Ok(&灵明),
+        "yustar" => Ok(&星陈),
+        other => Err(format!(
+            "未知方案 '{other}'；本子命令支持：moling（魔靈）、yuling（靈明）、yustar（星陳）"
+        )),
+    }
+}

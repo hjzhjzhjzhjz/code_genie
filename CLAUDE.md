@@ -34,14 +34,18 @@ cargo run --release -- merge --keymap 字根键位表.txt --chaifen moling/chaif
 cargo run --release -- diagnose --dir runs
 cargo run --release -- chart --keymap 字根键位表.txt
 
+# 从上游 yaml/lua/csv 数据重新生成优化器输入文件（原 moling/prepare-inputs.sh）
+cargo run --release -- prepare --dir moling
+cargo run --release -- prepare --dir moling --from-step 3 --to-step 7
+
 # 检查编译错误 / 跑测试
 cargo check
 cargo test --release
 ```
 
 全局参数：`-c/--config`（默认 `config.toml`）、`--rounds N`（多轮播种，默认 1）。
-子命令共 13 个：`optimize`(默认) / `resume` / `bench` / `encode` / `evaluate` / `export` /
-`chart` / `assess` / `rime-convert` / `sentence` / `pipeline` / `merge` / `diagnose`。
+子命令共 14 个：`optimize`(默认) / `resume` / `prepare` / `bench` / `encode` / `evaluate` /
+`export` / `chart` / `assess` / `rime-convert` / `sentence` / `pipeline` / `merge` / `diagnose`。
 
 ## 核心架构
 
@@ -55,7 +59,8 @@ cargo test --release
 
 | 模块 | 职责 |
 |------|------|
-| `main.rs` | CLI 入口（clap），13 个子命令的分发、多轮播种、尺度解析、收尾保存编排 |
+| `main.rs` | CLI 入口（clap），14 个子命令的分发、多轮播种、尺度解析、收尾保存编排 |
+| `prepare/` | `prepare` 子命令：把上游 yaml/lua/csv 数据加工成优化器输入文件（13 步，逐字节等价重写原 `moling/prepare-inputs.sh`）；`schema.rs` 存三套方案的参数表 |
 | `annealing.rs` | 混合优化算法核心：4 种初始化策略、multi-start + hill climb 热身、冲突导向邻域搜索、SA 主循环 |
 | `context.rs` | `OptContext` 构建所有优化数据：字根组、汉字信息、当量表、简码配置、反向索引 |
 | `evaluator.rs` | `Evaluator` 计算重码数/率、当量、分布偏差等指标；`SimpleEvaluator` 处理简码评估；支持 `try_move()`/`try_swap()` 增量更新 |

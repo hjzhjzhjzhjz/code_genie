@@ -44,7 +44,7 @@ usage() {
   CODE_GENIE    code_genie 可执行文件路径（默认 ../target/release/code_genie）
   DRYRUN        =1 时只打印将执行的命令，跳过执行（默认执行）
   NO_BUILD      =1 时跳过 cargo build（默认执行）
-  NO_PREPARE    =1 时跳过 ./prepare-inputs.sh（默认执行）
+  NO_PREPARE    =1 时跳过 code_genie prepare（默认执行）
 
 行为:
   - 输入一句话备注，追加写入 <DIR>/COMMENT.txt（用 >> 保留历史，便于 resume 复用）。
@@ -128,7 +128,6 @@ else
        charAbsoluteFrequency*.json \
        freq.txt \
        init.sh \
-       prepare-inputs.sh \
        roots-freq.txt \
        roots-pinyin.txt \
        $files \
@@ -137,7 +136,7 @@ fi
 
 LOG="$OUT/optimize-$TS.log"
 date
-echo "Running './prepare-inputs.sh' and '$CODE_GENIE -c $CONFIG $SUBCMD', writing log to $LOG ..."
+echo "Running '$CODE_GENIE prepare' and '$CODE_GENIE -c $CONFIG $SUBCMD', writing log to $LOG ..."
 {
     date
 
@@ -154,10 +153,10 @@ echo "Running './prepare-inputs.sh' and '$CODE_GENIE -c $CONFIG $SUBCMD', writin
 
     set -x
     if [ "$NO_PREPARE" = 1 ]; then
-        echo "NO_PREPARE=1，跳过 ./prepare-inputs.sh"
+        echo "NO_PREPARE=1，跳过 code_genie prepare"
     else
-        echo "NO_PREPARE 不为 1，执行 ./prepare-inputs.sh"
-        $DRYRUN ./prepare-inputs.sh
+        echo "NO_PREPARE 不为 1，执行 code_genie prepare"
+        $DRYRUN $CODE_GENIE prepare --dir .
     fi
 
     echo
