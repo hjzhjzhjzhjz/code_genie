@@ -506,9 +506,17 @@ pub fn run(参: &参数) -> Result<(), String> {
     }
     println!("  字根:     {} 条", 字根表.len());
 
-    // 2. 字形变体表
-    let 字形表路径 = 找(源, &["yuhao-zigens.csv"])
-        .ok_or_else(|| format!("{} 下找不到 yuhao-zigens.csv", 源.display()))?;
+    // 2. 字形变体表（`yuhao-zigens.csv` 是上游素材，放在 `yuhao-data/` 里；
+    //    先看源目录，再按当前工作目录去找 `yuhao-data/`）
+    let 字形表路径 = crate::data_dir::找(源, "yuhao-zigens.csv")
+        .or_else(|| crate::data_dir::找(Path::new("."), "yuhao-zigens.csv"))
+        .ok_or_else(|| {
+            format!(
+                "{} 下和 {}/ 里都没有 yuhao-zigens.csv",
+                源.display(),
+                crate::data_dir::目录名
+            )
+        })?;
     let 字形表 = 读字形表(&字形表路径)?;
 
     // 3. 拼音

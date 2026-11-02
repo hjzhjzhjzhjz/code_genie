@@ -25,6 +25,7 @@ mod checkpoint;
 mod clusters;
 mod config;
 mod context;
+mod data_dir;
 mod diagnose;
 mod evaluator;
 mod export_table;
@@ -402,6 +403,11 @@ enum Commands {
         #[arg(long, default_value = "moling")]
         dir: String,
 
+        /// 上游素材目录；缺省按 `--dir/yuhao-data` → `--dir/../yuhao-data` 自动探测，
+        /// 都找不到就认为素材平铺在 `--dir` 下
+        #[arg(long = "data-dir")]
+        data_dir: Option<String>,
+
         /// 方案名：moling（魔靈）/ yuling（靈明）/ yustar（星陳）
         #[arg(long, default_value = "moling")]
         schema: String,
@@ -467,7 +473,8 @@ enum Commands {
         #[arg(long, default_value = "output-keymap.txt")]
         keymap: String,
 
-        /// 源目录：取 yuhao-zigens.csv / 字根声韵.txt / roots-cluster.txt
+        /// 源目录：取 字根声韵.txt / roots-cluster.txt；yuhao-zigens.csv 是上游素材，
+        /// 源目录里没有就到 yuhao-data/ 里找
         #[arg(long, default_value = ".")]
         source: String,
 
@@ -513,6 +520,7 @@ fn main() {
     // prepare 不依赖主配置（它跑在输入文件还不存在的时候），因此在加载 config 之前先处理
     if let Some(Commands::Prepare {
         dir,
+        data_dir,
         schema,
         from_step,
         to_step,
@@ -522,6 +530,7 @@ fn main() {
     {
         let 参 = prepare::参数 {
             目录: dir.clone(),
+            素材目录: data_dir.clone(),
             方案: schema.clone(),
             从步骤: *from_step,
             到步骤: *to_step,

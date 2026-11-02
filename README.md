@@ -42,6 +42,7 @@ cargo build --release
 | `diagnose` | 批量诊断码表目录 | `code_genie diagnose --dir runs` |
 | `clusters` | 聚类重码分析：某一行聚类压成一个大码，要付出多少重码 | `code_genie clusters --per-row` |
 | `zigen` | 字形变体表：`zigen-<方案>.csv` + `roots-mapping.tsv` + `zigen-trainer-<方案>.json` | `code_genie zigen --schema moling --source moling` |
+| `prepare` | 从上游 yaml/lua/csv 数据加工出优化器输入文件（13 步） | `code_genie prepare --dir moling` |
 
 ## 输入文件
 
@@ -56,6 +57,12 @@ cargo build --release
 
 > 注意两份拆分表的写法差异：`单字拆分.txt` 里字根**已展开到码位**（`到 → 至.0 刂.0 刂.1`），
 > `拆分全表.txt` 是**纯根名**（`到 → 至 刂`）。码表一律用后者按编码规则现算。
+
+上游素材（`yustar_chaifen*.dict.yaml`、`yuhao_charsets.lua`、`yuhao-zigens.csv`、
+`chars.dict.yaml`、`beiyu-char-freq.txt`、`charAbsoluteFrequency*.json`）与方案无关，
+统一放在仓库根的 `yuhao-data/`（与宇浩测评器数据同目录）。`prepare` / `zigen` 找素材时
+依次看 `<dir>/yuhao-data` → `<dir>/../yuhao-data` → `<dir>`，也可以用 `--data-dir` 手工指定；
+产物一律只写 `--dir`。
 
 ## 配置文件
 

@@ -15,8 +15,9 @@
 # prepare 子命令联调用的本地工作副本 / 黄金基线（临时目录，不入库）
 .tmp-*
 # `code_genie prepare` 的产物（构建时重建，不入库）
-# 输入文件（roots-cluster.txt / roots-fly.txt / key_distribution.txt /
-# pair_equivalence.txt / beiyu-char-freq.txt）仍入库，不在此列。
+# 上游素材已统一移到 yuhao-data/（入库）；方案专用的人工维护输入
+# （roots-cluster.txt / roots-fly.txt / key_distribution.txt /
+# pair_equivalence.txt）仍留在 moling/，不入库的只有下面这些产物。
 moling/全字频表.txt
 moling/算码字集.txt
 moling/算码字频.txt
@@ -30,4 +31,3 @@ moling/飞键候选.txt
 moling/字根约束.txt
 moling/动态字根.txt
 moling/单字拆分.txt
-moling/charAbsoluteFrequency*.json

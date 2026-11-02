@@ -66,7 +66,8 @@ cargo test --release
 | 模块 | 职责 |
 |------|------|
 | `main.rs` | CLI 入口（clap），16 个子命令的分发、多轮播种、尺度解析、收尾保存编排 |
-| `prepare/` | `prepare` 子命令：把上游 yaml/lua/csv 数据加工成优化器输入文件（13 步，逐字节等价重写原 `moling/prepare-inputs.sh`）；`schema.rs` 存三套方案的参数表 |
+| `prepare/` | `prepare` 子命令：把上游 yaml/lua/csv 数据加工成优化器输入文件（13 步，逐字节等价重写原 `moling/prepare-inputs.sh`）；`schema.rs` 存三套方案的参数表。上游素材（`yustar_chaifen*.dict.yaml`、`yuhao_charsets.lua`、`yuhao-zigens.csv`、`chars.dict.yaml`、`beiyu-char-freq.txt`、`charAbsoluteFrequency*.json`）统一放在仓库根的 `yuhao-data/`，产物只写 `--dir` |
+| `data_dir.rs` | 素材目录定位：`<dir>/yuhao-data` → `<dir>/../yuhao-data` → `<dir>`（最后一项兼容素材平铺在 `--dir` 下的老布局）；`prepare`/`zigen` 找素材都走它 |
 | `annealing.rs` | 混合优化算法核心：4 种初始化策略、multi-start + hill climb 热身、冲突导向邻域搜索、SA 主循环 |
 | `context.rs` | `OptContext` 构建所有优化数据：字根组、汉字信息、当量表、简码配置、反向索引 |
 | `evaluator.rs` | `Evaluator` 计算重码数/率、当量、分布偏差等指标；`SimpleEvaluator` 处理简码评估；支持 `try_move()`/`try_swap()` 增量更新 |

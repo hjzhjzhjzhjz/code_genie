@@ -17,7 +17,8 @@ use Term::ANSIColor;
 use autodie;
 
 my $mabiao_file = "mabiao_sc.tsv";
-my $freq_file = "beiyu-char-freq.txt";
+# 上游素材统一放在仓库根的 yuhao-data/；可用 YUHAO_DATA 或 --freq 覆盖
+my $freq_file = ($ENV{YUHAO_DATA} // "../yuhao-data") . "/beiyu-char-freq.txt";
 my $is_color = 1;
 my $is_simplified = 0;
 

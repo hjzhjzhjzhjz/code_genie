@@ -71,10 +71,11 @@ pub fn 步骤0_全字频表(上: &上下文) -> Result<(), String> {
 }
 
 fn 读字频json(上: &上下文, 名: &str, 网址: &str) -> Result<HashMap<String, f64>, String> {
-    let 路径 = 上.路径(名);
+    // 素材目录（`yuhao-data/`）里通常已有这两份 JSON；没有才下载，且下到素材目录
+    let 路径 = crate::data_dir::找(&上.目录, 名).unwrap_or_else(|| 上.素材目录.join(名));
     if !路径.exists() {
         println!("    下载 {名} ...");
-        下载(&上.目录, 网址, 名)?;
+        下载(&上.素材目录, 网址, 名)?;
     }
     let 文本 = std::fs::read_to_string(&路径)
         .map_err(|e| format!("读取 {} 失败：{}", 路径.display(), e))?;
@@ -83,6 +84,8 @@ fn 读字频json(上: &上下文, 名: &str, 网址: &str) -> Result<HashMap<Str
 
 /// 与 bash 版一致地依赖本机 `curl`，失败时给出可操作的手动下载提示
 fn 下载(目录: &Path, 网址: &str, 名: &str) -> Result<(), String> {
+    std::fs::create_dir_all(目录)
+        .map_err(|e| format!("创建素材目录 {} 失败：{e}", 目录.display()))?;
     let 结果 = Command::new("curl")
         .args(["-O", "--fail", "--retry", "3", "--retry-delay", "2", 网址])
         .current_dir(目录)

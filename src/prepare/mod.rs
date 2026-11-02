@@ -13,6 +13,12 @@
 // 3. 第 0 步需要的两份字频 JSON 若缺失，会先尝试本机 `curl` 拉取（与 bash 版
 //    同样的外部依赖），失败则给出「手动放到 --dir 下」的明确提示。
 //
+// 上游素材（`yustar_chaifen*.dict.yaml`、`yuhao_charsets.lua`、`yuhao-zigens.csv`、
+// `beiyu-char-freq.txt`、`charAbsoluteFrequency*.json`、`chars.dict.yaml`）跟方案
+// 无关，统一放在仓库根的 `yuhao-data/`（见 [`crate::data_dir`]）。读取时先看
+// `--dir` 再看素材目录，所以「素材平铺在 `--dir` 下」的老布局照样能跑；
+// 产物一律只写 `--dir`。用 `--data-dir` 可以手工指定素材目录。
+//
 // `--from-step/--to-step` 用于分段调试（例如本机没有那份 JSON 时从第 1 步开始，
 // 复用已有的 `全字频表.txt`）；`--baseline-dir` 用于把产物与一份基线逐字节对照。
 // =========================================================================
@@ -31,6 +37,8 @@ use crate::prepare::schema::方案;
 /// 一份准备任务的上下文：工作目录 + 方案 + 解析后的四个可被方案覆盖的文件名
 pub struct 上下文 {
     pub 目录: PathBuf,
+    /// 上游素材目录（`yuhao-data/`），读素材时回落到这里
+    pub 素材目录: PathBuf,
     pub 方案: &'static 方案,
     /// `ROOTS_TXT`：字根声码韵码表
     pub 字根表: String,
@@ -43,8 +51,12 @@ pub struct 上下文 {
 }
 
 impl 上下文 {
-    fn 新建(目录: &str, 方案: &'static 方案) -> Self {
+    fn 新建(目录: &str, 方案: &'static 方案, 素材: Option<&str>) -> Self {
         let 目录 = PathBuf::from(目录);
+        let 素材目录 = match 素材 {
+            Some(p) => PathBuf::from(p),
+            None => crate::data_dir::定位(&目录),
+        };
         // 对应 init.sh 末尾的 `for s in full-freq chars roots roots-cluster` 循环：
         // 方案自己放了 `全字频表-<schema>.txt` 这类文件就用它，否则用默认名
         // （`roots-cluster` 是人工维护的输入，不随产物一起改名）。
@@ -69,6 +81,7 @@ impl 上下文 {
             算码字集: 解析(names::算码字集基名, names::算码字集),
             方案,
             目录,
+            素材目录,
         }
     }
 
@@ -77,6 +90,10 @@ impl 上下文 {
     }
 
     pub fn 读(&self, 名: &str) -> Result<Vec<String>, String> {
+        // 产物只写 `--dir`，但上游素材在 `yuhao-data/` 里：先看本地，再回落素材目录
+        if let Some(p) = crate::data_dir::找(&self.目录, 名) {
+            return text::读行(&p);
+        }
         text::读行(&self.路径(名))
     }
 
@@ -93,6 +110,8 @@ impl 上下文 {
 pub struct 参数 {
     /// 工作目录，脚本里的 cwd（默认 `moling`）
     pub 目录: String,
+    /// 上游素材目录；缺省自动探测 `--dir` 下的 `yuhao-data/` 或上一级的 `yuhao-data/`
+    pub 素材目录: Option<String>,
     /// 方案名，见 [`schema::取`]
     pub 方案: String,
     /// 起始步骤（含）
@@ -126,10 +145,11 @@ const 产物清单: [&str; 13] = [
 /// 入口
 pub fn run(参: &参数) -> Result<(), String> {
     let 方案 = schema::取(&参.方案)?;
-    let 上 = 上下文::新建(&参.目录, 方案);
+    let 上 = 上下文::新建(&参.目录, 方案, 参.素材目录.as_deref());
 
     println!("=== 准备优化输入（{} / {}）===", 方案.名, 方案.名称);
     println!("  工作目录: {}", 上.目录.display());
+    println!("  素材目录: {}", 上.素材目录.display());
     println!("  字频表:   {}", 上.全字频表);
     println!("  算码字集: {}", 上.算码字集);
     println!("  字根表:   {}", 上.字根表);

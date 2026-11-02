@@ -10,6 +10,8 @@ shopt -s failglob
 : "${NO_PREPARE:=0}"
 : "${NO_BUILD:=0}"
 : "${SCHEMA:=moling}"
+# 上游素材（字频 JSON 等）统一放在仓库根的 yuhao-data/，与测评器数据同目录
+: "${YUHAO_DATA:=../yuhao-data}"
 
 
 [ -f "config-$SCHEMA.toml" ] && CONFIG="config-$SCHEMA.toml" || CONFIG="config.toml"
@@ -128,7 +130,7 @@ else
     mkdir -p "$BAK"
     # backup configuration for later review
     cp 拆分*.txt \
-       charAbsoluteFrequency*.json \
+       "$YUHAO_DATA"/charAbsoluteFrequency*.json \
        算码字频.txt \
        init.sh \
        字根频率.txt \

@@ -12,6 +12,9 @@ shopt -s failglob
 . ./init.sh
 
 : "${TYPER_ROOT:="$HOME/home/typer"}"
+# 上游素材（yuhao-zigens.csv 等）统一放在仓库根的 yuhao-data/；perl 里用 $ENV{YUHAO_DATA} 取
+: "${YUHAO_DATA:=../yuhao-data}"
+export YUHAO_DATA
 
 [ -d "$TYPER_ROOT/scripts" ] || TYPER_ROOT=typer
 [ -d "$TYPER_ROOT/scripts" ] || TYPER_ROOT=../../typer
@@ -65,7 +68,7 @@ perl -CSDA -F, -lanE '
     next if $. == 1 || exists $h{$F[1]};
     print "$F[1]\t$F[2]" if $F[1] ne $F[2] && $F[1] =~ /\{/;
     $h{$F[1]} = 1;
-    ' yuhao-zigens.csv | LC_ALL=C sort -u > "$1/roots-mapping.tsv"
+    ' "$YUHAO_DATA/yuhao-zigens.csv" | LC_ALL=C sort -u > "$1/roots-mapping.tsv"
 
 echo "Writing $1/zigen-$SCHEMA.csv and $1/zigen-trainer-$SCHEMA.json ..."
 export ROOTS_TXT="$SOURCE/roots-$SCHEMA.txt"
@@ -81,7 +84,7 @@ perl -CSDA -Mautodie -Mutf8 -lanE 'use List::Util qw/uniqstr/; use JSON::PP;
           $order{$root} = scalar(keys(%order)) * 1000;
       }
 
-      open my $fh, "yuhao-zigens.csv";
+      open my $fh, "$ENV{YUHAO_DATA}/yuhao-zigens.csv";
       while (<$fh>) {
           next if $. == 1;
           chomp;
