@@ -38,6 +38,7 @@ mod pipeline;
 mod prepare;
 mod rime_convert;
 mod root_chart;
+mod roots_chart;
 mod run;
 mod schedule;
 mod sentence;
@@ -112,7 +113,7 @@ enum Commands {
 
     /// 跑一轮完整优化：备份输入 → prepare → optimize/resume，写 COMMENT.txt 与日志
     ///
-    /// `moling/optimize.sh` 的原生子命令实现（那个脚本只剩这一层事务没进 Rust）。
+    /// 原 `moling/optimize.sh` 的 Rust 实现（该脚本已删除，功能完全由本子命令取代）。
     #[command(name = "run")]
     Run {
         /// 工作目录：prepare/optimize 的 cwd，config*.toml 与产物都在这里
@@ -240,18 +241,54 @@ enum Commands {
         #[arg(short = 'o', long, default_value = "全码表.txt")]
         output: String,
     },
-    /// 生成字根图（HTML）
+    /// 生成字根图
     #[command(name = "chart")]
     Chart {
-        /// 键位映射文件（字根键位表.txt）
+        /// 键位映射文件（简易模式：直接从 keymap 出单页字根图）
         #[arg(short = 'k', long)]
-        keymap: String,
+        keymap: Option<String>,
 
         /// 字根映射表（可选，花括号名 → PUA 显示字）
         #[arg(short = 'm', long)]
         mapping: Option<String>,
 
-        /// 输出文件
+        /// 优化输出目录（完整模式：产 roots/chaifen/mabiao/.js/.html 全套，取代 generate-root-chart.sh）
+        #[arg(short = 'd', long)]
+        dir: Option<String>,
+
+        /// 完整模式的方案名：moling（魔靈）/ yuling（靈明）/ yustar（星陳）
+        #[arg(long, default_value = "moling")]
+        schema: String,
+
+        /// 页面标题（完整模式，缺省「<方案>字根表 <日期>」）
+        #[arg(long)]
+        title: Option<String>,
+
+        /// Unihan 数据目录（含 Unihan_Readings.txt / Unihan_Variants.txt）
+        #[arg(long = "unihan-dir")]
+        unihan_dir: Option<String>,
+
+        /// 字根字体文件（.woff/.ttf）；文件存在则 base64 内嵌，否则当字体名
+        #[arg(long)]
+        font: Option<String>,
+
+        /// 每页字数
+        #[arg(long = "page-size", default_value_t = 500)]
+        page_size: usize,
+
+        /// 每个字根最多几个例字
+        #[arg(long = "max-examples", default_value_t = 10)]
+        max_examples: usize,
+
+        /// 统计前多少个高频字
+        #[arg(long = "top-chars", default_value_t = 8000)]
+        top_chars: usize,
+
+        /// 只出 .js，不出 .html
+        #[arg(long = "no-page")]
+        no_page: bool,
+
+        /// 简易模式的输出文件
         #[arg(short = 'o', long, default_value = "字根图.html")]
         output: String,
     },
@@ -665,6 +702,38 @@ fn main() {
         return;
     }
 
+    // chart 的完整模式只读产物文件与上游素材，不依赖主配置
+    if let Some(Commands::Chart {
+        dir: Some(dir),
+        schema,
+        title,
+        unihan_dir,
+        font,
+        page_size,
+        max_examples,
+        top_chars,
+        no_page,
+        ..
+    }) = &cli.command
+    {
+        let 参 = roots_chart::参数 {
+            目录: dir.clone(),
+            方案: schema.clone(),
+            标题: title.clone(),
+            unihan目录: unihan_dir.clone(),
+            字体: font.clone(),
+            每页字数: *page_size,
+            例字数: *max_examples,
+            高频字数: *top_chars,
+            跳过页面: *no_page,
+        };
+        if let Err(e) = roots_chart::run(&参) {
+            eprintln!("❌ {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     // clusters 只用 prepare 的数据文件，同样不依赖主配置
     if let Some(Commands::Clusters {
         schema,
@@ -800,8 +869,40 @@ fn main() {
         Some(Commands::Chart {
             keymap,
             mapping,
+            dir,
+            schema,
+            title,
+            unihan_dir,
+            font,
+            page_size,
+            max_examples,
+            top_chars,
+            no_page,
             output,
-        }) => root_chart::run(&keymap, mapping.as_deref(), &output),
+        }) => {
+            if let Some(d) = dir {
+                let 参 = roots_chart::参数 {
+                    目录: d.clone(),
+                    方案: schema.clone(),
+                    标题: title.clone(),
+                    unihan目录: unihan_dir.clone(),
+                    字体: font.clone(),
+                    每页字数: page_size,
+                    例字数: max_examples,
+                    高频字数: top_chars,
+                    跳过页面: no_page,
+                };
+                if let Err(e) = roots_chart::run(&参) {
+                    eprintln!("❌ {e}");
+                    std::process::exit(1);
+                }
+            } else if let Some(k) = keymap {
+                root_chart::run(&k, mapping.as_deref(), &output);
+            } else {
+                eprintln!("❌ chart 需要 `-k <键位表>`（简易图）或 `-d <输出目录>`（完整套件）");
+                std::process::exit(2);
+            }
+        }
         Some(Commands::RimeConvert {
             base,
             output,

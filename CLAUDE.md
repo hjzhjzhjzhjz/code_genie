@@ -87,12 +87,13 @@ cargo test --release
 | `sentence.rs` | 整句准确率：逐单元首候选 + 连续码流解码；词典吃 dict.yaml 或纯 TSV；可调外部 librime 解码器 |
 | `pipeline.rs` | 逐字取码推导表（Markdown）与字根归并对比 |
 | `explore.rs` | 权重空间探索：读一批 `optimize` 日志里自己打印的「全码权重 / 输出目录」，汇总各轮 `summary.txt` 的线程指标，出 TSV + Plotly 平行坐标 HTML（20 根轴：5 权重 + 5 指标 × 最小/首选/最大）；取代已删的 `moling/analyze-results-of-batch-test-weights.sh` |
-| `zigen.rs` | 字形变体表：`zigen-<方案>.csv`（`rime-convert` 写字根提示时读它）、`roots-mapping.tsv`（`chart -m` 用）、`zigen-trainer-<方案>.json`（背字根用）；取代 `moling/generate-root-chart.sh` 里纯数据的三步，其余产物 Rust 侧已有同口径实现 |
+| `zigen.rs` | 字形变体表：`zigen-<方案>.csv`（`rime-convert` 写字根提示时读它）、`roots-mapping.tsv`（`chart -m` 用）、`zigen-trainer-<方案>.json`（背字根用）；取代已删的 `moling/generate-root-chart.sh` 里纯数据的三步，其余产物 Rust 侧已有同口径实现 |
 | `clusters.rs` | 聚类重码分析：复用 `prepare::inputs::展开` 得到码位序列，按五种取码法（去第 0~3 码、全码）统计动重/静重/组数；`--per-row` 逐行代入聚类表与基线做差 |
 | `diagnose.rs` | 批量诊断码表目录（重码、当量、分布、选重） |
 | `assess.rs` | 调 yuhao-assess 跑测评、出对比表、生成可导入网页版的方案档案；`--qualify` 按阈值（通用重码率 ≤0.00031、常用国字 ≤0.00028、动态选重 <0.0020、速度当量 <1.270）筛合格方案，取代已删的 `moling/compare-optimization-results.sh` |
 | `handfeel.rs` | 手感指标：速度当量、动态选重、同指连击率、换手率 |
-| `root_chart.rs` | 字根键位图（HTML） |
+| `root_chart.rs` | 字根键位图（HTML）：`-k <键位表>` 简易模式，直接出单页字根图 |
+| `roots_chart.rs` | 字根表页面（`chart -d` 完整模式）：一口气产 `roots.tsv`/`chaifen.tsv`/`mabiao.tsv`/`<方案>.js`/`<方案>-<日期>.html`，取代已删的 `moling/generate-root-chart.sh` 后半段（typer 两个 perl 脚本的 .js/.html 生成，HTML 模板原样收进 `assets/roots_chart_page.html`） |
 | `checkpoint.rs` | 断点续算：线程检查点、元信息、原子写、历史归档 |
 | `fsutil.rs` | 文件读写，覆盖前自动按时间戳归档旧文件 |
 | `validate.rs` | 校验拆分表中所有字根是否已定义，输出缺失报告 |

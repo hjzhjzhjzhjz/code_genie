@@ -2,8 +2,8 @@
 // 🏃 `run` 子命令：一轮完整优化（prepare → optimize/resume）的外层事务
 // =========================================================================
 //
-// 这是 `moling/optimize.sh` 的 Rust 移植版。脚本本身不做优化，只负责一圈「外围
-// 事务」，这些在 `optimize` 子命令里都没有对应实现：
+// 这是原 `moling/optimize.sh` 的 Rust 移植版（脚本已删除）。它不做优化，只负责
+// 一圈「外围事务」，这些在 `optimize` 子命令里都没有对应实现：
 //
 //   1. 定输出目录：没给 `-d` 就用 `<方案>-output/output-<时间戳>`；
 //   2. 写 `COMMENT.txt`：问一句备注，**追加**写入（resume 复用时保留历史）；
@@ -337,8 +337,6 @@ fn 待备份清单(工作: &Path, 素材: &Path, 配置: &str, 方案名: &str) 
     for 名 in [names::算码字频, names::字根频率, names::字根读音] {
         名单.push(工作.join(名));
     }
-    名单.push(工作.join("init.sh"));
-    名单.push(工作.join(format!("init-{方案名}.sh")));
 
     // 两条通配：拆分表（含 `拆分全表-台.txt`）与素材目录里的字频 JSON
     名单.extend(按模式扫(工作, "拆分", ".txt"));
