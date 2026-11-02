@@ -324,7 +324,6 @@ fn 待备份清单(工作: &Path, 素材: &Path, 配置: &str, 方案名: &str) 
         names::字根声韵基名,
         基名(names::单字拆分),
         基名(names::字根约束),
-        基名(names::动态字根),
         "roots-fly",
         "roots-cluster",
         "key_distribution",

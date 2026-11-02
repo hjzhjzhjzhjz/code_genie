@@ -1059,11 +1059,6 @@ fn run_bench(cfg: &Config, iters: usize, steps: usize) {
 
     // 加载输入并构建上下文（perf 与 scale 数值无关，用默认 scale/targets）
     let (fixed_roots, constrained) = must(loader::load_fixed(&cfg.files.fixed));
-    let dynamic_groups = must(loader::load_dynamic(
-        &cfg.files.dynamic,
-        &constrained,
-        &cfg.keys.allowed,
-    ));
     let splits = must(loader::load_splits(&cfg.files.splits));
     let equiv_table = or_warn_default(loader::load_pair_equivalence(&cfg.files.pair_equiv));
     let key_dist_config = or_warn_default(loader::load_key_distribution(&cfg.files.key_dist));
@@ -1076,7 +1071,7 @@ fn run_bench(cfg: &Config, iters: usize, steps: usize) {
     let ctx = OptContext::new_with_fixed_and_termination(
         &splits,
         &fixed_roots,
-        &dynamic_groups,
+        &constrained,
         equiv_table,
         key_dist_config,
         ScaleConfig::default(),
@@ -1957,11 +1952,6 @@ fn run_optimize(
 
     // ==================== 加载数据 ====================
     let (fixed_roots, constrained) = must(loader::load_fixed(&cfg.files.fixed));
-    let dynamic_groups = must(loader::load_dynamic(
-        &cfg.files.dynamic,
-        &constrained,
-        &cfg.keys.allowed,
-    ));
     let splits = must(loader::load_splits(&cfg.files.splits));
 
     // 加载简码配置
@@ -1991,15 +1981,14 @@ fn run_optimize(
 
     // 打印数据统计
     let max_parts_in_data = splits.iter().map(|(_, r, _)| r.len()).max().unwrap_or(0);
-    let total_roots: usize = dynamic_groups.iter().map(|g| g.roots.len()).sum();
+    let total_roots: usize = constrained.iter().map(|g| g.roots.len()).sum();
     let total_freq: u64 = splits.iter().map(|(_, _, f)| f).sum();
 
     println!("\n数据加载完毕:");
     println!("  - 固定字根(单键): {}", fixed_roots.len());
-    println!("  - 受限字根组(多键): {} 组", constrained.len());
     println!(
-        "  - 动态字根组: {} 组 (共 {} 字根)",
-        dynamic_groups.len(),
+        "  - 受限字根组(多键): {} 组 (共 {} 字根)",
+        constrained.len(),
         total_roots
     );
     println!("  - 汉字数量: {}", splits.len());
@@ -2007,7 +1996,7 @@ fn run_optimize(
     println!("  - 最大码长: {}", max_parts_in_data);
 
     // ==================== 校验 ====================
-    if !validate::check_validation(&splits, &fixed_roots, &dynamic_groups) {
+    if !validate::check_validation(&splits, &fixed_roots, &constrained) {
         std::process::exit(1);
     }
 
@@ -2064,7 +2053,7 @@ fn run_optimize(
         let temp_ctx = OptContext::new_with_fixed_and_termination(
             &splits,
             &fixed_roots,
-            &dynamic_groups,
+            &constrained,
             equiv_table,
             key_dist_config,
             temp_scale,
@@ -2243,7 +2232,7 @@ fn run_optimize(
             OptContext::new_with_fixed_and_termination(
                 &splits,
                 &fixed_roots,
-                &dynamic_groups,
+                &constrained,
                 equiv_table_2,
                 key_dist_config_2,
                 scale_config,
@@ -2759,7 +2748,6 @@ fn backup_inputs(cfg: &Config, cli_config_path: &str, output_dir: &str) {
 
     let data_srcs = [
         cfg.files.fixed.as_str(),
-        cfg.files.dynamic.as_str(),
         cfg.files.splits.as_str(),
         cfg.files.pair_equiv.as_str(),
         cfg.files.key_dist.as_str(),
@@ -2815,7 +2803,6 @@ fn run_resume(dir: &str) {
         format!("{}/{}", inputs_dir, base)
     };
     cfg.files.fixed = redirect(&cfg.files.fixed);
-    cfg.files.dynamic = redirect(&cfg.files.dynamic);
     cfg.files.splits = redirect(&cfg.files.splits);
     cfg.files.pair_equiv = redirect(&cfg.files.pair_equiv);
     cfg.files.key_dist = redirect(&cfg.files.key_dist);
@@ -2823,15 +2810,10 @@ fn run_resume(dir: &str) {
 
     // 3) 重建优化上下文（复用 meta.scale_config，跳过 calibrate，需求 6.3）。
     let (fixed_roots, constrained) = must(loader::load_fixed(&cfg.files.fixed));
-    let dynamic_groups = must(loader::load_dynamic(
-        &cfg.files.dynamic,
-        &constrained,
-        &cfg.keys.allowed,
-    ));
     let splits = must(loader::load_splits(&cfg.files.splits));
     let equiv_table = or_warn_default(loader::load_pair_equivalence(&cfg.files.pair_equiv));
     let key_dist_config = or_warn_default(loader::load_key_distribution(&cfg.files.key_dist));
-    if !validate::check_validation(&splits, &fixed_roots, &dynamic_groups) {
+    if !validate::check_validation(&splits, &fixed_roots, &constrained) {
         std::process::exit(1);
     }
     let simple_config = if cfg.weights.simple_code.enabled {
@@ -2849,7 +2831,7 @@ fn run_resume(dir: &str) {
     let mut ctx = OptContext::new_with_fixed_and_termination(
         &splits,
         &fixed_roots,
-        &dynamic_groups,
+        &constrained,
         equiv_table,
         key_dist_config,
         meta.scale_config,
@@ -2943,7 +2925,6 @@ mod backup_tests {
         let files = [
             ("config.ron", "config-content"),
             ("input-fixed.txt", "fixed-content"),
-            ("input-roots.txt", "roots-content"),
             ("input-division.txt", "division-content"),
             ("pair_equivalence.txt", "equiv-content"),
             ("key_distribution.txt", "keydist-content"),
@@ -2954,7 +2935,6 @@ mod backup_tests {
 
         let mut cfg = Config::default();
         cfg.files.fixed = src.join("input-fixed.txt").to_string_lossy().to_string();
-        cfg.files.dynamic = src.join("input-roots.txt").to_string_lossy().to_string();
         cfg.files.splits = src.join("input-division.txt").to_string_lossy().to_string();
         cfg.files.pair_equiv = src
             .join("pair_equivalence.txt")
@@ -2996,14 +2976,12 @@ mod backup_tests {
         let custom_config = "my-custom-config.ron";
         std::fs::write(src.join(custom_config), "custom-config-content").unwrap();
         std::fs::write(src.join("input-fixed.txt"), "fixed").unwrap();
-        std::fs::write(src.join("input-roots.txt"), "roots").unwrap();
         std::fs::write(src.join("input-division.txt"), "division").unwrap();
         std::fs::write(src.join("pair_equivalence.txt"), "equiv").unwrap();
         std::fs::write(src.join("key_distribution.txt"), "keydist").unwrap();
 
         let mut cfg = Config::default();
         cfg.files.fixed = src.join("input-fixed.txt").to_string_lossy().to_string();
-        cfg.files.dynamic = src.join("input-roots.txt").to_string_lossy().to_string();
         cfg.files.splits = src.join("input-division.txt").to_string_lossy().to_string();
         cfg.files.pair_equiv = src
             .join("pair_equivalence.txt")

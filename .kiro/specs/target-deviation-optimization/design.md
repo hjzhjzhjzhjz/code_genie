@@ -318,7 +318,7 @@ let (scale_config, scale_source) = if all_manual {
 } else {
     // 需要 calibrate：构建 temp_ctx，计算初始指标
     let temp_ctx = OptContext::new(
-        &splits, &fixed_roots, &dynamic_groups,
+        &splits, &fixed_roots, &constrained,
         equiv_table, key_dist_config,
         ScaleConfig::default(), simple_config.clone(), weights,
     );
@@ -338,7 +338,7 @@ let targets_config = cfg.get_targets_config();
 
 // 构建正式 OptContext（新增 targets_config 参数）
 let ctx = OptContext::new(
-    &splits, &fixed_roots, &dynamic_groups,
+    &splits, &fixed_roots, &constrained,
     equiv_table_2, key_dist_config_2,
     scale_config, simple_config, weights,
     targets_config,   // 新增参数

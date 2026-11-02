@@ -183,7 +183,7 @@ jobs:
         with:
           workspaces: "."
 
-      # files_dir=moling 时输入取 moling/ 下的文件，而 字根约束/动态字根/
+      # files_dir=moling 时输入取 moling/ 下的文件，而 字根约束/
       # 单字拆分/字根声韵 等是 `code_genie prepare` 的产物、不入库，必须先重建，
       # 否则下游 src/main.rs 的 must() 会 exit(1)。原先的 prepare-inputs.sh 已由
       # Rust 子命令取代；这里用 cargo run 是因为本步早于后面的 cargo build。
@@ -195,7 +195,6 @@ jobs:
           for f in 字根约束.txt 单字拆分.txt 字根声韵.txt; do
             [ -s "moling/$f" ] || { echo "::error::$f 缺失或为空"; exit 1; }
           done
-          [ -e "moling/动态字根.txt" ] || { echo "::error::动态字根.txt 缺失"; exit 1; }
 
       - name: 生成 config.ron
         run: |
@@ -217,7 +216,7 @@ jobs:
               sys.exit(f"找不到基础配置: {base}")
           lines = src.read_text(encoding="utf-8").splitlines()
 
-          FILE_KEYS = ("fixed", "dynamic", "splits", "full_splits", "pair_equiv", "key_dist")
+          FILE_KEYS = ("fixed", "splits", "full_splits", "pair_equiv", "key_dist")
           hit_steps, hit_threads, out = False, False, []
           for line in lines:
               # RON 无 [section] 头，total_steps/threads 全局唯一，直接匹配即可
@@ -249,9 +248,9 @@ jobs:
           echo "--- annealing ---"
           grep -nE '^\s*(threads|total_steps):' config.ron
           echo "--- files ---"
-          grep -nE '^\s*(fixed|dynamic|splits|full_splits|pair_equiv|key_dist):' config.ron || true
+          grep -nE '^\s*(fixed|splits|full_splits|pair_equiv|key_dist):' config.ron || true
           echo "--- 输入文件 ---"
-          for f in $(grep -E '^\s*(fixed|dynamic|splits|full_splits|pair_equiv|key_dist):' config.ron | grep -oE '"[^"]+"' | tr -d '"'); do
+          for f in $(grep -E '^\s*(fixed|splits|full_splits|pair_equiv|key_dist):' config.ron | grep -oE '"[^"]+"' | tr -d '"'); do
             if [ -f "$f" ]; then
               echo "OK   $f ($(wc -c < "$f") bytes, $(wc -l < "$f") lines)"
             else

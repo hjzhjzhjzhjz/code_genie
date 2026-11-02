@@ -182,7 +182,7 @@ pub struct CharInfo {
     pub frequency: u64,
 }
 
-/// 字根组 - 用于需要优化的动态字根
+/// 字根组 - 优化单元：同一组内的字根在退火中被当作整体分配到同一把键
 #[derive(Clone)]
 pub struct RootGroup {
     /// 字根列表

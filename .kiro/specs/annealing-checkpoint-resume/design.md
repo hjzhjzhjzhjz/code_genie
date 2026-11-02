@@ -44,7 +44,6 @@ output-{YYYYMMDD-HHMMSS}/
   inputs/                     # 退火前备份（需求 4）
     config.toml
     input-fixed.txt
-    input-roots.txt
     input-division.txt
     pair_equivalence.txt
     key_distribution.txt
@@ -261,7 +260,7 @@ if ckpt_dir.is_some() && step % checkpoint_interval == 0 && step > start_step {
 fn backup_inputs(cfg: &Config, cli_config_path: &str, output_dir: &str) {
     let inputs_dir = format!("{output_dir}/inputs");
     fs::create_dir_all(&inputs_dir)...;
-    for src in [cli_config_path, &cfg.files.fixed, &cfg.files.dynamic,
+    for src in [cli_config_path, &cfg.files.fixed,
                 &cfg.files.splits, &cfg.files.pair_equiv, &cfg.files.key_dist] {
         let dst = format!("{inputs_dir}/{}", basename(src));
         if let Err(e) = fs::copy(src, &dst) { eprintln!("⚠️ 备份输入 {src} 失败: {e}"); }

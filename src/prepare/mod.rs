@@ -140,7 +140,7 @@ pub struct 参数 {
 }
 
 /// 一次产出的文件清单，用于 `--baseline-dir` 对照
-const 产物清单: [&str; 13] = [
+const 产物清单: [&str; 12] = [
     names::全字频表,
     names::算码字集,
     names::算码字频,
@@ -152,7 +152,6 @@ const 产物清单: [&str; 13] = [
     names::字根声韵,
     names::飞键候选,
     names::字根约束,
-    names::动态字根,
     names::单字拆分,
 ];
 
@@ -182,7 +181,7 @@ pub fn run(参: &参数) -> Result<(), String> {
             8 => inputs::步骤8_大码约束(&上)?,
             9 => inputs::步骤9_声韵约束(&上)?,
             10 => inputs::步骤10_飞键约束(&上)?,
-            11 => inputs::步骤11_空字根表(&上)?,
+            11 => {} // 原「动态字根」步骤已移除：字根分组全部在 字根约束.txt 内定义
             12 => inputs::步骤12_编码展开(&上)?,
             13 => inputs::步骤13_简码码位(&上, 解析配置(参, &上).as_deref())?,
             other => return Err(format!("步骤号 {other} 超出 0~13")),

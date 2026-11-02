@@ -74,7 +74,7 @@ cargo test --release
 | `annealing.rs` | 混合优化算法核心：4 种初始化策略、multi-start + hill climb 热身、冲突导向邻域搜索、SA 主循环 |
 | `context.rs` | `OptContext` 构建所有优化数据：字根组、汉字信息、当量表、简码配置、反向索引 |
 | `evaluator.rs` | `Evaluator` 计算重码数/率、当量、分布偏差等指标；`SimpleEvaluator` 处理简码评估；支持 `try_move()`/`try_swap()` 增量更新 |
-| `loader.rs` | 加载固定字根、动态字根、拆分表、当量表、键位分布、keymap 文件 |
+| `loader.rs` | 加载固定字根、拆分表、当量表、键位分布、keymap 文件 |
 | `types.rs` | 核心类型：`CharInfo`、`RootGroup`、`Metrics`、`SimpleMetrics`、`LogicalRoot`、`CharSimpleInfo`、`SimpleCodeConfig` 等 |
 | `config.rs` | TOML 配置解析（`Config` 及子结构体），权重校验，简码规则转换，默认配置后备 |
 | `schedule.rs` | `TemperatureSchedule` 温度调度器，高斯舒适区自适应降温，预计算 LUT |
@@ -111,7 +111,6 @@ cargo test --release
 
 1. **固定字根**: 单键映射，从 `字根约束.txt` 加载，不参与优化
 2. **有约束字根**: 多键选择（也在 `字根约束.txt` 中定义），作为 `RootGroup` 参与优化但键位有约束
-3. **动态字根**: 需要优化分配，从 `动态字根.txt` 加载，同行字根为一组
 
 ### 简码系统
 
@@ -148,7 +147,6 @@ cargo test --release
 | 文件 | 格式 |
 |------|------|
 | `字根约束.txt` | `字根名 [tab] 键位`（单键=固定，多键=约束） |
-| `动态字根.txt` | `字根名1 字根名2 ...`（同行为一组，空格分隔） |
 | `单字拆分.txt` | `汉字 [tab] 字根1 字根2 ... [tab] 频率`（字根**已展开到码位**：`至.0 刂.0 刂.1`） |
 | `拆分全表.txt` | 同上格式，但字根是**纯根名**（`至 刂`），全量约 12 万字，供出码表用 |
 | `pair_equivalence.txt` | `键对 [tab] 当量值` |
@@ -164,7 +162,6 @@ cargo test --release
 (
     files: (
         fixed: "字根约束.txt",
-        dynamic: "动态字根.txt",
         splits: "单字拆分.txt",                // 优化用（常用字，快）
         full_splits: "moling/拆分全表.txt",    // 全量拆分表（留空 = 不生成完整码表）
                                                // ⚠️ 必须与 splits 同一套根名体系

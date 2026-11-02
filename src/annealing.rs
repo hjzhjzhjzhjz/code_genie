@@ -979,7 +979,7 @@ pub fn deterministic_init(ctx: &OptContext, _cfg: &Config) -> Vec<u8> {
     (0..ctx.num_groups)
         .map(|gi| {
             let allowed = &ctx.groups[gi].allowed_keys;
-            // allowed 恒非空（load_fixed/load_dynamic 保证）
+            // allowed 恒非空（由 load_fixed 保证）
             allowed[gi % allowed.len()]
         })
         .collect()

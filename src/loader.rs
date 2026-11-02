@@ -53,104 +53,6 @@ pub fn load_fixed(path: &str) -> Result<(HashMap<String, u8>, Vec<RootGroup>), S
     Ok((truly_fixed, constrained))
 }
 
-/// 加载动态字根组
-pub fn load_dynamic(
-    path: &str,
-    constrained: &[RootGroup],
-    allowed_keys: &str,
-) -> Result<Vec<RootGroup>, String> {
-    let global_allowed: Vec<u8> = allowed_keys
-        .chars()
-        .filter_map(char_to_key_index)
-        .map(|i| i as u8)
-        .collect();
-
-    let content =
-        fs::read_to_string(path).map_err(|e| format!("无法读取动态字根文件 {}: {}", path, e))?;
-
-    // C7：维护「字根 → 组索引」，替代每行扫描全部组（O(行×组) → O(行内根数)）。
-    let mut groups: Vec<RootGroup> = constrained.to_vec();
-    let mut root_to_group: HashMap<String, usize> = HashMap::new();
-    for (gi, g) in groups.iter().enumerate() {
-        for r in &g.roots {
-            root_to_group.insert(r.clone(), gi);
-        }
-    }
-
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        // 本行声明的全部字根（用于判断其归属的既有组）
-        let line_roots: Vec<String> = line.split_whitespace().map(|s| s.to_string()).collect();
-        if line_roots.is_empty() {
-            continue;
-        }
-        // 本行中尚未归属的「新」字根
-        let new_roots: Vec<String> = line_roots
-            .iter()
-            .filter(|r| !root_to_group.contains_key(*r))
-            .cloned()
-            .collect();
-        if new_roots.is_empty() {
-            // 本行所有字根都已归属，无需新增
-            continue;
-        }
-
-        // #7：用索引收集本行涉及哪些既有组，避免「遇到第一个就暴力合并」。
-        let mut touched: Vec<usize> = Vec::new();
-        for r in &line_roots {
-            if let Some(&gi) = root_to_group.get(r) {
-                if !touched.contains(&gi) {
-                    touched.push(gi);
-                }
-            }
-        }
-
-        match touched.len() {
-            // 无归属：整行新字根自成一组
-            0 => {
-                let gi = groups.len();
-                for r in &new_roots {
-                    root_to_group.insert(r.clone(), gi);
-                }
-                groups.push(RootGroup {
-                    roots: new_roots,
-                    allowed_keys: global_allowed.clone(),
-                });
-            }
-            // 唯一归属：把新字根并入该组
-            1 => {
-                let gi = touched[0];
-                for r in &new_roots {
-                    if !groups[gi].roots.contains(r) && !root_to_group.contains_key(r) {
-                        groups[gi].roots.push(r.clone());
-                        root_to_group.insert(r.clone(), gi);
-                    }
-                }
-            }
-            // 横跨多个既有组：直接合并会破坏组语义（暴力合并），改为告警并让新字根独立成组
-            _ => {
-                eprintln!(
-                    "⚠️ 动态字根行 {:?} 同时涉及多个已有组 {:?}，为避免错误合并，新字根已独立成组",
-                    line_roots, touched
-                );
-                let gi = groups.len();
-                for r in &new_roots {
-                    root_to_group.insert(r.clone(), gi);
-                }
-                groups.push(RootGroup {
-                    roots: new_roots,
-                    allowed_keys: global_allowed.clone(),
-                });
-            }
-        }
-    }
-
-    Ok(groups)
-}
-
 /// 加载拆分表
 ///
 /// # 返回值
@@ -420,7 +322,7 @@ pub fn keymap_to_assignment(
             Some(k) => assignment[gi] = k,
             None => {
                 let allowed = &ctx.groups[gi].allowed_keys;
-                // allowed 恒非空（由 load_fixed/load_dynamic 保证）
+                // allowed 恒非空（由 load_fixed 保证）
                 assignment[gi] = allowed[rng.gen_range(0..allowed.len())];
                 filled += 1;
             }

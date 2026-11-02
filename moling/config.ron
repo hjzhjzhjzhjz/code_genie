@@ -1,7 +1,6 @@
 (
     files: (
         fixed: "字根约束.txt",
-        dynamic: "动态字根.txt",
         splits: "单字拆分.txt",
         pair_equiv: "pair_equivalence.txt",
         key_dist: "key_distribution.txt",

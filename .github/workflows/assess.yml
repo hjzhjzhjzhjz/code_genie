@@ -115,7 +115,7 @@ jobs:
           python3 - <<'PY'
           import pathlib, re
           cfg = pathlib.Path("config.ron.example").read_text(encoding="utf-8")
-          for name in ["fixed", "dynamic", "splits", "pair_equiv", "key_dist"]:
+          for name in ["fixed", "splits", "pair_equiv", "key_dist"]:
               cfg = re.sub(rf'(?m)^(\s*{name}:\s*")([^"]*)(")', rf'\g<1>moling/\g<2>\g<3>', cfg)
           pathlib.Path("config.ron").write_text(cfg, encoding="utf-8")
           print("config.ron 已生成（[files] 指向 moling/）")

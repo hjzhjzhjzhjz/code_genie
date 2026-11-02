@@ -114,7 +114,7 @@ pub fn keymap_to_assignment(
             Some(k) => assignment[gi] = k,
             None => {
                 let allowed = &ctx.groups[gi].allowed_keys;
-                // allowed 恒非空（由 load_fixed/load_dynamic 保证）
+                // allowed 恒非空（由 load_fixed 保证）
                 assignment[gi] = allowed[rng.gen_range(0..allowed.len())];
                 filled += 1;
             }

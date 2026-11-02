@@ -79,7 +79,7 @@ code_genie 是一个用 Rust 编写的输入法字根编码方案优化器，核
 #### 验收标准
 
 1. WHEN 优化器创建 Output_Dir 后、退火开始前，THE 优化器 SHALL 将本次运行依赖的全部输入文件复制到 `{Output_Dir}/inputs/` 目录。
-2. THE 被备份的依赖输入文件 SHALL 包含：CLI 指定的配置文件（`-c` 路径，默认 `config.toml`）、`files.fixed`、`files.dynamic`、`files.splits`、`files.pair_equiv`、`files.key_dist` 所指向的文件。
+2. THE 被备份的依赖输入文件 SHALL 包含：CLI 指定的配置文件（`-c` 路径，默认 `config.toml`）、`files.fixed`、`files.splits`、`files.pair_equiv`、`files.key_dist` 所指向的文件。
 3. THE 备份 SHALL 以输入文件的原始文件名（basename）保存到 Inputs_Dir。
 4. IF 某依赖输入文件不存在或复制失败，THEN THE 优化器 SHALL 输出告警；该失败 SHALL NOT 阻止已成功备份的其它文件，且 SHALL NOT 中止优化（除非该文件本就是优化所必需而导致后续加载失败）。
 5. THE 备份 SHALL 不修改原始输入文件（只读复制）。

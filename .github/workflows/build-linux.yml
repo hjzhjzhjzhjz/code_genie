@@ -68,14 +68,14 @@ jobs:
           python3 - <<'PY'
           import pathlib, re
           cfg = pathlib.Path("config.ron.example").read_text(encoding="utf-8")
-          for name in ["fixed", "dynamic", "splits", "pair_equiv", "key_dist"]:
+          for name in ["fixed", "splits", "pair_equiv", "key_dist"]:
               cfg = re.sub(rf'(?m)^(\s*{name}:\s*")([^"]*)(")',
                            rf'\g<1>moling/\g<2>\g<3>', cfg)
           pathlib.Path("config.ron").write_text(cfg, encoding="utf-8")
           print("config.ron 已生成（[files] 指向 moling/）")
           PY
 
-      # 字根约束/动态字根/单字拆分/字根声韵 等是 `code_genie prepare` 的产物，不入库，
+      # 字根约束/单字拆分/字根声韵 等是 `code_genie prepare` 的产物，不入库，
       # 打包与后续步骤需要它们，必须先重建。原先的 moling/prepare-inputs.sh（bash + 内嵌 Perl）
       # 已由 Rust 子命令取代，路径不再要求先 cd 到 moling/。
       - name: 生成码灵输入文件（code_genie prepare）
@@ -83,13 +83,10 @@ jobs:
           set -euo pipefail
           ./target/release/code_genie prepare --dir moling 2>&1 | tee prepare-inputs.log
           echo "--- 产物校验 ---"
-          # 动态字根.txt 由第 (11) 步生成为**空文件**（字根全在 字根约束.txt 里），
-          # 只校验存在性；其余三个必须有内容。
           for f in 字根约束.txt 单字拆分.txt 字根声韵.txt; do
             [ -s "moling/$f" ] || { echo "❌ $f 缺失或为空"; exit 1; }
           done
-          [ -e "moling/动态字根.txt" ] || { echo "❌ 动态字根.txt 缺失"; exit 1; }
-          sha256sum moling/字根约束.txt moling/动态字根.txt \
+          sha256sum moling/字根约束.txt \
                     moling/单字拆分.txt moling/字根声韵.txt \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -127,7 +124,7 @@ jobs:
           shutil.copy2("target/release/code_genie", pkg / "code_genie")
           os.chmod(pkg / "code_genie", 0o755)
 
-          required = ["moling/字根约束.txt", "moling/动态字根.txt",
+          required = ["moling/字根约束.txt",
                       "moling/单字拆分.txt", "moling/pair_equivalence.txt",
                       "moling/key_distribution.txt", "moling/拆分全表.txt",
                       "codegenie-s4.jsonc"]

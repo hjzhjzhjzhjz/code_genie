@@ -4,7 +4,6 @@
 (
     files: (
         fixed: "字根约束.txt",              // 固定字根与各码位约束
-        dynamic: "动态字根.txt",            // 动态字根组（当前方案为空文件）
         splits: "单字拆分.txt",             // 优化用拆分表（常用字，快）
         pair_equiv: "pair_equivalence.txt", // 字根对当量表（留空 = 用内嵌当量表）
         key_dist: "key_distribution.txt",   // 用指分布目标（留空 = 用内嵌用指分布）

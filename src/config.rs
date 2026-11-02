@@ -38,7 +38,6 @@ pub struct Config {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FilesConfig {
     pub fixed: String,
-    pub dynamic: String,
     pub splits: String,
     pub pair_equiv: String,
     pub key_dist: String,
@@ -743,7 +742,6 @@ impl Default for Config {
             files: FilesConfig {
                 // 与 src/prepare/names.rs 保持同一套产物名
                 fixed: crate::prepare::names::字根约束.to_string(),
-                dynamic: crate::prepare::names::动态字根.to_string(),
                 splits: crate::prepare::names::单字拆分.to_string(),
                 pair_equiv: "pair_equivalence.txt".to_string(),
                 key_dist: "key_distribution.txt".to_string(),
@@ -932,7 +930,6 @@ simple_levels = []
 
 [files]
 fixed = "字根约束.txt"
-dynamic = "动态字根.txt"
 splits = "单字拆分.txt"
 pair_equiv = "pair_equivalence.txt"
 key_dist = "key_distribution.txt"
@@ -1006,7 +1003,6 @@ simple_levels = []
 
 [files]
 fixed = "f"
-dynamic = "d"
 splits = "s"
 pair_equiv = "p"
 key_dist = "k"
@@ -1060,7 +1056,6 @@ simple_levels = []
 
 [files]
 fixed = "f"
-dynamic = "d"
 splits = "s"
 pair_equiv = "p"
 key_dist = "k"
