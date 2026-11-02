@@ -159,12 +159,12 @@ pub fn save_combined_code_output(ctx: &OptContext, assignment: &[u8], dir: &str)
         }
     }
 
-    // 全码部分 - 所有字都输出全码（按星月 encoder 规则，与单字编码表同口径）
+    // 全码部分 - 所有字都输出全码（按槽位直取，与单字编码表同口径）
     let 字根表 = 根键位串(ctx, assignment);
     for &ci in &sorted_chars {
         let ch = ctx.raw_splits[ci].0;
         let (_, roots, _) = &ctx.raw_splits[ci];
-        if let Ok(code) = crate::rime_convert::单字码(roots, &字根表) {
+        if let Ok(code) = 按槽位取码(roots, &字根表) {
             if !code.is_empty() {
                 out.push_str(&format!("{}\t{}\n", ch, code));
             }
@@ -186,10 +186,37 @@ fn 根键位串(ctx: &OptContext, assignment: &[u8]) -> HashMap<String, String> 
     表
 }
 
+/// 按槽位取码：根名 `X.k` 取「X 的键位串」第 k 个字母（小写）。
+///
+/// 优化器的 `CharInfo.parts` 是**逐槽位取键位**（`白.0` / `白.1` 各算一条独立键位），
+/// 而 `raw_splits` 正是带槽位的展开式（`的 = 白.0 勹.0 丶.0 丶.1`）。所以输出码表必须按
+/// 槽位取，不能用只认**紧凑基名**的 `rime_convert::单字码`——否则 `白.0` 查不到 `白`、
+/// 且根数也会按 4 根算（应为 3 根），导致整表为空或码错。
+///
+/// 无槽位后缀的根（`k == -1`）按第 0 码位处理，便于兼容紧凑拆分表。
+fn 按槽位取码(
+    根们: &[String], 字根表: &HashMap<String, String>
+) -> Result<String, String> {
+    let mut out = String::with_capacity(根们.len());
+    for r in 根们 {
+        let base = extract_base_name(r);
+        let k = extract_suffix_num(r).max(0) as usize;
+        let key = 字根表
+            .get(&base)
+            .ok_or_else(|| format!("未知字根「{base}」"))?;
+        let ch = key
+            .chars()
+            .nth(k)
+            .or_else(|| key.chars().next())
+            .ok_or_else(|| format!("字根「{base}」无码位"))?;
+        out.push(ch.to_ascii_lowercase());
+    }
+    Ok(out)
+}
+
 /// 生成完整码表：每字先出简码（若有），再出全码，格式 `字<TAB>码<TAB>频次`。
 ///
-/// 全码不再是「每根拼一个键」，而是走 `rime_convert::单字码` 的星月 encoder 规则：
-///   1 根 A+S+S / 2 根 A1A2S2S1 / 3 根 A1A2A3S3 / ≥4 根 A1A2A3A_last
+/// 全码按**槽位直取**（与优化器 `CharInfo.parts` 同口径），见 [`按槽位取码`]。
 fn 完整码表文本(ctx: &OptContext, assignment: &[u8]) -> String {
     let 字根表 = 根键位串(ctx, assignment);
 
@@ -201,9 +228,9 @@ fn 完整码表文本(ctx: &OptContext, assignment: &[u8]) -> String {
         out.push_str(&format!("{}\t{}\t{}\n", ch, code, freq));
     }
 
-    // 全码
+    // 全码（按槽位取码）
     for (ch, roots, freq) in &ctx.raw_splits {
-        if let Ok(code) = crate::rime_convert::单字码(roots, &字根表) {
+        if let Ok(code) = 按槽位取码(roots, &字根表) {
             if !code.is_empty() {
                 out.push_str(&format!("{}\t{}\t{}\n", ch, code, freq));
             }
