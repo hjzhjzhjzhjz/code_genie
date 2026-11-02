@@ -108,6 +108,19 @@ jobs:
           set -euo pipefail
           ./target/release/code_genie prepare --dir moling
 
+      # assess 内部要加载 config.toml（取 keys.allowed 等参数）。按 config.toml.example
+      # 生成一份，[files] 指向 moling/ 下的真实产物；full_splits 在 example 里已带 moling/ 前缀。
+      - name: 生成 config.toml
+        run: |
+          python3 - <<'PY'
+          import pathlib, re
+          cfg = pathlib.Path("config.toml.example").read_text(encoding="utf-8")
+          for name in ["fixed", "dynamic", "splits", "pair_equiv", "key_dist"]:
+              cfg = re.sub(rf'(?m)^({name}\s*=\s*")([^"]*)(")', rf'\g<1>moling/\g<2>\g<3>', cfg)
+          pathlib.Path("config.toml").write_text(cfg, encoding="utf-8")
+          print("config.toml 已生成（[files] 指向 moling/）")
+          PY
+
       # ---- 手动模式：只测给定的一份码表 ----
       - name: 导出码表
         if: github.event_name == 'workflow_dispatch' && inputs.run_id == ''
