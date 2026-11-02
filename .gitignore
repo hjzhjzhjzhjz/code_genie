@@ -9,7 +9,11 @@
 **/log*
 **/config.toml
 # 本地构建配置（MSVC/GNU 链路因机器而异，不入库）
-.cargo/
+# 但 .cargo/audit.toml 是审计白名单，必须入库——CI 的 audit job 靠它判断
+# 哪些 informational warning 已被评估过。父目录不能整体排除，否则子文件
+# 的例外规则不生效。
+.cargo/*
+!.cargo/audit.toml
 # 本地会话记忆（工作区每日日志，只在本机保留）
 .workbuddy/
 # agent 的磁盘工作记忆（planning-with-files 的 task_plan/findings/progress，

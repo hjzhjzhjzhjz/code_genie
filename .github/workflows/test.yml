@@ -58,20 +58,51 @@ jobs:
     name: 依赖漏洞（cargo audit）
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    permissions:
-      contents: read
-      issues: write
-      checks: write
     steps:
       - name: 检出
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
-      - name: 审计 Cargo.lock
-        uses: rustsec/audit-check@v2.0.0
+      # 原先用 rustsec/audit-check@v2.0.0：它仍声明 node20（上游 main 已改 node24
+      # 但未发版），每次运行留一条弃用注解；内部又是 cargo install 从源码编译，
+      # 白等两分半。改成装预编译的 cargo-audit 自己跑：行为等价（同样读 Cargo.lock
+      # 与 RustSec 公告库、同样在漏洞时失败），注解干净，还能用 .cargo/audit.toml
+      # 显式声明哪些 informational warning 可以忽略、理由写在同一处。
+      - name: 安装 cargo-audit（预编译二进制）
+        uses: taiki-e/install-action@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          tool: cargo-audit
+
+      - name: 审计 Cargo.lock
+        id: audit
+        run: |
+          set -o pipefail
+          if ! cargo audit 2>&1 | tee audit.log; then
+            echo "::error::发现依赖漏洞，见下方输出"
+            exit 1
+          fi
+          # 只有 unmaintained / unsound / notice 这类 informational warning 时退出码
+          # 仍是 0。单独数一下写进摘要，免得「有几个告警」被淹没在日志里。
+          echo "warn_count=$(grep -c '^warning:' audit.log || true)" >> "$GITHUB_OUTPUT"
+
+      - name: 写入 Job Summary
+        if: always()
+        run: |
+          {
+            echo "### 依赖漏洞审计"
+            echo ""
+            echo "| 项 | 结果 |"
+            echo "| --- | --- |"
+            echo "| cargo audit | ${{ steps.audit.outcome }} |"
+            echo "| informational 告警 | ${{ steps.audit.outputs.warn_count }} |"
+            echo ""
+            echo '```'
+            tail -n 40 audit.log 2>/dev/null || echo "（未跑到审计阶段）"
+            echo '```'
+            echo ""
+            echo "白名单在 \`.cargo/audit.toml\`，每条必须写清来源链与风险面。"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   check:
     name: 格式 / Clippy / 测试

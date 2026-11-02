@@ -1,0 +1,15 @@
+# cargo audit 配置（本地与 CI 共用；CI 的 audit job 直接读这份文件）
+#
+# cargo audit 默认把 unmaintained / unsound / notice 当作「informational warning」，
+# 不计入漏洞、退出码仍是 0，但会打印出来。这里只忽略「已确认无法通过升级解决、
+# 且不构成本项目实际风险」的具体条目，其余一律照常报。
+
+[advisories]
+ignore = [
+    # RUSTSEC-2026-0192：ttf-parser 0.25.1 被作者标记为不再维护（无补丁版本）。
+    # 来源唯一的传递依赖 charts-rs 2.3.0（可选 feature `chart`），它用 ttf-parser
+    # 解析字体度量做文本排版；上游尚未迁到建议的替代品 skrifa，也没有更新版本可升。
+    # 风险面：只在本地把折线图光栅化成 PNG 时读取系统字体，不接受外部字体输入，
+    # 不进优化主路径。等 charts-rs 换掉该依赖或 RUSTSEC 给出替代方案后再删这行。
+    "RUSTSEC-2026-0192",
+]
