@@ -1,7 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc e39d77f6cfbc70d481f2741dc0884c2a7acf00b4a2a431b07a1c87f72efae92e # shrinks to 手动 = [None, None, None, None, None, None, None, None, None, None], 校准 = [1e-6, 1e-6, 1e-6, 1e-6, 1e-6, 1e-6, 1e-6, 1e-6, 1e-6, 1e-6], simple_enabled = false
