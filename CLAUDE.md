@@ -2,6 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**动手前先读 `CONSTRAINTS.md`。那是本项目的质量契约：底线规则、数值门槛、豁免流程都在里面。
+不要为了让改动通过而削弱它——改代码，或者走豁免表。**
+
 ## 项目概述
 
 CodeGenie 是一个**字根编码优化器**，使用模拟退火算法优化汉字输入法的字根到键位映射方案。目标是最小化重码数、当量值和键位分布偏差，同时支持简码优化。
@@ -38,6 +41,14 @@ cargo run --release -- clusters --per-row --schema moling
 
 # 权重空间探索：汇总一批 optimize 日志 → 表 + 平行坐标网页
 cargo run --release -- explore test-*.log --table batch-test-weights.txt --html batch-test-weights.html
+
+# 收敛曲线：optimize 每 1% 步数输出一行「采样 step=… 得分=… 当前=… 温度=…」，
+# 这里解析成 SVG（默认只画最优；--含当前 加右轴看震荡）
+python tools/画收敛曲线.py runs/xxx/optimize.log --含当前
+
+# 码表对比：两版 output-keymap.txt 的字根键位差异（剥 # 注释、补表头后走 csvdiff）
+# 退出码 0=无差异、1=有差异，可直接当 CI 门禁
+python tools/对比码表.py 旧/output-keymap.txt 新/output-keymap.txt
 
 # 字形变体表（字根键位表 → zigen csv / 字根映射 / 背字根卡组）
 cargo run --release -- zigen --schema moling --keymap runs/s4-export/output-keymap.txt --source moling --out zigen-out

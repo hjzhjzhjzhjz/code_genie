@@ -172,6 +172,27 @@ src/
 └── validate.rs      # 输入校验
 ```
 
+配套脚本（不参与编译）：
+
+```
+tools/
+├── rime_eval.cc     # 星月方案取码的 C++ 参考实现
+├── 对比码表.py       # 两版 output-keymap.txt 的字根键位差异（内部走 csvdiff）
+├── 画收敛曲线.py     # optimize 日志的「采样」行 → 收敛曲线 SVG
+└── 检查红线.py       # 按 diff 范围执行 CONSTRAINTS.md 的底线规则
+```
+
+## 质量红线
+
+`CONSTRAINTS.md` 是质量契约：底线规则（不新增 `#[ignore]`、不删测试、不无理由抑制告警、
+不写 `todo!()`）由 `tools/检查红线.py` 按 diff 扫描，门槛被悄悄调低时会拦住；格式、Clippy、
+测试、依赖漏洞各有对应命令。写代码前先读那份文件。
+
+```bash
+python tools/检查红线.py        # 与上游分支比较
+python tools/检查红线.py --base HEAD   # 只看未提交改动
+```
+
 ## 技术细节
 
 ### 字根分类

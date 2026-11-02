@@ -16,6 +16,63 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  floor:
+    name: 质量红线（diff 扫描）
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: 检出（需要完整历史才能找共同祖先）
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 确定比较基准
+        id: base
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "base=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            base="${{ github.event.before }}"
+            # 新分支或强推时 before 可能是全零 / 不可达，退回上一个提交
+            if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+              base=$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)
+            fi
+            echo "base=$base" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 执行底线扫描
+        run: python3 tools/检查红线.py --base "${{ steps.base.outputs.base }}"
+
+      - name: 写入 Job Summary
+        if: always()
+        run: |
+          {
+            echo "### 质量红线"
+            echo ""
+            echo "对比基准：\`${{ steps.base.outputs.base }}\`"
+            echo ""
+            echo "底线见 \`CONSTRAINTS.md\`；门槛被放宽、测试被删、抑制注释新增都会拦在这里。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  audit:
+    name: 依赖漏洞（cargo audit）
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      checks: write
+    steps:
+      - name: 检出
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: 审计 Cargo.lock
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   check:
     name: 格式 / Clippy / 测试
     runs-on: ubuntu-24.04
