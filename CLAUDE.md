@@ -46,6 +46,14 @@ cargo run --release -- explore test-*.log --table batch-test-weights.txt --html 
 # 这里解析成 SVG（默认只画最优；--含当前 加右轴看震荡）
 python tools/画收敛曲线.py runs/xxx/optimize.log --含当前
 
+# 同一条曲线出 PNG（正式报告用；charts-rs 是可选 feature，默认构建不编译它，
+# 否则每次 cargo build 都要多编 resvg/fontdb 那几十个 crate）
+cargo build --release --features chart
+cargo run --release --features chart -- plot runs/xxx/optimize.log -o 收敛.png --含当前
+
+# 一次 optimize 运行 → 一份实验档案（假设 / 结论 / 参数 / 得分 / 曲线），入库到 experiments/
+python tools/记录实验.py runs/xxx/optimize.log --标签 降初温 --假设 "初温降到 12 后最优能否低于 6.5"
+
 # 码表对比：两版 output-keymap.txt 的字根键位差异（剥 # 注释、补表头后走 csvdiff）
 # 退出码 0=无差异、1=有差异，可直接当 CI 门禁
 python tools/对比码表.py 旧/output-keymap.txt 新/output-keymap.txt

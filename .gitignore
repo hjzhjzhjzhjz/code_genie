@@ -12,6 +12,9 @@
 .cargo/
 # 本地会话记忆（工作区每日日志，只在本机保留）
 .workbuddy/
+# agent 的磁盘工作记忆（planning-with-files 的 task_plan/findings/progress，
+# 一次改造一份，属于过程记录；成果沉淀在 experiments/ 与文档里）
+.planning/
 # prepare 子命令联调用的本地工作副本 / 黄金基线（临时目录，不入库）
 .tmp-*
 # `code_genie prepare` 的产物（构建时重建，不入库）

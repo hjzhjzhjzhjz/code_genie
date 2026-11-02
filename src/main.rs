@@ -21,6 +21,7 @@ mod annealing;
 mod assess;
 mod bucket_store;
 mod calibrate;
+mod chart;
 mod checkpoint;
 mod clusters;
 mod config;
@@ -292,6 +293,24 @@ enum Commands {
         /// 简易模式的输出文件
         #[arg(short = 'o', long, default_value = "字根图.html")]
         output: String,
+    },
+    /// 把 optimize 日志的收敛采样画成折线图（PNG 需构建时加 --features chart）
+    #[command(name = "plot")]
+    Plot {
+        /// optimize 日志文件（要含「采样 step=」行）
+        log: String,
+
+        /// 输出文件，按扩展名决定格式（.png / .svg）
+        #[arg(short = 'o', long, default_value = "收敛曲线.png")]
+        output: String,
+
+        /// 同时画「当前得分」（左右双轴：高温期它比最优高好几倍）
+        #[arg(long = "含当前")]
+        含当前: bool,
+
+        /// 图表标题；缺省用「收敛曲线 · <日志文件名>」
+        #[arg(long)]
+        title: Option<String>,
     },
     /// 跑宇浩测评并输出对比表（内部调 yuhao-assess 的 CLI）
     #[command(name = "assess")]
@@ -700,6 +719,27 @@ fn main() {
         return;
     }
 
+    // plot 只读日志文件，同样不依赖主配置；放在最前，配置缺失也能出图。
+    if let Some(Commands::Plot {
+        log,
+        output,
+        含当前,
+        title,
+    }) = &cli.command
+    {
+        let 参 = chart::参数 {
+            日志: log.clone(),
+            输出: output.clone(),
+            含当前: *含当前,
+            标题: title.clone(),
+        };
+        if let Err(e) = chart::run(&参) {
+            eprintln!("❌ {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     // chart 的完整模式只读产物文件与上游素材，不依赖主配置
     if let Some(Commands::Chart {
         dir: Some(dir),
@@ -1038,6 +1078,7 @@ fn main() {
         Some(Commands::Zigen { .. }) => unreachable!("zigen 已在加载配置前处理"),
         Some(Commands::Explore { .. }) => unreachable!("explore 已在加载配置前处理"),
         Some(Commands::Run { .. }) => unreachable!("run 已在加载配置前处理"),
+        Some(Commands::Plot { .. }) => unreachable!("plot 已在加载配置前处理"),
         None => run_optimize_rounds(&cfg, &cli.config, None, None, None, None, cli.rounds),
     }
 }

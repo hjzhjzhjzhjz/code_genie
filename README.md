@@ -44,6 +44,7 @@ cargo build --release
 | `zigen` | 字形变体表：`zigen-<方案>.csv` + `roots-mapping.tsv` + `zigen-trainer-<方案>.json` | `code_genie zigen --schema moling --source moling` |
 | `prepare` | 从上游 yaml/lua/csv 数据加工出优化器输入文件（13 步） | `code_genie prepare --dir moling` |
 | `explore` | 权重空间探索：汇总一批 optimize 日志，出平行坐标网页 | `code_genie explore test-*.log --html batch-test-weights.html` |
+| `plot` | 收敛曲线出图（PNG 需 `--features chart`） | `code_genie plot optimize.log -o 收敛.png --含当前` |
 
 ## 输入文件
 
@@ -161,6 +162,7 @@ src/
 ├── sentence.rs      # 整句准确率（内置 Viterbi / 外部 librime）
 ├── pipeline.rs      # 取码推导表 + 字根归并对比
 ├── clusters.rs      # 聚类重码分析（复用 prepare 的编码展开）
+├── chart.rs         # 收敛曲线出图（日志采样行 → SVG/PNG，`chart` feature 下才画）
 ├── zigen.rs         # 字形变体表（zigen csv / 字根映射 / zigen-trainer 卡组）
 ├── diagnose.rs      # 码表诊断
 ├── assess.rs        # 宇浩测评对比 + 方案档案
@@ -179,8 +181,22 @@ tools/
 ├── rime_eval.cc     # 星月方案取码的 C++ 参考实现
 ├── 对比码表.py       # 两版 output-keymap.txt 的字根键位差异（内部走 csvdiff）
 ├── 画收敛曲线.py     # optimize 日志的「采样」行 → 收敛曲线 SVG
+├── 记录实验.py       # 一次 optimize 运行 → 一份实验档案（参数 + 得分 + 曲线 PNG）
 └── 检查红线.py       # 按 diff 范围执行 CONSTRAINTS.md 的底线规则
 ```
+
+## 实验档案
+
+调参跑的每一步都在 `experiments/` 里留一份可查的记录：
+
+```bash
+cargo build --release --features chart      # 出 PNG 需要这个 feature
+python tools/记录实验.py runs/xxx/optimize.log --标签 降初温 --假设 "初温降到 12 后最优能否低于 6.5"
+```
+
+产物是 `<日期>-<时间>-<标签>.md`（假设 / 结论 / 参数 / 结果 / 曲线）加一张同名 PNG。
+「假设」跑之前写、「结论」跑完写，其余由脚本从日志和 `config.ron` 自动提取。
+细节见 `experiments/README.md`。
 
 ## 质量红线
 
