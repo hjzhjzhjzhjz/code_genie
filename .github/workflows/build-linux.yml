@@ -68,9 +68,12 @@ jobs:
           python3 - <<'PY'
           import pathlib, re
           cfg = pathlib.Path("config.ron.example").read_text(encoding="utf-8")
-          for name in ["fixed", "splits", "pair_equiv", "key_dist"]:
+          for name in ["fixed", "splits"]:
               cfg = re.sub(rf'(?m)^(\s*{name}:\s*")([^"]*)(")',
                            rf'\g<1>moling/\g<2>\g<3>', cfg)
+          # 当量/用指分布：prepare 不再产出这两份文件，留空走内嵌表
+          cfg = cfg.replace('"pair_equivalence.txt"', '""')
+          cfg = cfg.replace('"key_distribution.txt"', '""')
           pathlib.Path("config.ron").write_text(cfg, encoding="utf-8")
           print("config.ron 已生成（[files] 指向 moling/）")
           PY
@@ -105,6 +108,14 @@ jobs:
             --output /tmp/全码表.txt
           wc -l < /tmp/全码表.txt
 
+      - name: 优化冒烟（内嵌当量/用指分布 + 5000 步）
+        run: |
+          set -e
+          sed 's/2000000/5000/; s/threads: 12/threads: 2/' config.ron > /tmp/tiny.ron
+          ./target/release/code_genie -c /tmp/tiny.ron optimize -d /tmp/tiny-out 2>&1 | tail -n 8
+          test -s /tmp/tiny-out/字根键位表.txt
+          echo "优化冒烟 OK"
+
       - name: 打包（二进制 + 数据 + 宇浩测评 + 一键脚本 + 说明）
         run: |
           python3 - <<'PY'
@@ -125,13 +136,20 @@ jobs:
           os.chmod(pkg / "code_genie", 0o755)
 
           required = ["moling/字根约束.txt",
-                      "moling/单字拆分.txt", "moling/pair_equivalence.txt",
-                      "moling/key_distribution.txt", "moling/拆分全表.txt",
+                      "moling/单字拆分.txt", "moling/字根声韵.txt",
+                      "moling/拆分全表.txt",
                       "codegenie-s4.jsonc"]
           missing = [f for f in required if not pathlib.Path(f).exists()]
           if missing:
               raise SystemExit("缺少打包所需文件（应在 code_genie prepare 步骤生成）："
                                + ", ".join(missing))
+
+          # prepare 的上游源文件：包内重跑 optimize 时自动 prepare 需要
+          for f in ["moling/input-division.txt", "moling/input-roots.txt",
+                    "moling/input-fixed.txt"]:
+              dst = pkg / f
+              dst.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(f, dst)
 
           for f in required:
               dst = pkg / f
@@ -227,7 +245,8 @@ jobs:
               "  sentence   整句准确率（语料：yuhao-assess/public/texts/literature.txt）",
               "",
               "数据目录",
-              "  moling/          拆分表、字根文件、当量、用指分布、拆分全表",
+              "  moling/          prepare 产物（字根约束/单字拆分/字根声韵/拆分全表）",
+              "                   与其上游源文件；当量/用指分布走程序内嵌表",
               "  ceping-data/     诊断用的当量/字频/词表",
               "  yuhao-assess/    宇浩测评 CLI 源码与数据（public/ 已含测评数据与语料；",
               "                   node_modules 首次 pnpm install 生成）",
