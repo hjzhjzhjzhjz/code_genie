@@ -151,10 +151,17 @@ fn default_simple_protect_top_n() -> usize {
 pub struct AnnealingConfig {
     pub threads: usize,
     pub total_steps: usize,
-    /// 初温 / 末温：**运行时自动标定**（按初态采样 |Δscore| 闭式求解），
-    /// 这里的值只是采样失败时的兜底，配置文件里通常不需要写。
+    /// 初温：**直接取配置值**，运行时不再标定（与上游 Dieken/code_genie 同模式）。
+    ///
+    /// 默认 `0.005` 与上游 moling 方案一致；配合末温 `5e-5` 得到 100 倍跨度，
+    /// 曲线中点温度 `5e-4` 正好落在上游 `comfort_temp` 的量级。
     #[serde(default = "default_temp_start")]
     pub temp_start: f64,
+    /// 末温：直接取配置值。
+    ///
+    /// 建议保持 `temp_start / 100` 的量级。跨度太小 → 末段仍在高温游走、来不及精修；
+    /// 跨度太大（如 1e6）→ 几何曲线的尺度被压坏，退火走到一半就进入冻结状态，
+    /// 后半程的算力全部浪费。
     #[serde(default = "default_temp_end")]
     pub temp_end: f64,
     /// 舒适区在**降温曲线上的位置**（0~1，0=刚起步、1=临近结束）。
@@ -250,10 +257,10 @@ fn default_checkpoint_interval_ratio() -> f64 {
     0.05
 }
 fn default_temp_start() -> f64 {
-    1.0
+    0.005
 }
 fn default_temp_end() -> f64 {
-    1e-6
+    5e-5
 }
 fn default_comfort_progress() -> f64 {
     0.5
@@ -813,8 +820,8 @@ impl Default for Config {
             annealing: AnnealingConfig {
                 threads: 16,
                 total_steps: 10_000,
-                temp_start: 1.0,
-                temp_end: 0.000001,
+                temp_start: default_temp_start(),
+                temp_end: default_temp_end(),
                 comfort_progress: default_comfort_progress(),
                 comfort_temp: None,
                 comfort_width: 0.15,
@@ -1254,6 +1261,26 @@ dist_max = 8.0
         assert_eq!(a.conflict_refresh_interval, 1000); // 默认
         assert_eq!(a.conflict_sample_window, 20); // 默认
         assert!(a.conflict_key_by_load); // 默认开启
+    }
+
+    #[test]
+    fn test_温度直接取自配置且默认与上游对齐() {
+        // 默认值是上游 moling 方案那一组，跨度为 100 倍（曲线中点 t_start/10）。
+        let d = Config::default().annealing;
+        assert_eq!(d.temp_start, default_temp_start());
+        assert_eq!(d.temp_end, default_temp_end());
+        assert!(
+            (d.temp_start / d.temp_end - 100.0).abs() < 1e-9,
+            "默认末温应为初温的 1/100，实际跨度 {}",
+            d.temp_start / d.temp_end
+        );
+
+        // 配置里写了什么就生效什么（不再有运行时标定覆盖这一步）。
+        let 改过 = minimal_config_prefix().replace("temp_start = 1.0", "temp_start = 0.02");
+        let cfg: Config = toml::from_str(&改过).expect("解析失败");
+        assert_eq!(cfg.annealing.temp_start, 0.02);
+        // 另一项里写的是 0.001，原样生效（不会再被任何运行时逻辑覆盖）。
+        assert_eq!(cfg.annealing.temp_end, 0.001);
     }
 
     #[test]

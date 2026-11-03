@@ -18,8 +18,8 @@ cargo build --release
 # 运行优化（默认行为，等同于 optimize 子命令）
 cargo run --release
 
-# 使用指定配置文件 + 多轮播种
-cargo run --release -- -c config.ron optimize -d out --rounds 3
+# 使用指定配置文件
+cargo run --release -- -c config.ron optimize -d out
 
 # 断点续算 / 压测 / 编码 / 评估
 cargo run --release -- resume -d out
@@ -71,7 +71,7 @@ cargo check
 cargo test --release
 ```
 
-全局参数：`-c/--config`（默认 `config.ron`）、`--rounds N`（多轮播种，默认 1）。
+全局参数：`-c/--config`（默认 `config.ron`）。
 子命令共 16 个：`optimize`(默认) / `resume` / `prepare` / `clusters` / `zigen` / `bench` / `encode` / `evaluate` /
 `export` / `chart` / `assess` / `rime-convert` / `sentence` / `pipeline` / `merge` / `diagnose`。
 

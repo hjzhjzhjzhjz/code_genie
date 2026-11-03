@@ -7,7 +7,7 @@
 - **自动调温**：温度不写死，每次运行按初态采样 `|Δscore|` 闭式标定 `t_start` / `t_end`，随权重与评分尺度走
 - **多目标优化**：重码数 / 重码率 / 加权当量 / 当量 CV / 用指分布偏差，支持 `[targets]` 设目标值与 `_max` 硬约束
 - **逃逸机制**：冲突导向邻域、低温智能扰动、平台期重热、整键互换（`full_key_swap`）
-- **并行与多轮**：多线程独立退火 + `--rounds N` 内置多轮播种（每轮吃上一轮结果、复用尺度）
+- **并行**：多线程独立退火取最优；需要微调既有结果时用 `--seed-dir` / `--seed-keymap` 指定起点
 - **增量评估**：`Evaluator` 支持 `try_move()` / `try_swap()` 增量更新，热路径零全量重建
 - **简码系统**：规则式简码（`AaBaCa`）+ 上屏键 / 异手过滤 / 固定简码
 - **全量码表**：`[files] full_splits` 指定全量拆分表后，收尾自动输出覆盖 12 万字的 `完整码表.txt`
@@ -23,11 +23,11 @@ cargo build --release
 
 ## 子命令
 
-全局参数：`-c/--config <路径>`（默认 `config.ron`）、`--rounds N`（多轮播种，默认 1）。
+全局参数：`-c/--config <路径>`（默认 `config.ron`）。
 
 | 命令 | 用途 | 最简示例 |
 |------|------|----------|
-| `optimize`（默认） | 跑模拟退火优化 | `code_genie -c config.ron optimize -d out --rounds 3` |
+| `optimize`（默认） | 跑模拟退火优化 | `code_genie -c config.ron optimize -d out` |
 | `resume` | 从 checkpoint 断点续算 | `code_genie resume -d out` |
 | `bench` | 压测 eval / 算子 / SA 吞吐 | `code_genie bench --iters 20000 --steps 200000` |
 | `encode` | 按 keymap 给拆分表编码 | `code_genie encode -k 字根键位表.txt -d 单字拆分.txt` |

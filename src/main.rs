@@ -50,7 +50,7 @@ mod validate;
 mod zigen;
 
 use crate::annealing::{simulated_annealing_resumable, SaResult};
-use crate::calibrate::{auto_temperature, calibrate_scales};
+use crate::calibrate::calibrate_scales;
 use crate::checkpoint::ThreadCheckpoint;
 use crate::config::{Config, TargetsConfig};
 use crate::context::OptContext;
@@ -70,11 +70,6 @@ struct Cli {
     /// 配置文件路径
     #[arg(short = 'c', long, default_value = "config.ron")]
     config: String,
-
-    /// 多轮播种：连续跑 N 轮，第 2 轮起用上一轮输出目录自播种并复用其尺度（默认 1 = 单轮）。
-    /// 与 CI 的 repeat 循环语义一致；按 Ctrl-C 中断则停止后续轮次。
-    #[arg(long = "rounds", default_value_t = 1, global = true)]
-    rounds: usize,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -98,12 +93,12 @@ enum Commands {
         #[arg(long = "seed-keymap")]
         seed_keymap: Option<String>,
 
-        /// 复用尺度文件（尺度.json）：跳过校准，保证多轮/跨运行口径一致
+        /// 复用尺度文件（尺度.json）：跳过校准，保证跨运行口径一致
         #[arg(long = "scale")]
         scale: Option<String>,
     },
 
-    /// 基准测试：压测目标函数评估、邻域算子（含 full_key_swap）、自动调温与 SA 吞吐
+    /// 基准测试：压测目标函数评估、邻域算子（含 full_key_swap）与 SA 吞吐
     Bench {
         /// 每个微基准的迭代次数
         #[arg(long, default_value_t = 20000)]
@@ -707,7 +702,6 @@ fn main() {
             跳过准备: *no_prepare,
             试运行: *dry_run,
             不防休眠: *no_caffeinate,
-            轮数: cli.rounds,
             播种目录: seed_dir.clone(),
             播种键位: seed_keymap.clone(),
             尺度: scale.clone(),
@@ -1062,14 +1056,14 @@ fn main() {
             seed_dir,
             seed_keymap,
             scale,
-        }) => run_optimize_rounds(
+        }) => run_optimize(
             &cfg,
             &cli.config,
             output_dir,
             seed_dir,
             seed_keymap,
             scale,
-            cli.rounds,
+            &停止标志(),
         ),
         Some(Commands::Bench { iters, steps }) => run_bench(&cfg, iters, steps),
         // prepare 在加载配置之前就已返回，这里只是让 match 完备
@@ -1079,7 +1073,7 @@ fn main() {
         Some(Commands::Explore { .. }) => unreachable!("explore 已在加载配置前处理"),
         Some(Commands::Run { .. }) => unreachable!("run 已在加载配置前处理"),
         Some(Commands::Plot { .. }) => unreachable!("plot 已在加载配置前处理"),
-        None => run_optimize_rounds(&cfg, &cli.config, None, None, None, None, cli.rounds),
+        None => run_optimize(&cfg, &cli.config, None, None, None, None, &停止标志()),
     }
 }
 
@@ -1087,7 +1081,7 @@ fn main() {
 // bench 子命令
 // =========================================================================
 
-/// 基准测试：压测目标函数评估、邻域算子（含新增 full_key_swap）、自动调温与 SA 吞吐。
+/// 基准测试：压测目标函数评估、邻域算子（含新增 full_key_swap）与 SA 吞吐。
 ///
 /// 用法：`cargo run --release -- -c config.ron bench [--iters N] [--steps N]`
 fn run_bench(cfg: &Config, iters: usize, steps: usize) {
@@ -1226,36 +1220,9 @@ fn run_bench(cfg: &Config, iters: usize, steps: usize) {
         }
     }
 
-    // 5) 自动调温（一次性探测）
-    let auto = {
-        let mut rng = rand::rng();
-        let t = Instant::now();
-        let r = auto_temperature(&ctx, &assign, &mut rng);
-        let dt = t.elapsed().as_secs_f64();
-        match r {
-            Some((t0, t1)) => {
-                println!(
-                    "  [auto_temp]     {:>10.2} ms/次  → t_start={:.3e}, t_end={:.3e}",
-                    dt * 1e3,
-                    t0,
-                    t1
-                );
-                Some((t0, t1))
-            }
-            None => {
-                println!("  [auto_temp]     {:>10.2} ms/次  → 采样失败", dt * 1e3);
-                None
-            }
-        }
-    };
-
-    // 6) SA 吞吐（单线程跑 steps 步）
+    // 5) SA 吞吐（单线程跑 steps 步）
     {
         let mut c = cfg.clone();
-        if let Some((t0, t1)) = auto {
-            c.annealing.temp_start = t0;
-            c.annealing.temp_end = t1;
-        }
         c.annealing.total_steps = steps.max(1);
         let stop = Arc::new(AtomicBool::new(false));
         let t = Instant::now();
@@ -1900,11 +1867,15 @@ fn resolve_seed_paths(
     }
 }
 
-/// 单轮 optimize 的产出：实际输出目录（缺省时由时间戳生成）与是否被 Ctrl-C 中断。
-/// 多轮播种（`--rounds`）用它决定下一轮的播种目录与尺度文件，中断则停止后续轮次。
-struct RoundOutcome {
-    output_dir: String,
-    interrupted: bool,
+/// Ctrl-C 停止标志。
+///
+/// 处理器在进程内只能安装一次（`ctrlc::set_handler` 重复调用会返回 Err 且新标志永不
+/// 置位），所以本进程只建一个标志，传给唯一那一次退火调用。
+fn 停止标志() -> Arc<AtomicBool> {
+    let flag = Arc::new(AtomicBool::new(false));
+    let f = Arc::clone(&flag);
+    let _ = ctrlc::set_handler(move || f.store(true, Ordering::Relaxed));
+    flag
 }
 
 fn run_optimize(
@@ -1915,7 +1886,7 @@ fn run_optimize(
     seed_keymap: Option<String>,
     scale_arg: Option<String>,
     stop_flag: &Arc<AtomicBool>,
-) -> RoundOutcome {
+) {
     let start_time = Instant::now();
     println!("=== CodeGenie 码灵算法优化器 v10 ===");
 
@@ -2062,13 +2033,10 @@ fn run_optimize(
     // 校准后复用 temp_ctx 作为正式 ctx，仅就地更新评分用的 scale/targets（二者不参与
     // 构建期预计算，仅评分路径读取）。all_manual（手动 scale 跳过校准）无 temp_ctx，
     // 正式 ctx 仍需单独构建一次。
-    // calibration_init：校准用的初解（确定性贪心），同时给尺度校准与自动调温当基准，
-    // 只算一次。口径统一后，scale 与温度才不会被两个不同的劣质/优质基准各自带偏。
-    let (scale_config, scale_source, calib_ctx, calibration_init): (
+    let (scale_config, scale_source, calib_ctx): (
         types::ScaleConfig,
         &'static str,
         Option<OptContext>,
-        Option<Vec<u8>>,
     ) = if let Some(sp) = scale_arg.as_deref() {
         let text = std::fs::read_to_string(sp).unwrap_or_else(|e| {
             eprintln!("❌ 读不了尺度文件 {}: {}", sp, e);
@@ -2079,11 +2047,11 @@ fn run_optimize(
             std::process::exit(1);
         });
         println!("\n📐 复用尺度文件 {}（跳过校准，多轮口径一致）", sp);
-        (sc, "复用尺度文件", None, None)
+        (sc, "复用尺度文件", None)
     } else if all_manual {
         println!("\n📐 ScaleConfig 已全部手动配置，跳过自动校准...");
         let (sc, src) = resolve_scale_config(cfg, types::ScaleConfig::default());
-        (sc, src, None, None)
+        (sc, src, None)
     } else {
         println!("\n📐 正在进行初始尺度校准...");
         // C8：当量/分布仅校准路径需要，就地加载（all_manual / 复用尺度路径不再重复读）。
@@ -2227,9 +2195,8 @@ fn run_optimize(
             &cfg.get_targets_config(),
         );
         let (sc, src) = resolve_scale_config(cfg, calibrated);
-        // 复用校准期构建的 temp_ctx 作为正式 ctx（省去退火前第二次完整构建），
-        // 同时把这次初解交给自动调温复用，避免再跑一遍多起点。
-        (sc, src, Some(temp_ctx), Some(initial_assignment))
+        // 复用校准期构建的 temp_ctx 作为正式 ctx（省去退火前第二次完整构建）。
+        (sc, src, Some(temp_ctx))
     };
 
     println!("  ScaleConfig 来源: {}", scale_source);
@@ -2292,47 +2259,20 @@ fn run_optimize(
     // 桶存储后端选择日志（需求 12）：单线程、配置确认阶段输出一次。
     evaluator::log_bucket_backends(&ctx);
 
-    // === 自动调温：按初态采样的带符号 Δscore 标定 t_start / t_end ===
-    // 温度不写死在配置里（写死会与评分尺度错配），每次运行按当前权重/scale 现算。
-    // 基准必须是**真正进入 SA 的那个初解**（贪心多起点 + 坐标下降）；若拿轮转分配的
-    // `deterministic_init` 当基准，其 Δ 分布里「不恶化」的移动占比过高（实测 >40%），
-    // 按接受率二分反解出的温度会直接塌到下限。
-    let sa_cfg = {
-        let mut c = cfg.clone();
-        let init = match calibration_init {
-            // 尺度校准那步已经算好了同一个初解，直接复用，不再重跑多起点。
-            Some(v) => v,
-            // --scale / 手动 scale 路径没算过，这里补一次（确定性种子，口径一致）。
-            None => annealing::smart_init(&ctx, cfg),
-        };
-        let mut rng = rand::rng();
-        match auto_temperature(&ctx, &init, &mut rng) {
-            Some((t0, t1)) => {
-                c.annealing.temp_start = t0;
-                c.annealing.temp_end = t1;
-                match c.annealing.comfort_temp {
-                    Some(t) if t > 0.0 && t.is_finite() => println!(
-                        "🌡️ 自动调温: t_start={:.6e}, t_end={:.6e}, 舒适区={:.6e}（配置绝对温度）",
-                        t0, t1, t
-                    ),
-                    _ => println!(
-                        "🌡️ 自动调温: t_start={:.6e}, t_end={:.6e}, 舒适区={:.6e}（曲线位置 {:.2}）",
-                        t0,
-                        t1,
-                        annealing::舒适区温度(&c),
-                        c.annealing.comfort_progress
-                    ),
-                }
-            }
-            None => eprintln!(
-                "⚠️ 自动调温采样失败（无合法移动或 Δscore 恒为 0），回退到兜底值 t_start={:.6e} / t_end={:.6e}",
-                c.annealing.temp_start, c.annealing.temp_end
-            ),
-        }
-        c
-    };
+    // === 退火温度：直接用配置值（与上游 Dieken/code_genie 同模式）===
+    // 不做运行时标定。温度只在评分尺度变化时才需要跟着变，而那件事由配置里的
+    // temp_start / temp_end 显式表达；自动标定会让同配置的跨运行温度不可复现
+    // （实测 t_start 摆动 5.6 倍），参数实验因此无法比较。
+    println!(
+        "🌡️ 退火温度: t_start={:.6e}, t_end={:.6e}, 舒适区={:.6e}（曲线位置 {:.2}）",
+        cfg.annealing.temp_start,
+        cfg.annealing.temp_end,
+        annealing::舒适区温度(cfg),
+        cfg.annealing.comfort_progress
+    );
+    let sa_cfg = cfg.clone();
 
-    // 固化尺度：repeat 下一轮用 --scale 复用，保证多轮口径一致（跨运行播种同理）。
+    // 固化尺度：下一次运行可用 --scale 复用，保证跨运行口径一致。
     {
         let 尺度路径 = format!("{}/尺度.json", output_dir);
         match serde_json::to_string_pretty(&scale_config) {
@@ -2368,7 +2308,7 @@ fn run_optimize(
         }
     }
 
-    // Ctrl-C 停止标志由调用方（多轮驱动器）创建并只安装一次处理器：
+    // Ctrl-C 停止标志由调用方创建并只安装一次处理器：
     // `ctrlc::set_handler` 每个进程只能成功安装一次，重复调用会返回 Err 且新标志永不置位。
     println!(
         "💡 提示: 按 Ctrl-C 可暂停并保存检查点，之后用 `resume -d {}` 继续",
@@ -2444,11 +2384,6 @@ fn run_optimize(
 
     let interrupted = stop_flag.load(Ordering::Relaxed) || sa_results.iter().any(|r| r.interrupted);
     finalize_and_save(cfg, &ctx, sa_results, &output_dir, start_time, interrupted);
-
-    RoundOutcome {
-        output_dir,
-        interrupted,
-    }
 }
 
 /// 取「全量拆分表」路径：**只认 `files.full_splits` 的手动配置**，不做任何自动猜测。
@@ -2678,114 +2613,6 @@ fn finalize_and_save(
         println!("\n⏸️  已暂停。继续续算：");
         println!("   cargo run --release -- resume -d {}", output_dir);
     }
-}
-
-/// 多轮播种：连续跑 `rounds` 轮，第 2 轮起用上一轮输出目录自播种并复用其尺度文件。
-/// 与 CI（`.github/workflows/optimize.yml` 的 repeat 循环）语义一致：
-/// 同一输出目录、每轮吃上一轮的 `thread-NN/字根键位表.txt`、复用 `尺度.json` 保证口径不漂移。
-/// Ctrl-C 中断任一轮则停止后续轮次（交互场景下不强行再跑一整轮）。
-fn run_optimize_rounds(
-    cfg: &Config,
-    cli_config_path: &str,
-    output_dir: Option<String>,
-    seed_dir: Option<String>,
-    seed_keymap: Option<String>,
-    scale_arg: Option<String>,
-    rounds: usize,
-) {
-    let rounds = rounds.max(1);
-
-    // Ctrl-C 停止标志：处理器在进程内只安装一次，各轮共用同一标志。
-    // （`ctrlc::set_handler` 重复调用会返回 Err 且新标志永不置位，多轮场景必须共用。）
-    let stop_flag = Arc::new(AtomicBool::new(false));
-    {
-        let sf = Arc::clone(&stop_flag);
-        let _ = ctrlc::set_handler(move || sf.store(true, Ordering::Relaxed));
-    }
-
-    if rounds == 1 {
-        run_optimize(
-            cfg,
-            cli_config_path,
-            output_dir,
-            seed_dir,
-            seed_keymap,
-            scale_arg,
-            &stop_flag,
-        );
-        return;
-    }
-
-    if rounds > 20 {
-        println!(
-            "⚠️ --rounds {} 偏大（建议 ≤20），每轮都是完整 total_steps，注意总耗时",
-            rounds
-        );
-    }
-    println!(
-        "🔁 多轮播种模式：共 {} 轮（第 2 轮起用上一轮输出自播种 + 复用尺度）",
-        rounds
-    );
-
-    let mut cur_output = output_dir;
-    let mut cur_seed_dir = seed_dir;
-    let mut cur_seed_keymap = seed_keymap;
-    let mut cur_scale = scale_arg;
-
-    for k in 1..=rounds {
-        // 上一轮收尾期间收到 Ctrl-C：不再开新一轮（避免白跑一次初始化与校准）。
-        if k > 1 && stop_flag.load(Ordering::Relaxed) {
-            println!(
-                "⏸️  收到中断信号，停止后续轮次（已完成 {}/{} 轮）。",
-                k - 1,
-                rounds
-            );
-            return;
-        }
-        println!("\n========== 第 {}/{} 轮 ==========", k, rounds);
-        let outcome = run_optimize(
-            cfg,
-            cli_config_path,
-            cur_output.clone(),
-            cur_seed_dir.clone(),
-            cur_seed_keymap.clone(),
-            cur_scale.clone(),
-            &stop_flag,
-        );
-
-        if outcome.interrupted {
-            println!(
-                "⏸️  第 {} 轮被中断，停止后续轮次（已完成 {}/{} 轮）。",
-                k,
-                k - 1,
-                rounds
-            );
-            println!(
-                "   续算本轮：cargo run --release -- resume -d {}",
-                outcome.output_dir
-            );
-            return;
-        }
-
-        if k == rounds {
-            break;
-        }
-
-        // 下一轮：同一输出目录自播种，并复用本轮写出的尺度文件（缺失则重新校准）。
-        let scale_path = format!("{}/尺度.json", outcome.output_dir);
-        cur_seed_dir = Some(outcome.output_dir.clone());
-        cur_seed_keymap = None; // 与 --seed-dir 互斥
-        cur_scale = if std::path::Path::new(&scale_path).exists() {
-            println!("📐 下一轮复用尺度: {}", scale_path);
-            Some(scale_path)
-        } else {
-            println!("📐 未找到 {}，下一轮将重新校准尺度", scale_path);
-            None
-        };
-        cur_output = Some(outcome.output_dir);
-    }
-
-    println!("\n✅ 多轮播种完成（共 {} 轮）", rounds);
 }
 
 /// 备份依赖输入文件到 `{output_dir}/inputs/`（需求 4）。失败仅告警，不中止。

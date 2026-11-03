@@ -44,8 +44,8 @@
     annealing: (
         threads: 12,                       // 并行线程数
         total_steps: 2000000,              // 总迭代步数
-        temp_start: 1.0,                   // 初温（兜底；运行时按初态自动标定）
-        temp_end: 0.000001,                // 末温（兜底）
+        temp_start: 0.005,                 // 初温（直接生效，运行时不做标定）
+        temp_end: 0.00005,                 // 末温（建议保持 t_start/100 的量级）
         comfort_progress: 0.5,             // 舒适区在降温曲线上的位置（0~1，0.5 = 正中）
         comfort_width: 0.15,               // 舒适区宽度（高斯 sigma）
         comfort_slowdown: 0.7,             // 舒适区减速因子

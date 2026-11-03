@@ -62,8 +62,6 @@ pub struct 参数 {
     pub 试运行: bool,
     /// 不套 `caffeinate`（macOS 默认套）
     pub 不防休眠: bool,
-    /// 多轮播种，转给 `optimize --rounds`
-    pub 轮数: usize,
     /// 转给 `optimize --seed-dir`
     pub 播种目录: Option<String>,
     /// 转给 `optimize --seed-keymap`
@@ -447,13 +445,9 @@ fn 准备任务(自身: &Path, 方案名: &str, 素材: &Path, 显式素材: boo
     }
 }
 
-/// `-c <配置> [--rounds N] (optimize|resume) -d <输出> [种子参数]`
+/// `-c <配置> (optimize|resume) -d <输出> [种子参数]`
 fn 优化任务(自身: &Path, 配置: &str, 输出: &str, 参: &参数) -> 任务 {
     let mut 参数 = vec!["-c".to_string(), 配置.to_string()];
-    if 参.轮数 > 1 && !参.续算 {
-        参数.push("--rounds".to_string());
-        参数.push(参.轮数.to_string());
-    }
     参数.push(if 参.续算 { "resume" } else { "optimize" }.to_string());
     参数.push("-d".to_string());
     参数.push(输出.to_string());
@@ -660,7 +654,6 @@ mod tests {
             跳过准备: false,
             试运行: false,
             不防休眠: true,
-            轮数: 1,
             播种目录: None,
             播种键位: None,
             尺度: None,
@@ -774,22 +767,20 @@ mod tests {
     fn 优化命令带上配置输出与种子() {
         let 自身 = Path::new("/tmp/code_genie");
         let mut 参 = 参数样例();
-        参.轮数 = 3;
         参.播种目录 = Some("old".to_string());
         let 文 = 优化任务(自身, "config.ron", "out-1", &参).渲染();
         assert_eq!(
             文,
-            "code_genie -c config.ron --rounds 3 optimize -d out-1 --seed-dir old"
+            "code_genie -c config.ron optimize -d out-1 --seed-dir old"
         );
     }
 
-    /// resume 不吃种子/尺度/轮数，拼进去只会让参数看着像生效了
+    /// resume 不吃种子/尺度，拼进去只会让参数看着像生效了
     #[test]
-    fn 续算命令不带种子与轮数() {
+    fn 续算命令不带种子与尺度() {
         let 自身 = Path::new("/tmp/code_genie");
         let mut 参 = 参数样例();
         参.续算 = true;
-        参.轮数 = 5;
         参.播种目录 = Some("old".to_string());
         参.尺度 = Some("尺度.json".to_string());
         let 文 = 优化任务(自身, "config.ron", "out-1", &参).渲染();
