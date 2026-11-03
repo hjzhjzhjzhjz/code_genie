@@ -187,10 +187,17 @@ pub struct AnnealingConfig {
     pub perturb_collision_pairs_limit: usize,
     pub reheat_factor: f64,
 
-    /// 冲突导向移动的执行概率（0.0~1.0），0.0 表示关闭本特性
+    /// 冲突导向移动的执行概率（0.0~1.0），0.0 表示关闭本特性（默认）
+    ///
+    /// 扫参（4 线程 × 4 轮、200 万步，见 `冲突导向邻域-字频排序改造.md` 5.5）：
+    /// 0.1 收益约减半；0.2 是当前验证过的拐点；0.35 以上得分开始回退（冲突邻域
+    /// 挤占了更有效的 swap/move 预算）。
     #[serde(default = "default_conflict_probability")]
     pub conflict_probability: f64,
-    /// 每隔多少步重建一次冲突缓存；0 表示初始化后不再重建
+    /// 冲突条目重建的兜底间隔（同步次数）；0 表示只按脏编码数自适应重建
+    ///
+    /// 编码桶改为增量维护后（见 `annealing::CollisionCache`），本项不再控制
+    /// 「全量重建」，而只是防止条目长期不重排的兜底闸门。
     #[serde(default = "default_conflict_refresh_interval")]
     pub conflict_refresh_interval: usize,
     /// 在排序后冲突列表的前 N 个元素中采样
@@ -214,6 +221,9 @@ pub struct AnnealingConfig {
     pub full_key_swap_probability: f64,
 }
 
+/// 默认 **关闭**（0.0）：这是新增算子，不应改变未显式开启的用户的搜索轨迹。
+/// 实测开启有益（0.2 时得分 −3.7%/t≈2.2、重码率 −2.8%），但那是相对消融基线的
+/// 结论，不是「所有配置都该默认打开」的理由——概率与其它邻域的配比需按配置调。
 fn default_conflict_probability() -> f64 {
     0.0
 }
@@ -817,8 +827,8 @@ impl Default for Config {
                 perturb_temp_multiplier: default_perturb_temp_multiplier(),
                 perturb_collision_pairs_limit: default_perturb_collision_pairs_limit(),
                 reheat_factor: 1.25,
-                conflict_probability: 0.0,
-                conflict_refresh_interval: 1000,
+                conflict_probability: default_conflict_probability(),
+                conflict_refresh_interval: default_conflict_refresh_interval(),
                 conflict_sample_window: default_conflict_sample_window(),
                 conflict_weight_by_freq: default_conflict_weight_by_freq(),
                 conflict_key_by_load: default_conflict_key_by_load(),
@@ -1249,11 +1259,16 @@ dist_max = 8.0
     #[test]
     fn test_conflict_fields_default_impl() {
         let a = &Config::default().annealing;
-        assert_eq!(a.conflict_probability, 0.0);
-        assert_eq!(a.conflict_refresh_interval, 1000);
-        assert_eq!(a.conflict_sample_window, 20);
-        assert!(a.conflict_weight_by_freq);
-        assert!(a.conflict_key_by_load); // 默认开启（拿综合分换更均匀的用指分布）
+        // 逐项与 `default_*` 函数比对，而不是硬编码字面量：这样 `Config::default()`
+        // 与 serde 缺省值一旦分叉，测试会立刻失败（此前二者各写一份 0.0/0.25 就分叉过）。
+        assert_eq!(a.conflict_probability, default_conflict_probability());
+        assert_eq!(
+            a.conflict_refresh_interval,
+            default_conflict_refresh_interval()
+        );
+        assert_eq!(a.conflict_sample_window, default_conflict_sample_window());
+        assert_eq!(a.conflict_weight_by_freq, default_conflict_weight_by_freq());
+        assert_eq!(a.conflict_key_by_load, default_conflict_key_by_load());
     }
 
     // -----------------------------------------------------------------------

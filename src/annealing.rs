@@ -277,14 +277,82 @@ fn random_valid_init(ctx: &OptContext, rng: &mut impl Rng) -> Vec<u8> {
 // 🔍 冲突分析
 // =========================================================================
 
-/// 构建编码到汉字的反向索引
+/// 构建编码到汉字的反向索引（只保留 ≥2 个汉字的桶）
+///
+/// 单个汉字独占的编码永远不可能冲突，全表 9868 条里绝大多数是这种；提前裁掉
+/// 能让后续遍历/增量维护都只在「真正可能冲突」的几百个桶上进行。
 fn build_code_to_chars(ctx: &OptContext, assignment: &[u8]) -> HashMap<usize, Vec<usize>> {
     let mut code_to_chars: HashMap<usize, Vec<usize>> = HashMap::new();
     for ci in 0..ctx.char_infos.len() {
         let code = ctx.calc_code_only(ci, assignment);
         code_to_chars.entry(code).or_default().push(ci);
     }
+    code_to_chars.retain(|_, v| v.len() >= 2);
     code_to_chars
+}
+
+/// 把一个冲突桶（同一编码下的若干汉字）折算成一条代表冲突对
+///
+/// 返回 `(组号下限, 组号上限, 权重)`；桶内字根组不足两个（同一组的两个码位自撞）
+/// 时返回 `None`——那种冲突靠「移走一个组」拆不开。
+fn entry_for_bucket(
+    ctx: &OptContext,
+    chars: &[usize],
+    weight_by_freq: bool,
+    scratch: &mut Vec<(usize, u64)>,
+) -> Option<(usize, usize, usize)> {
+    // 冲突权重：count 策略用 chars.len()；freq 策略用「字频和 − 最高字频」，
+    // 与评估器 collision_frequency 的口径一致（首字不计损失）。
+    let weight: usize = if weight_by_freq {
+        let sum: u64 = chars.iter().map(|&ci| ctx.char_infos[ci].frequency).sum();
+        let max = chars
+            .iter()
+            .map(|&ci| ctx.char_infos[ci].frequency)
+            .max()
+            .unwrap_or(0);
+        // sum >= max 恒成立，减法不会下溢。
+        (sum - max) as usize
+    } else {
+        chars.len()
+    };
+
+    // 统计每个字根组在该编码下的字频贡献，用于挑选代表对。
+    //
+    // 两点性能约束，都是被实测逼出来的（曾经每步重排一次，把吞吐从 316 万
+    // 步/分打到 62 万）：
+    // 1. 用线性查表而不是 HashMap——桶内通常 2~4 个汉字、至多四五个组，
+    //    建哈希表反而更慢，且每个桶一次堆分配。
+    // 2. 复用调用方传入的 `scratch`，整个重排过程零分配。
+    scratch.clear();
+    for &ci in chars {
+        let info = &ctx.char_infos[ci];
+        for &p in &info.parts {
+            if p >= GROUP_MARKER {
+                let gi = (p - GROUP_MARKER) as usize;
+                match scratch.iter_mut().find(|e| e.0 == gi) {
+                    Some(e) => e.1 += info.frequency,
+                    None => scratch.push((gi, info.frequency)),
+                }
+            }
+        }
+    }
+
+    // 贡献降序 + 组号升序裁决，保证可复现（不依赖遍历顺序）。
+    scratch.sort_unstable_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    let ranked = &*scratch;
+
+    if ranked.len() < 2 {
+        return None;
+    }
+    let (g1, g2) = (ranked[0].0, ranked[1].0);
+    // 规范化为 (min, max)，保证 g1 < g2，使排序次键稳定、配对去歧义
+    let (lo, hi) = if g1 <= g2 { (g1, g2) } else { (g2, g1) };
+    Some((lo, hi, weight))
+}
+
+/// 冲突条目排序：主键 weight 降序；次键 (g1, g2) 升序裁决（结果可复现）
+fn sort_collisions(collisions: &mut [(usize, usize, usize)]) {
+    collisions.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)).then(a.1.cmp(&b.1)));
 }
 
 /// 找出所有重码冲突的字根组对
@@ -315,55 +383,192 @@ fn find_collision_groups(
     weight_by_freq: bool,
 ) -> Vec<(usize, usize, usize)> {
     let code_to_chars = build_code_to_chars(ctx, assignment);
-    let mut collisions: Vec<(usize, usize, usize)> = Vec::new();
+    let mut scratch: Vec<(usize, u64)> = Vec::with_capacity(8);
+    let mut collisions: Vec<(usize, usize, usize)> = code_to_chars
+        .values()
+        .filter_map(|chars| entry_for_bucket(ctx, chars, weight_by_freq, &mut scratch))
+        .collect();
+    sort_collisions(&mut collisions);
+    collisions
+}
 
-    for chars in code_to_chars.values() {
-        if chars.len() < 2 {
-            continue;
-        }
-        // 冲突权重：count 策略用 chars.len()；freq 策略用「字频和 − 最高字频」，
-        // 与评估器 collision_frequency 的口径一致（首字不计损失）。
-        let weight: usize = if weight_by_freq {
-            let sum: u64 = chars.iter().map(|&ci| ctx.char_infos[ci].frequency).sum();
-            let max = chars
-                .iter()
-                .map(|&ci| ctx.char_infos[ci].frequency)
-                .max()
-                .unwrap_or(0);
-            // sum >= max 恒成立，减法不会下溢。
-            (sum - max) as usize
-        } else {
-            chars.len()
-        };
+/// 冲突条目重建阈值：编码桶累计变化多少条才重排一次冲突列表。
+///
+/// 一次重排要遍历全部冲突桶（约 320 个）、逐桶折算权重再排序，而低温段每步
+/// swap 就会让 20~40 个编码换桶——阈值太小等于每步都重排。取 64 是实测折中：
+/// 重排已优化到零分配（复用 scratch），名义上约每 2~3 步一次，实际开销可忽略；
+/// 而条目滞后控制在两个编码变化量级内，`try_resolve_conflict` 很少采到失效目标。
+///
+/// 反面教材：阈值 **256** 时代价没省多少（重排本身已不贵），却让条目长期滞后，
+/// 冲突分支大量采到已消解的冲突而空转、白丢邻域预算——实测 4 个线程的得分
+/// 从 0.4823~0.5398 全散布，方差是关闭冲突算子时的两倍。
+const COLLISION_ENTRY_REBUILD_THRESHOLD: usize = 64;
 
-        // 统计每个字根组在该编码下的字频贡献，用于挑选代表对。
-        let mut group_freq: HashMap<usize, u64> = HashMap::new();
-        for &ci in chars {
-            let info = &ctx.char_infos[ci];
+/// 冲突缓存：编码桶增量维护 + 冲突条目延迟重建
+///
+/// # 为什么不再每 N 步全量重建
+///
+/// 原实现每 `conflict_refresh_interval`（默认 1000）步调一次 `find_collision_groups`，
+/// 那是「遍历 9868 个汉字重算码值 → 重新分桶 → 全量排序」的活。而低温段一千步内常有
+/// 数十次成功移动，缓存均值已过期半个周期；`try_resolve_conflict` 的新鲜度校验只能把
+/// 这些过期记录**跳过**，被跳过的采样机会直接白丢（等于这段时间的冲突算子预算打折）。
+///
+/// # 现在的做法
+///
+/// 1. **编码桶增量维护**：每次采样前对比组键位快照（约 650 次 `u8` 比较，实测开销
+///    可忽略），只对真正移动过的组重算其名下汉字的码值并迁移桶——成本 ≈ 该组字符数
+///    × 码长，而不是全表的 9868 次码值计算。
+/// 2. **冲突条目延迟重建**：脏编码累计到 [`COLLISION_ENTRY_REBUILD_THRESHOLD`] 才从桶
+///    重排一次条目。两次重建之间条目可能**少**几条新冲突，但不会多出错误目标
+///    （采样前仍有同键校验兜底）。
+///
+/// 用「快照 diff」而不是「调用点手动标记」是有意的：`try_move` / `try_swap` /
+/// `try_triple_swap` / `try_key_reorganization` / `try_full_key_swap` 都会改组键位，
+/// 逐个调用点埋标记极易漏（漏了也不会报错，只会让缓存悄悄失真）。diff 一次 650 项
+/// 就够，正确性不依赖任何调用点配合。
+struct CollisionCache {
+    /// 编码 → 该编码下的汉字下标（只保留 ≥2 的桶）
+    buckets: HashMap<usize, Vec<usize>>,
+    /// 汉字 → 当前所属编码
+    char_code: Vec<usize>,
+    /// 组 → 含该组标记的汉字下标（预计算一次，之后只读）
+    group_chars: Vec<Vec<usize>>,
+    /// 组 → 上次同步时的键位（diff 用）
+    group_key: Vec<u8>,
+    /// 排序后的冲突条目
+    entries: Vec<(usize, usize, usize)>,
+    /// 自上次重排条目以来发生变化的编码数
+    changed_codes: usize,
+    /// 自上次重排条目以来的同步次数（条目重建的步数兜底）
+    syncs_since_rebuild: usize,
+    /// 条目排序权重口径（`conflict_weight_by_freq`）
+    weight_by_freq: bool,
+    /// 条目重建的步数兜底间隔；0 表示只按脏编码数自适应
+    entry_rebuild_interval: usize,
+}
+
+impl CollisionCache {
+    fn new(
+        ctx: &OptContext,
+        assignment: &[u8],
+        weight_by_freq: bool,
+        entry_rebuild_interval: usize,
+    ) -> Self {
+        // 组 → 涉及汉字：一个汉字由多个字根组成，因此会出现在多个组的名下。
+        let mut group_chars: Vec<Vec<usize>> = vec![Vec::new(); ctx.num_groups];
+        for (ci, info) in ctx.char_infos.iter().enumerate() {
             for &p in &info.parts {
                 if p >= GROUP_MARKER {
-                    *group_freq.entry((p - GROUP_MARKER) as usize).or_insert(0) += info.frequency;
+                    let gi = (p - GROUP_MARKER) as usize;
+                    if gi < group_chars.len() {
+                        group_chars[gi].push(ci);
+                    }
                 }
             }
         }
 
-        // 贡献降序 + 组号升序裁决，保证可复现（不依赖 HashMap 遍历顺序）。
-        let mut ranked: Vec<(usize, u64)> = group_freq.into_iter().collect();
-        ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-
-        // 该编码只由单个组构成（如某根的两个码位自撞）时无法靠「移走一个组」拆开，跳过。
-        if ranked.len() < 2 {
-            continue;
-        }
-        let (g1, g2) = (ranked[0].0, ranked[1].0);
-        // 规范化为 (min, max)，保证 g1 < g2，使排序次键稳定、配对去歧义
-        let (lo, hi) = if g1 <= g2 { (g1, g2) } else { (g2, g1) };
-        collisions.push((lo, hi, weight));
+        let mut cache = Self {
+            buckets: HashMap::new(),
+            char_code: vec![0; ctx.char_infos.len()],
+            group_chars,
+            group_key: vec![0; ctx.num_groups],
+            entries: Vec::new(),
+            changed_codes: 0,
+            syncs_since_rebuild: 0,
+            weight_by_freq,
+            entry_rebuild_interval,
+        };
+        cache.rebuild(ctx, assignment);
+        cache
     }
 
-    // 主键：第三字段（weight）降序；次键（稳定裁决）：(g1, g2) 升序
-    collisions.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)).then(a.1.cmp(&b.1)));
-    collisions
+    /// 全量重建（初始化，或外部大范围改动后）。日常路径走 [`Self::sync`]。
+    fn rebuild(&mut self, ctx: &OptContext, assignment: &[u8]) {
+        self.buckets.clear();
+        for ci in 0..ctx.char_infos.len() {
+            let code = ctx.calc_code_only(ci, assignment);
+            self.char_code[ci] = code;
+            self.buckets.entry(code).or_default().push(ci);
+        }
+        self.buckets.retain(|_, v| v.len() >= 2);
+        let n_groups = self.group_key.len();
+        self.group_key.copy_from_slice(&assignment[..n_groups]);
+        self.rebuild_entries(ctx);
+        self.syncs_since_rebuild = 0;
+    }
+
+    /// 从编码桶重排冲突条目（不重算码值，是全量重建里最便宜的那半）
+    fn rebuild_entries(&mut self, ctx: &OptContext) {
+        let weight_by_freq = self.weight_by_freq;
+        let mut scratch: Vec<(usize, u64)> = Vec::with_capacity(8);
+        let mut entries: Vec<(usize, usize, usize)> = self
+            .buckets
+            .values()
+            .filter_map(|chars| entry_for_bucket(ctx, chars, weight_by_freq, &mut scratch))
+            .collect();
+        sort_collisions(&mut entries);
+        self.entries = entries;
+        self.changed_codes = 0;
+    }
+
+    /// 把「组键位与快照不同」的改动增量同步进编码桶
+    ///
+    /// 只重算受影响组名下汉字的码值（平均每组十余个汉字），成本与改动规模成正比。
+    /// 脏编码累计到阈值、或同步次数到兜底间隔时才重排条目。
+    fn sync(&mut self, ctx: &OptContext, assignment: &[u8]) {
+        let mut any = false;
+        for gi in 0..self.group_key.len() {
+            let key = assignment[gi];
+            if self.group_key[gi] == key {
+                continue;
+            }
+            self.group_key[gi] = key;
+            any = true;
+
+            for &ci in &self.group_chars[gi] {
+                let new_code = ctx.calc_code_only(ci, assignment);
+                let old_code = self.char_code[ci];
+                if new_code == old_code {
+                    continue;
+                }
+
+                // 从旧桶摘除；桶空了就删掉，避免桶表被空壳撑大
+                let emptied = match self.buckets.get_mut(&old_code) {
+                    Some(v) => {
+                        if let Some(pos) = v.iter().position(|&x| x == ci) {
+                            v.swap_remove(pos);
+                        }
+                        v.is_empty()
+                    }
+                    None => false,
+                };
+                if emptied {
+                    self.buckets.remove(&old_code);
+                }
+
+                self.buckets.entry(new_code).or_default().push(ci);
+                self.char_code[ci] = new_code;
+                self.changed_codes += 1;
+            }
+        }
+
+        if !any {
+            return;
+        }
+
+        self.syncs_since_rebuild += 1;
+        let over_interval = self.entry_rebuild_interval > 0
+            && self.syncs_since_rebuild >= self.entry_rebuild_interval;
+        if self.changed_codes >= COLLISION_ENTRY_REBUILD_THRESHOLD || over_interval {
+            self.rebuild_entries(ctx);
+            self.syncs_since_rebuild = 0;
+        }
+    }
+
+    /// 当前冲突条目（可能滞后于最新键位，采样时另有同键校验兜底）
+    fn entries(&self) -> &[(usize, usize, usize)] {
+        &self.entries
+    }
 }
 
 /// 找出特定键位上的所有字根组
@@ -388,12 +593,16 @@ fn find_groups_on_key(ctx: &OptContext, assignment: &[u8], key: u8) -> Vec<usize
 /// # 权重取什么
 ///
 /// 目标是 `calc_distribution_deviation` 里那一项 `(actual% − target%)² · penalty`。
-/// 把负载搬进键 k 时，该项的一阶下降量正比于 `headroom · low_penalty`，
-/// 其中 `headroom = target_rate − actual_pct`（百分点，正数=还欠配额）。
-/// 直接拿它当抽样权重，落点就沿着「让分布惩罚下降」的梯度走，而不是凭经验拍一个
-/// 「越空越好」——用绝对负载会把 home 键（目标本来就高）误判成超标。
-/// 全部键都已超标（或 `low_penalty` 全为 0、配置没给目标）时回退均匀采样，
-/// 与改造前行为一致。
+/// 在 `low_penalty = 0`（只罚超标、不罚欠配额，是实际配置的常见形态）下，
+/// 欠配额的键之间**没有**梯度差别，唯一有意义的信号是「这键还差多少才到目标」：
+/// `headroom = target_rate − actual_pct`（百分点，正数=还欠配额）。它同时起两个作用——
+/// 越过目标之前不加惩罚，越接近目标越该降低被选中的概率。所以拿它当抽样权重，
+/// 而不是用绝对负载（会把 home 键这种「目标本来就高」的键误判成超标）。
+///
+/// `low_penalty > 0` 的配置才额外乘上它（那种口径下「欠得越多越该补」才成立）。
+///
+/// 全部键都已超标（或配置根本没给目标使用率）时回退均匀采样，与改造前行为一致。
+/// 注意这是**静默**回退：没有目标配置时权重量全为 0，结果看起来和「加权生效」一样。
 ///
 /// # 为什么不需要额外快照
 ///
@@ -427,12 +636,25 @@ fn pick_key_by_headroom(
             // 与 calc_distribution_deviation 同口径：usage × 100 × inv_total_key_presses
             let actual = evaluator.key_weighted_usage[k as usize] * 100.0 * inv;
             let headroom = cfg.target_rate - actual;
-            if headroom <= 0.0 || cfg.low_penalty <= 0.0 {
+            // 只排除「已经超标」的键；权重用 headroom 本身。
+            //
+            // 早期实现把 `low_penalty` 也乘进来，而它是「欠配额时的惩罚系数」，
+            // 不是「这个键还能吃多少负载」。真实配置（`key_distribution.txt`）里
+            // 第 4 列 low_penalty 普遍为 **0**（只罚超标、不罚欠配额），于是权重
+            // 全部归零、所有键被跳过、每次都静默退回均匀随机——负载加权从头到尾
+            // 没有生效过，日志上也看不出来。现在只在 low_penalty > 0 时才乘它
+            // （那种配置下「欠得越多越该补」才成立）。
+            if headroom <= 0.0 {
                 continue;
             }
+            let weight = if cfg.low_penalty > 0.0 {
+                headroom * cfg.low_penalty
+            } else {
+                headroom
+            };
             keys[n] = k;
-            weights[n] = headroom * cfg.low_penalty;
-            total += weights[n];
+            weights[n] = weight;
+            total += weight;
             n += 1;
         }
     }
@@ -836,6 +1058,7 @@ pub(crate) fn try_full_key_swap(
 ///   使精炼分数与主循环 best_score 同口径（全码+简码），接受判定正确。
 fn enhanced_hill_climb(
     ctx: &OptContext,
+    cfg: &Config,
     init: Vec<u8>,
     rng: &mut impl Rng,
     max_steps: usize,
@@ -857,26 +1080,41 @@ fn enhanced_hill_climb(
     }
 
     let zero_temp = 1e-15;
+    // 冲突算子的三个参数与主循环同源：精炼段是同一份搜索的收尾，不该自带一套口径。
+    // 原先这里硬编码 window=20 + 按个数排序 + 均匀落点，配置改了它不跟随。
+    let conflict_weight_by_freq = cfg.annealing.conflict_weight_by_freq;
+    let conflict_sampling = ConflictSampling {
+        window: cfg.annealing.conflict_sample_window,
+        key_by_load: cfg.annealing.conflict_key_by_load,
+    };
     let mut no_improve_count = 0usize;
-    let mut collisions = find_collision_groups(ctx, &assignment, false);
+    // 冲突缓存懒构建：warmup 阶段大量调用本函数，若一步都没走到冲突分支，
+    // 就不该为它付一次全表分桶的代价（原实现在函数开头无条件算一遍）。
+    let mut conflict_cache: Option<CollisionCache> = None;
 
     for step in 0..max_steps {
         let op_type = step % 10;
 
         let success = match op_type {
             0..=3 => {
+                let cache = conflict_cache.get_or_insert_with(|| {
+                    CollisionCache::new(
+                        ctx,
+                        &assignment,
+                        conflict_weight_by_freq,
+                        cfg.annealing.conflict_refresh_interval,
+                    )
+                });
+                // 与主循环同一套增量同步：精炼段每一步都可能移动组，缓存不再等 200 步。
+                cache.sync(ctx, &assignment);
+                let collisions = cache.entries();
                 if !collisions.is_empty() {
                     try_resolve_conflict(
                         ctx,
                         &mut assignment,
                         &mut evaluator,
-                        &collisions,
-                        ConflictSampling {
-                            window: 20,
-                            // 精炼段在 zero_temp 下只接受严格改进，落点策略对结果影响很小，
-                            // 这里保持改造前的均匀随机。
-                            key_by_load: false,
-                        },
+                        collisions,
+                        conflict_sampling,
                         zero_temp,
                         rng,
                     )
@@ -915,9 +1153,6 @@ fn enhanced_hill_climb(
         // At zero_temp, success means score improved (only strict improvements accepted)
         if success {
             no_improve_count = 0;
-            if step % 200 == 0 {
-                collisions = find_collision_groups(ctx, &assignment, false);
-            }
         } else {
             no_improve_count += 1;
         }
@@ -932,12 +1167,13 @@ fn enhanced_hill_climb(
 
 fn hill_climb_warmup(
     ctx: &OptContext,
+    cfg: &Config,
     init: Vec<u8>,
     rng: &mut impl Rng,
     max_steps: usize,
     disable_simple: bool,
 ) -> (Vec<u8>, f64) {
-    enhanced_hill_climb(ctx, init, rng, max_steps, disable_simple)
+    enhanced_hill_climb(ctx, cfg, init, rng, max_steps, disable_simple)
 }
 
 // =========================================================================
@@ -1124,7 +1360,8 @@ fn multi_start_init_with(
             }
         };
 
-        let (refined, score) = hill_climb_warmup(ctx, candidate, &mut *rng, warmup_steps, true);
+        let (refined, score) =
+            hill_climb_warmup(ctx, cfg, candidate, &mut *rng, warmup_steps, true);
 
         if score < best_score {
             best_score = score;
@@ -1449,12 +1686,18 @@ pub fn simulated_annealing_resumable(
     // 落点是否按负载（剩余配额）加权；关闭则退回改造前的均匀随机
     let conflict_key_by_load = cfg.annealing.conflict_key_by_load;
     let conflict_enabled = conflict_prob > 0.0;
-    let mut collisions: Vec<(usize, usize, usize)> = if conflict_enabled {
-        find_collision_groups(ctx, &assignment, conflict_weight_by_freq)
+    // 冲突缓存：编码桶增量维护 + 条目延迟重建（见 `CollisionCache` 文档）。
+    // 关闭时不构建；`conflict_prob = 0` 时也从不在采样路径 sync，保持零开销。
+    let mut conflict_cache = if conflict_enabled {
+        Some(CollisionCache::new(
+            ctx,
+            &assignment,
+            conflict_weight_by_freq,
+            conflict_refresh,
+        ))
     } else {
-        Vec::new()
+        None
     };
-    let mut steps_since_refresh = 0usize;
 
     let sa_start = Instant::now();
 
@@ -1698,36 +1941,37 @@ pub fn simulated_annealing_resumable(
             temp_multiplier = 1.0;
         }
 
-        // 冲突缓存刷新（仅启用时；interval=0 表示初始化后不再重建）
-        if conflict_enabled {
-            if conflict_refresh > 0 && steps_since_refresh >= conflict_refresh {
-                collisions = find_collision_groups(ctx, &assignment, conflict_weight_by_freq);
-                steps_since_refresh = 0;
-            } else {
-                steps_since_refresh += 1;
-            }
-        }
-
         // 邻域分发：启用时每步抽取一次 r 决定走冲突路径还是既有 swap/move；
         // 关闭时跳过抽样，直接走既有分发，保持 RNG 消耗序列与原实现一致。
         // 每步恰好提议一次邻域移动；`proposal_accepted` 记录本步是否被（含概率）接受，用于窗口接受率。
         let mut proposal_accepted = false;
         let did_conflict = if conflict_enabled {
             let r = rng.random::<f64>();
-            if r < conflict_prob && !collisions.is_empty() {
-                proposal_accepted = try_resolve_conflict(
-                    ctx,
-                    &mut assignment,
-                    &mut evaluator,
-                    &collisions,
-                    ConflictSampling {
-                        window: conflict_window,
-                        key_by_load: conflict_key_by_load,
-                    },
-                    temp,
-                    &mut rng,
-                );
-                true
+            if r < conflict_prob {
+                // 采样前增量同步：把上一步可能的移动并进编码桶，脏编码够多才重排条目。
+                // 这是替代「每 1000 步全量重建」的关键——缓存不再成块过期。
+                let cache = conflict_cache
+                    .as_mut()
+                    .expect("conflict_enabled 为真时缓存必然已构建");
+                cache.sync(ctx, &assignment);
+                let collisions = cache.entries();
+                if !collisions.is_empty() {
+                    proposal_accepted = try_resolve_conflict(
+                        ctx,
+                        &mut assignment,
+                        &mut evaluator,
+                        collisions,
+                        ConflictSampling {
+                            window: conflict_window,
+                            key_by_load: conflict_key_by_load,
+                        },
+                        temp,
+                        &mut rng,
+                    );
+                    true
+                } else {
+                    false
+                }
             } else {
                 false
             }
@@ -1852,7 +2096,7 @@ pub fn simulated_annealing_resumable(
             && step % perturb_interval == 0
             && base_temp < perturb_trigger_temp
         {
-            let collisions = find_collision_groups(ctx, &assignment, false);
+            let collisions = find_collision_groups(ctx, &assignment, conflict_weight_by_freq);
             let n_perturb = (n_groups as f64 * cfg.annealing.perturb_strength) as usize;
 
             if !collisions.is_empty() {
@@ -2068,6 +2312,7 @@ pub fn simulated_annealing_resumable(
     // 同口径（全码+简码），接受判定正确；简码关闭时该参数无效（路径与基线一致）。
     let (final_assignment, final_score) = hill_climb_warmup(
         ctx,
+        cfg,
         best_assignment.clone(),
         &mut rng,
         final_warmup_steps,
@@ -2413,6 +2658,49 @@ mod conflict_tests {
         kd
     }
 
+    /// 与真实 `key_distribution.txt` 同形：只罚超标、不罚欠配额（`low_penalty = 0`）。
+    fn zero_low_penalty_dist() -> [KeyDistConfig; EQUIV_TABLE_SIZE] {
+        let mut kd = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
+        for k in [0usize, 2] {
+            kd[k] = KeyDistConfig {
+                target_rate: 50.0,
+                low_penalty: 0.0,
+                high_penalty: 1.0,
+            };
+        }
+        kd[1] = KeyDistConfig {
+            target_rate: 1.0,
+            low_penalty: 0.0,
+            high_penalty: 1.0,
+        };
+        kd
+    }
+
+    // low_penalty = 0 时也必须真的按配额加权。
+    //
+    // 这是曾静默失效的回归测试：早期权重写成 `headroom × low_penalty`，
+    // 而实际配置里 low_penalty 全是 0，权重恒为 0 → 全部键被跳过 → 每次
+    // 采样都退回均匀随机，负载加权从未生效且不留任何痕迹。
+    #[test]
+    fn test_load_pick_works_with_zero_low_penalty() {
+        let ctx = make_ctx_with_dist(&FREQS, &ALLOWED, zero_low_penalty_dist());
+        // 5 组全在键 1：键 1 实际 100% 远超 1% 目标，键 0/2 实际 0%、还差 50%
+        let a = vec![1u8; FREQS.len()];
+        let ev = Evaluator::new(&ctx, &a);
+        let mut rng = rand::rng();
+
+        let mut seen = [false; 3];
+        for _ in 0..500 {
+            let k = pick_key_by_headroom(&ctx, &ev, 0, 1, &mut rng).expect("应有候选键");
+            assert_ne!(k, 1, "low_penalty=0 时同样不该选超标键");
+            seen[k as usize] = true;
+        }
+        assert!(
+            seen[0] && seen[2],
+            "两个欠配额键都应被采到，说明没有退化成固定落点"
+        );
+    }
+
     #[test]
     fn test_load_pick_avoids_overloaded_keys() {
         let ctx = make_ctx_with_dist(&FREQS, &ALLOWED, lopsided_dist());
@@ -2489,6 +2777,80 @@ mod conflict_tests {
         );
         assert!(moved, "欠配额键存在时冲突移动应被接受");
         assert!(a.iter().any(|&k| k != 1), "至少一个组应离开超标的键 1");
+    }
+
+    // 增量桶维护的正确性：任意一串移动之后，缓存重排出的条目必须与全量重建逐条一致。
+    // 这是把「每 1000 步全量重建」换成增量同步的全部风险所在——桶漏删/漏加会直接
+    // 让冲突目标错位，而这种错误不会抛异常、只会悄悄拉低收益。
+    #[test]
+    fn test_collision_cache_matches_full_rebuild() {
+        let freqs = [900u64, 700, 500, 300, 100];
+        let ctx = make_ctx(&freqs, &ALLOWED);
+        let mut a = vec![0u8; freqs.len()];
+        let mut rng = StdRng::seed_from_u64(20261103);
+        let mut cache = CollisionCache::new(&ctx, &a, true, 0);
+
+        for _ in 0..60 {
+            let gi = rng.random_range(0..freqs.len());
+            let allowed = &ctx.groups[gi].allowed_keys;
+            a[gi] = allowed[rng.random_range(0..allowed.len())];
+            cache.sync(&ctx, &a);
+        }
+
+        // 强制重排条目后逐条比对（阈值内的条目滞后不是错误，这里只验桶的正确性）
+        cache.rebuild_entries(&ctx);
+        let mut got = cache.entries().to_vec();
+        sort_collisions(&mut got);
+        assert_eq!(got, find_collision_groups(&ctx, &a, true));
+    }
+
+    // 脏编码累计到阈值应当自动重排，让条目追平全量结果（不需要外部再触发一次重建）
+    #[test]
+    fn test_collision_cache_auto_rebuild_after_threshold() {
+        let freqs = [900u64, 700, 500, 300];
+        let ctx = make_ctx(&freqs, &ALLOWED);
+        let mut a = vec![0u8; freqs.len()];
+        let mut cache = CollisionCache::new(&ctx, &a, true, 0);
+
+        // 反复移动同一组：每次只有 1 个汉字换编码，累计到阈值以上自动触发重排
+        let mut auto_rebuilt = false;
+        for i in 0..(COLLISION_ENTRY_REBUILD_THRESHOLD + 8) {
+            a[0] = if i % 2 == 0 { 1 } else { 0 };
+            cache.sync(&ctx, &a);
+            // `changed_codes` 归零 = 本次 sync 刚刚重排过条目
+            if cache.changed_codes == 0 {
+                auto_rebuilt = true;
+                break;
+            }
+        }
+        assert!(auto_rebuilt, "脏编码累计到阈值后应自动重排条目");
+
+        let mut got = cache.entries().to_vec();
+        sort_collisions(&mut got);
+        assert_eq!(
+            got,
+            find_collision_groups(&ctx, &a, true),
+            "脏编码超阈值后条目应已自动追平全量结果"
+        );
+    }
+
+    // 关闭口径（weight_by_freq = false）下增量路径同样成立
+    #[test]
+    fn test_collision_cache_count_weight_consistency() {
+        let freqs = [900u64, 700, 500, 300];
+        let ctx = make_ctx(&freqs, &ALLOWED);
+        let mut a = vec![0u8; freqs.len()];
+        let mut cache = CollisionCache::new(&ctx, &a, false, 0);
+
+        for i in 0..5 {
+            a[i % freqs.len()] = if i % 2 == 0 { 1 } else { 2 };
+            cache.sync(&ctx, &a);
+        }
+        cache.rebuild_entries(&ctx);
+
+        let mut got = cache.entries().to_vec();
+        sort_collisions(&mut got);
+        assert_eq!(got, find_collision_groups(&ctx, &a, false));
     }
 }
 

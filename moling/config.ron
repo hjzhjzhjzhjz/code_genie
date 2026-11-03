@@ -54,10 +54,15 @@
         perturb_temp_multiplier: 2.0,
         perturb_collision_pairs_limit: 10,
         reheat_factor: 1.0,
-        conflict_probability: 0.0,
+        // 冲突导向算子：三个子开关必须与 probability 一起看——probability = 0 时它们全部失效。
+        // 0.2 是与上游对照实验中验证过的取值（2M 步、4 线程，得分 −3.74%/t=2.2、重码率 −2.8%）。
+        conflict_probability: 0.2,
         conflict_refresh_interval: 1000,
         conflict_sample_window: 20,
-        conflict_weight_by_freq: false,
+        // 按重码损失（字频和 − 最高字频）排序，优先修高频重码；false = 按汉字个数
+        conflict_weight_by_freq: true,
+        // 落点按键位剩余配额加权（用指分布更匀，代价综合得分 +2.3%）
+        conflict_key_by_load: true,
         checkpoint_interval_ratio: 0.05,
         full_key_swap_probability: 0.01,
     ),
