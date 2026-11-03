@@ -163,6 +163,13 @@ pub struct AnnealingConfig {
     /// 反直觉的量改成了「曲线走到几成」这种能直接看懂、能直接调的量。
     #[serde(default = "default_comfort_progress")]
     pub comfort_progress: f64,
+    /// 舒适区温度的**绝对值**（可选，优先于 `comfort_progress`）。
+    ///
+    /// 与上游 Dieken/code_genie 的 `annealing.comfort_temp` 同义：给定时直接按绝对温度
+    /// 定位减速带中心，不再按降温曲线位置换算。留空（或 <= 0）时回落到
+    /// `comfort_progress`，保持原有「尺度无关」的默认行为。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comfort_temp: Option<f64>,
     pub comfort_width: f64,
     pub comfort_slowdown: f64,
     pub swap_probability: f64,
@@ -192,6 +199,10 @@ pub struct AnnealingConfig {
     /// 冲突组排序是否按频率加权（true=按字频之和，false=按汉字数量）
     #[serde(default = "default_conflict_weight_by_freq")]
     pub conflict_weight_by_freq: bool,
+    /// 冲突组的新落点是否按键位剩余配额加权采样
+    /// （true=避开已超目标使用率的键，false=均匀随机）
+    #[serde(default = "default_conflict_key_by_load")]
+    pub conflict_key_by_load: bool,
 
     /// checkpoint 写出间隔比例：单位为占 total_steps 的比例，
     /// 实际间隔步数 = max(1, floor(total_steps × ratio))（默认 0.05，约每 5% 写一次，与汇报频率一致）
@@ -209,10 +220,19 @@ fn default_conflict_probability() -> f64 {
 fn default_conflict_refresh_interval() -> usize {
     1000
 }
+/// 默认 20：实测 20/25/30 三档无统计学差异（见 `冲突导向邻域-字频排序改造.md` 5.3），
+/// 20 的得分与重码均值最优，故取 20。
 fn default_conflict_sample_window() -> usize {
     20
 }
 fn default_conflict_weight_by_freq() -> bool {
+    true
+}
+/// 默认 **关闭**：实测（n=32/臂）启用后分布偏差 −6.4%（t=−0.94，不显著），
+/// 但重码 +1.2%（t=1.71）、CV +1.5%（t=2.28）、综合得分 +2.3%（t=1.58）。
+/// 原因是分布权重只有 0.02，而限制落点会挤掉拆重码最有效的键位——得不偿失。
+/// 仅当把「用指分布」当硬指标时才值得打开（见 `冲突导向邻域-字频排序改造.md` 5.4）。
+fn default_conflict_key_by_load() -> bool {
     false
 }
 fn default_checkpoint_interval_ratio() -> f64 {
@@ -785,6 +805,7 @@ impl Default for Config {
                 temp_start: 1.0,
                 temp_end: 0.000001,
                 comfort_progress: default_comfort_progress(),
+                comfort_temp: None,
                 comfort_width: 0.15,
                 comfort_slowdown: 0.8,
                 swap_probability: 0.3,
@@ -797,8 +818,9 @@ impl Default for Config {
                 reheat_factor: 1.25,
                 conflict_probability: 0.0,
                 conflict_refresh_interval: 1000,
-                conflict_sample_window: 20,
-                conflict_weight_by_freq: false,
+                conflict_sample_window: default_conflict_sample_window(),
+                conflict_weight_by_freq: default_conflict_weight_by_freq(),
+                conflict_key_by_load: default_conflict_key_by_load(),
                 checkpoint_interval_ratio: default_checkpoint_interval_ratio(),
                 full_key_swap_probability: default_full_key_swap_probability(),
             },
@@ -1197,13 +1219,14 @@ dist_max = 8.0
 
     #[test]
     fn test_conflict_fields_default_when_absent() {
-        // 不含任何冲突导向字段的 [annealing] 应解析成功且四字段取默认值
+        // 不含任何冲突导向字段的 [annealing] 应解析成功且五字段取默认值
         let cfg: Config = toml::from_str(minimal_config_prefix()).expect("解析失败");
         let a = &cfg.annealing;
         assert_eq!(a.conflict_probability, 0.0);
         assert_eq!(a.conflict_refresh_interval, 1000);
         assert_eq!(a.conflict_sample_window, 20);
-        assert!(!a.conflict_weight_by_freq);
+        assert!(a.conflict_weight_by_freq);
+        assert!(!a.conflict_key_by_load); // 默认关闭（实测综合得分变差）
     }
 
     #[test]
@@ -1219,6 +1242,7 @@ dist_max = 8.0
         assert!(a.conflict_weight_by_freq); // 显式
         assert_eq!(a.conflict_refresh_interval, 1000); // 默认
         assert_eq!(a.conflict_sample_window, 20); // 默认
+        assert!(!a.conflict_key_by_load); // 默认关闭
     }
 
     #[test]
@@ -1227,7 +1251,8 @@ dist_max = 8.0
         assert_eq!(a.conflict_probability, 0.0);
         assert_eq!(a.conflict_refresh_interval, 1000);
         assert_eq!(a.conflict_sample_window, 20);
-        assert!(!a.conflict_weight_by_freq);
+        assert!(a.conflict_weight_by_freq);
+        assert!(!a.conflict_key_by_load); // 默认关闭（实测综合得分变差）
     }
 
     // -----------------------------------------------------------------------

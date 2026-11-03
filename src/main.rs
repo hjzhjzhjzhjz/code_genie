@@ -2062,10 +2062,13 @@ fn run_optimize(
     // 校准后复用 temp_ctx 作为正式 ctx，仅就地更新评分用的 scale/targets（二者不参与
     // 构建期预计算，仅评分路径读取）。all_manual（手动 scale 跳过校准）无 temp_ctx，
     // 正式 ctx 仍需单独构建一次。
-    let (scale_config, scale_source, calib_ctx): (
+    // calibration_init：校准用的初解（确定性贪心），同时给尺度校准与自动调温当基准，
+    // 只算一次。口径统一后，scale 与温度才不会被两个不同的劣质/优质基准各自带偏。
+    let (scale_config, scale_source, calib_ctx, calibration_init): (
         types::ScaleConfig,
         &'static str,
         Option<OptContext>,
+        Option<Vec<u8>>,
     ) = if let Some(sp) = scale_arg.as_deref() {
         let text = std::fs::read_to_string(sp).unwrap_or_else(|e| {
             eprintln!("❌ 读不了尺度文件 {}: {}", sp, e);
@@ -2076,11 +2079,11 @@ fn run_optimize(
             std::process::exit(1);
         });
         println!("\n📐 复用尺度文件 {}（跳过校准，多轮口径一致）", sp);
-        (sc, "复用尺度文件", None)
+        (sc, "复用尺度文件", None, None)
     } else if all_manual {
         println!("\n📐 ScaleConfig 已全部手动配置，跳过自动校准...");
         let (sc, src) = resolve_scale_config(cfg, types::ScaleConfig::default());
-        (sc, src, None)
+        (sc, src, None, None)
     } else {
         println!("\n📐 正在进行初始尺度校准...");
         // C8：当量/分布仅校准路径需要，就地加载（all_manual / 复用尺度路径不再重复读）。
@@ -2224,8 +2227,9 @@ fn run_optimize(
             &cfg.get_targets_config(),
         );
         let (sc, src) = resolve_scale_config(cfg, calibrated);
-        // 复用校准期构建的 temp_ctx 作为正式 ctx（省去退火前第二次完整构建）。
-        (sc, src, Some(temp_ctx))
+        // 复用校准期构建的 temp_ctx 作为正式 ctx（省去退火前第二次完整构建），
+        // 同时把这次初解交给自动调温复用，避免再跑一遍多起点。
+        (sc, src, Some(temp_ctx), Some(initial_assignment))
     };
 
     println!("  ScaleConfig 来源: {}", scale_source);
@@ -2288,23 +2292,37 @@ fn run_optimize(
     // 桶存储后端选择日志（需求 12）：单线程、配置确认阶段输出一次。
     evaluator::log_bucket_backends(&ctx);
 
-    // === 自动调温：按初态采样的带符号 Δscore 标定 t_start / t_end / 舒适区位置 ===
-    // 温度与舒适区都不写死在配置里（写死会与评分尺度错配），每次运行按当前权重/scale 现算。
+    // === 自动调温：按初态采样的带符号 Δscore 标定 t_start / t_end ===
+    // 温度不写死在配置里（写死会与评分尺度错配），每次运行按当前权重/scale 现算。
+    // 基准必须是**真正进入 SA 的那个初解**（贪心多起点 + 坐标下降）；若拿轮转分配的
+    // `deterministic_init` 当基准，其 Δ 分布里「不恶化」的移动占比过高（实测 >40%），
+    // 按接受率二分反解出的温度会直接塌到下限。
     let sa_cfg = {
         let mut c = cfg.clone();
-        let init = annealing::deterministic_init(&ctx, cfg);
+        let init = match calibration_init {
+            // 尺度校准那步已经算好了同一个初解，直接复用，不再重跑多起点。
+            Some(v) => v,
+            // --scale / 手动 scale 路径没算过，这里补一次（确定性种子，口径一致）。
+            None => annealing::smart_init(&ctx, cfg),
+        };
         let mut rng = rand::rng();
         match auto_temperature(&ctx, &init, &mut rng) {
             Some((t0, t1)) => {
                 c.annealing.temp_start = t0;
                 c.annealing.temp_end = t1;
-                println!(
-                    "🌡️ 自动调温: t_start={:.6e}, t_end={:.6e}, 舒适区={:.6e}（曲线位置 {:.2}）",
-                    t0,
-                    t1,
-                    annealing::舒适区温度(&c),
-                    c.annealing.comfort_progress
-                );
+                match c.annealing.comfort_temp {
+                    Some(t) if t > 0.0 && t.is_finite() => println!(
+                        "🌡️ 自动调温: t_start={:.6e}, t_end={:.6e}, 舒适区={:.6e}（配置绝对温度）",
+                        t0, t1, t
+                    ),
+                    _ => println!(
+                        "🌡️ 自动调温: t_start={:.6e}, t_end={:.6e}, 舒适区={:.6e}（曲线位置 {:.2}）",
+                        t0,
+                        t1,
+                        annealing::舒适区温度(&c),
+                        c.annealing.comfort_progress
+                    ),
+                }
             }
             None => eprintln!(
                 "⚠️ 自动调温采样失败（无合法移动或 Δscore 恒为 0），回退到兜底值 t_start={:.6e} / t_end={:.6e}",
@@ -2912,11 +2930,10 @@ fn run_resume(dir: &str) {
     let mut sa_cfg = cfg.clone();
     sa_cfg.annealing.temp_start = meta.temp_start;
     sa_cfg.annealing.temp_end = meta.temp_end;
-    // 舒适区也按 meta 的绝对温度反解回「曲线位置」：p = ln(Tc/Ts) / ln(Te/Ts)。
-    // 旧检查点若 comfort_temp 缺失/为 0，则沿用配置的 comfort_progress。
-    if meta.comfort_temp > 0.0 && meta.temp_start > meta.temp_end && meta.temp_end > 0.0 {
-        let p = (meta.comfort_temp / meta.temp_start).ln() / (meta.temp_end / meta.temp_start).ln();
-        sa_cfg.annealing.comfort_progress = p.clamp(0.0, 1.0);
+    // 舒适区同样以 meta 的绝对温度为权威：直接写回绝对值，避免「绝对→进度→绝对」往返误差。
+    // 旧检查点若 comfort_temp 缺失/为 0，则沿用配置的 comfort_progress（或配置的绝对温度）。
+    if meta.comfort_temp > 0.0 && meta.comfort_temp.is_finite() {
+        sa_cfg.annealing.comfort_temp = Some(meta.comfort_temp);
     }
 
     let interval = annealing::checkpoint_interval(

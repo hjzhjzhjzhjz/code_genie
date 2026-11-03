@@ -12,12 +12,18 @@ use rand::Rng;
 ///
 /// 使得不同量纲的指标在得分计算中具有相当的权重。
 ///
-/// #8 修复：缩放因子不再单纯等于 `1 / 初值`。纯 `1/初值` 会把评分口径绑死在
-/// 一次随机初态上（初态为 0 时更会放大成 `1/eps`），导致不同种子下不可复现。
-/// 现改为「参考值」策略：
-/// - 优先用配置 `[targets]` 中该指标的**典型值**（与初态解耦、可复现）；
-/// - 未启用或典型值为 0 时，退回初值观测；
-/// - 初值也接近 0 时用 `1.0` 兜底，避免 `1/eps` 爆炸。
+/// **口径：初态观测优先**（与上游 Dieken/code_genie 一致）。
+/// `scale = 1 / 初态观测值`，即「一个初态量级的偏离 = 1 分」。
+///
+/// 早期 #8 版本曾改成「target 优先」，理由是 `1/初值` 会把口径绑死在一次**随机**初态上。
+/// 但基准现已换成 `smart_init`（固定种子的贪心多起点，确定性），可复现的问题不复存在；
+/// 而 target 优先会带来更严重的失真：`scale = 1/目标值`，目标定得越激进（如当量目标 0.12、
+/// 初态 1.28），该项的有效权重就被放大约 10 倍，与上游完全不可比，也把优化器压到单一指标上。
+///
+/// 因此改为：
+/// - 初态观测值 > eps → 用观测值（主路径）；
+/// - 观测值≈0（如零重码）→ 退回配置 `[targets]` 的典型值；
+/// - 两者都不可用 → `1.0` 兜底，避免 `1/eps` 爆炸。
 pub fn calibrate_scales(
     initial_metrics: &Metrics,
     initial_simple: &SimpleMetrics,
@@ -26,12 +32,12 @@ pub fn calibrate_scales(
 ) -> ScaleConfig {
     let eps = 1e-9;
 
-    // 参考值选择：target 优先（enabled 且 > eps），否则 observed，最后 1.0 兜底。
+    // 参考值选择：observed 优先，target 兜底，最后 1.0。
     let pick = |target: f64, enabled: bool, observed: f64| -> f64 {
-        if enabled && target > eps {
-            target
-        } else if observed > eps {
+        if observed > eps {
             observed
+        } else if enabled && target > eps {
+            target
         } else {
             1.0
         }
@@ -129,8 +135,7 @@ pub fn auto_temperature(ctx: &OptContext, init: &[u8], rng: &mut impl Rng) -> Op
     let base = base_ev.get_score(ctx);
 
     const SAMPLES: usize = 100;
-    let mut sum = 0.0f64;
-    let mut cnt = 0usize;
+    let mut 采样差值: Vec<f64> = Vec::with_capacity(SAMPLES);
     for _ in 0..SAMPLES {
         let gi = rng.random_range(0..n);
         let allowed = &ctx.groups[gi].allowed_keys;
@@ -145,18 +150,56 @@ pub fn auto_temperature(ctx: &OptContext, init: &[u8], rng: &mut impl Rng) -> Op
         let mut trial = init.to_vec();
         trial[gi] = new;
         let mut ev = Evaluator::new_full_only(ctx, &trial);
-        sum += (ev.get_score(ctx) - base).abs();
-        cnt += 1;
+        采样差值.push(ev.get_score(ctx) - base);
     }
-    if cnt == 0 {
+    if 采样差值.is_empty() {
         return None;
     }
-    let avg = sum / cnt as f64;
-    // 平均 |Δ| 为 0（或非有限）说明初态已在局部极优、温度无从标定，交给调用方兜底。
-    if avg.is_nan() || avg <= 0.0 {
+
+    // 给定温度 T 时，样本集上的预期接受率：好/平走必收，坏走按 Metropolis 概率收。
+    let 预期接受率 = |t: f64| -> f64 {
+        if t <= 0.0 {
+            return 采样差值.iter().filter(|&&d| d <= 0.0).count() as f64 / 采样差值.len() as f64;
+        }
+        采样差值
+            .iter()
+            .map(|&d| if d <= 0.0 { 1.0 } else { (-d / t).exp() })
+            .sum::<f64>()
+            / 采样差值.len() as f64
+    };
+
+    // 二分反解「使接受率等于目标值」的温度。接受率对 T 单调递增 → 二分必然收敛。
+    let 解温度 = |目标: f64| -> f64 {
+        // 上界：接受率已饱和到 1 的量级；下界：接受率退化为「必收比例」。
+        let mut 低 = 1e-18f64;
+        let mut 高 = {
+            let mut h = 1.0f64;
+            while 预期接受率(h) < 目标 && h < 1e18 {
+                h *= 10.0;
+            }
+            h
+        };
+        for _ in 0..120 {
+            let 中 = 0.5 * (低 + 高);
+            if 预期接受率(中) < 目标 {
+                低 = 中;
+            } else {
+                高 = 中;
+            }
+        }
+        0.5 * (低 + 高)
+    };
+
+    // 旧口径按「平均 |Δ|」闭式反解（98%/2%），但均值被少数「巨幅恶化」样本拉爆：
+    // 实测 t_start 达配置值的 6.5e5 倍、首窗口接受率 87% 以上，2M 步零改进。
+    // 改为直接对齐接受率——首窗口 40%（充分探索）、末窗口 1%（纯贪心收尾），
+    // 与上游 moling 实测的 39% / 19% 同量级。
+    let t_start = 解温度(0.40);
+    let mut t_end = 解温度(0.01);
+    if !t_start.is_finite() || t_start <= 0.0 {
         return None;
     }
-    let t_start = avg / (1.0f64 / 0.98).ln();
-    let t_end = avg / (1.0f64 / 0.02).ln();
+    // 末温不得高于初温；若「必收比例」本身就高于 1% 目标，解会趋近 0，做下限保护。
+    t_end = t_end.min(t_start).max(t_start * 1e-6);
     Some((t_start, t_end.max(1e-12)))
 }

@@ -14,7 +14,9 @@ use crate::config::Config;
 use crate::context::OptContext;
 use crate::evaluator::Evaluator;
 use crate::schedule::TemperatureSchedule;
-use crate::types::{char_to_key_index, Metrics, SimpleMetrics, GROUP_MARKER, KEY_SPACE};
+use crate::types::{
+    char_to_key_index, Metrics, SimpleMetrics, EQUIV_TABLE_SIZE, GROUP_MARKER, KEY_SPACE,
+};
 
 /// 退火主循环结果（可续算变体返回）。
 pub struct SaResult {
@@ -144,7 +146,7 @@ pub(crate) fn latch_activation(
 // =========================================================================
 
 /// 原始贪心初始化 - 按组大小降序，均衡分配到键位
-fn greedy_balance_init(ctx: &OptContext, cfg: &Config, rng: &mut ThreadRng) -> Vec<u8> {
+fn greedy_balance_init(ctx: &OptContext, cfg: &Config, rng: &mut impl Rng) -> Vec<u8> {
     let mut assignment = vec![0u8; ctx.num_groups];
 
     let mut group_freq: Vec<(usize, usize)> = ctx
@@ -194,7 +196,7 @@ fn greedy_balance_init(ctx: &OptContext, cfg: &Config, rng: &mut ThreadRng) -> V
 }
 
 /// 频率感知贪心 - 按组权重降序，最小化碰撞代价
-fn frequency_greedy_init(ctx: &OptContext, rng: &mut ThreadRng) -> Vec<u8> {
+fn frequency_greedy_init(ctx: &OptContext, rng: &mut impl Rng) -> Vec<u8> {
     let n = ctx.num_groups;
     let mut assignment = vec![0u8; n];
 
@@ -237,7 +239,7 @@ fn frequency_greedy_init(ctx: &OptContext, rng: &mut ThreadRng) -> Vec<u8> {
 }
 
 /// 分散优先贪心
-fn spread_greedy_init(ctx: &OptContext, rng: &mut ThreadRng) -> Vec<u8> {
+fn spread_greedy_init(ctx: &OptContext, rng: &mut impl Rng) -> Vec<u8> {
     let n = ctx.num_groups;
     let mut assignment = vec![0u8; n];
 
@@ -261,7 +263,7 @@ fn spread_greedy_init(ctx: &OptContext, rng: &mut ThreadRng) -> Vec<u8> {
 }
 
 /// 纯随机有效解
-fn random_valid_init(ctx: &OptContext, rng: &mut ThreadRng) -> Vec<u8> {
+fn random_valid_init(ctx: &OptContext, rng: &mut impl Rng) -> Vec<u8> {
     let n = ctx.num_groups;
     let mut assignment = vec![0u8; n];
     for gi in 0..n {
@@ -288,8 +290,23 @@ fn build_code_to_chars(ctx: &OptContext, assignment: &[u8]) -> HashMap<usize, Ve
 /// 找出所有重码冲突的字根组对
 ///
 /// `weight_by_freq` 控制排序权重（元组第三字段）：
-/// - false：权重为参与该冲突编码的汉字数量（优化 collision_count，保持现有行为）
-/// - true ：权重为这些汉字的字频之和（优化 collision_rate）
+/// - false：权重为参与该冲突编码的汉字数量（优化 collision_count）
+/// - true ：权重为「字频和 − 最高字频」（优化 collision_rate）
+///
+/// # 为什么 freq 权重不是「字频和」
+///
+/// 评估器的 `collision_frequency` 是逐桶累加 `freq_sum - max_freq`：同一编码下
+/// **首个候选字不受罚**，只有被挤到后面的字才算重码损失。所以「能(3125730) / 绲(67)」
+/// 这种编码的字频和高达 312 万，实际可挽回损失只有 67 —— 按字频和排序会把它推到队首，
+/// 让邻域预算全砸在几乎没有收益的编码上。改按 `freq_sum - max_freq` 排序，排序键
+/// 才与要优化的指标同构：优先修的是「两个高频字撞在一起」的真·高频重码。
+///
+/// # 每个冲突编码只产出一条代表对
+///
+/// 原实现对同一编码下 k 个字根组枚举全部 `C(k,2)` 对，权重完全相同。4 个组的编码会
+/// 一次塞进 6 条重复对，把采样窗口（默认取排序后前 20 个）占满在同一两个编码上，
+/// 邻域预算被浪费在反复重试同一冲突，覆盖面收缩。改为每个编码只保留一条代表对
+/// （该编码下字频贡献最大的两个组），使窗口内 20 条对应 20 个不同的冲突编码。
 ///
 /// 排序：主键 weight 降序；次键 (g1, g2) 升序裁决，保证结果可复现、不依赖 HashMap 遍历顺序。
 fn find_collision_groups(
@@ -304,39 +321,44 @@ fn find_collision_groups(
         if chars.len() < 2 {
             continue;
         }
-        // 冲突权重：count 策略用 chars.len()；freq 策略用共享该编码的汉字字频之和
+        // 冲突权重：count 策略用 chars.len()；freq 策略用「字频和 − 最高字频」，
+        // 与评估器 collision_frequency 的口径一致（首字不计损失）。
         let weight: usize = if weight_by_freq {
-            chars
+            let sum: u64 = chars.iter().map(|&ci| ctx.char_infos[ci].frequency).sum();
+            let max = chars
                 .iter()
-                .map(|&ci| ctx.char_infos[ci].frequency as usize)
-                .sum()
+                .map(|&ci| ctx.char_infos[ci].frequency)
+                .max()
+                .unwrap_or(0);
+            // sum >= max 恒成立，减法不会下溢。
+            (sum - max) as usize
         } else {
             chars.len()
         };
 
-        let mut groups_in_conflict: HashSet<usize> = HashSet::new();
+        // 统计每个字根组在该编码下的字频贡献，用于挑选代表对。
+        let mut group_freq: HashMap<usize, u64> = HashMap::new();
         for &ci in chars {
             let info = &ctx.char_infos[ci];
             for &p in &info.parts {
                 if p >= GROUP_MARKER {
-                    let gi = (p - GROUP_MARKER) as usize;
-                    groups_in_conflict.insert(gi);
+                    *group_freq.entry((p - GROUP_MARKER) as usize).or_insert(0) += info.frequency;
                 }
             }
         }
 
-        let groups: Vec<usize> = groups_in_conflict.into_iter().collect();
-        for i in 0..groups.len() {
-            for j in (i + 1)..groups.len() {
-                // 规范化为 (min, max)，保证 g1 < g2，使排序次键稳定、配对去歧义
-                let (lo, hi) = if groups[i] <= groups[j] {
-                    (groups[i], groups[j])
-                } else {
-                    (groups[j], groups[i])
-                };
-                collisions.push((lo, hi, weight));
-            }
+        // 贡献降序 + 组号升序裁决，保证可复现（不依赖 HashMap 遍历顺序）。
+        let mut ranked: Vec<(usize, u64)> = group_freq.into_iter().collect();
+        ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+
+        // 该编码只由单个组构成（如某根的两个码位自撞）时无法靠「移走一个组」拆开，跳过。
+        if ranked.len() < 2 {
+            continue;
         }
+        let (g1, g2) = (ranked[0].0, ranked[1].0);
+        // 规范化为 (min, max)，保证 g1 < g2，使排序次键稳定、配对去歧义
+        let (lo, hi) = if g1 <= g2 { (g1, g2) } else { (g2, g1) };
+        collisions.push((lo, hi, weight));
     }
 
     // 主键：第三字段（weight）降序；次键（稳定裁决）：(g1, g2) 升序
@@ -355,46 +377,183 @@ fn find_groups_on_key(ctx: &OptContext, assignment: &[u8], key: u8) -> Vec<usize
 // 🎯 冲突导向的邻域操作
 // =========================================================================
 
+/// 从 `allowed_keys` 中按「剩余配额」加权挑一个落点键（排除当前键）。
+///
+/// # 为什么不再随机选键
+///
+/// 原实现把冲突组搬到**随机**新键，只关心「拆开重码」，完全不看目标键的负载：
+/// 10 个冲突编码接连撞上同一把已经超标的键，分布偏差就从 2.99 涨到 5.07（+69%）。
+/// 重码降了，键位均衡度赔进去。
+///
+/// # 权重取什么
+///
+/// 目标是 `calc_distribution_deviation` 里那一项 `(actual% − target%)² · penalty`。
+/// 把负载搬进键 k 时，该项的一阶下降量正比于 `headroom · low_penalty`，
+/// 其中 `headroom = target_rate − actual_pct`（百分点，正数=还欠配额）。
+/// 直接拿它当抽样权重，落点就沿着「让分布惩罚下降」的梯度走，而不是凭经验拍一个
+/// 「越空越好」——用绝对负载会把 home 键（目标本来就高）误判成超标。
+/// 全部键都已超标（或 `low_penalty` 全为 0、配置没给目标）时回退均匀采样，
+/// 与改造前行为一致。
+///
+/// # 为什么不需要额外快照
+///
+/// `Evaluator::key_weighted_usage` 是 31 槽累加器，`try_move`/`try_swap` 里 O(1)
+/// 增量维护（接受时加、拒绝时回滚），读它就是读**当前真实**负载：
+/// 既不必每步扫全表（9868 字 × parts），也不会有「刷新间隔内快照过期」的问题。
+/// 代价只是每步比较 21 个允许键的负载，相对 `try_move` 重算码值可以忽略。
+fn pick_key_by_headroom(
+    ctx: &OptContext,
+    evaluator: &Evaluator,
+    group: usize,
+    current_key: u8,
+    rng: &mut impl Rng,
+) -> Option<u8> {
+    let allowed = &ctx.groups[group].allowed_keys;
+    let inv = evaluator.inv_total_key_presses;
+    // 归一化系数无效（空表/未初始化）时无从判断配额，走均匀回退。
+    let usable = inv.is_finite() && inv > 0.0;
+
+    let mut keys = [0u8; EQUIV_TABLE_SIZE];
+    let mut weights = [0.0f64; EQUIV_TABLE_SIZE];
+    let mut n = 0usize;
+    let mut total = 0.0f64;
+
+    if usable {
+        for &k in allowed {
+            if k == current_key {
+                continue;
+            }
+            let cfg = &ctx.key_dist_config[k as usize];
+            // 与 calc_distribution_deviation 同口径：usage × 100 × inv_total_key_presses
+            let actual = evaluator.key_weighted_usage[k as usize] * 100.0 * inv;
+            let headroom = cfg.target_rate - actual;
+            if headroom <= 0.0 || cfg.low_penalty <= 0.0 {
+                continue;
+            }
+            keys[n] = k;
+            weights[n] = headroom * cfg.low_penalty;
+            total += weights[n];
+            n += 1;
+        }
+    }
+
+    if n == 0 || total <= 0.0 {
+        // 所有键都已超标，或配置里没有目标使用率：回退均匀采样
+        let mut others = [0u8; EQUIV_TABLE_SIZE];
+        let mut m = 0usize;
+        for &k in allowed {
+            if k != current_key {
+                others[m] = k;
+                m += 1;
+            }
+        }
+        if m == 0 {
+            return None;
+        }
+        return Some(others[rng.random_range(0..m)]);
+    }
+
+    let mut r = rng.random::<f64>() * total;
+    for i in 0..n {
+        r -= weights[i];
+        if r < 0.0 {
+            return Some(keys[i]);
+        }
+    }
+    // 浮点累加误差兜底：落到最后一个候选
+    Some(keys[n - 1])
+}
+
+/// 冲突导向邻域的采样参数：窗口大小 + 落点是否按负载加权。
+///
+/// 聚成一个结构而非两个裸参数，一是避免参数表过长（clippy `too_many_arguments`），
+/// 二是这两个量总是一起从配置里取、一起传下去。
+#[derive(Clone, Copy, Debug)]
+struct ConflictSampling {
+    /// 在排序后冲突列表的前 N 条里抽样
+    window: usize,
+    /// 落点是否按剩余配额加权（false = 均匀随机）
+    key_by_load: bool,
+}
+
 /// 尝试解决冲突：将冲突组中的一个移动到新键位
+///
+/// `sampling.key_by_load = true` 时新键按剩余配额加权采样（见 [`pick_key_by_headroom`]），
+/// 否则退回均匀随机；其余逻辑（窗口抽样、缓存新鲜度校验、两组的先后顺序）不变。
 fn try_resolve_conflict(
     ctx: &OptContext,
     assignment: &mut [u8],
     evaluator: &mut Evaluator,
     collisions: &[(usize, usize, usize)],
-    sample_window: usize,
+    sampling: ConflictSampling,
     temp: f64,
-    rng: &mut ThreadRng,
+    rng: &mut impl Rng,
 ) -> bool {
+    let sample_window = sampling.window;
+    let key_by_load = sampling.key_by_load;
     if collisions.is_empty() || sample_window == 0 {
         return false;
     }
 
     // 有效窗口 = min(sample_window, 列表长度)
     let window = sample_window.min(collisions.len());
-    let idx = rng.random_range(0..window);
-    let (g1, g2, _) = collisions[idx];
+    let start = rng.random_range(0..window);
 
-    let groups_to_try = if rng.random_bool(0.5) {
-        vec![g1, g2]
-    } else {
-        vec![g2, g1]
+    // 缓存新鲜度校验：`collisions` 每 conflict_refresh 步才重建一次，而每一步都可能
+    // 移动字根组。若某条冲突里的两个组已经不在同一键，说明该冲突早已被消解——
+    // 继续拿这条记录去移动，只会把预算花在过期的目标上（低温段尤其明显：
+    // 刷新间隔 1000 步内常有数十次成功移动，缓存均值已过期半个周期）。
+    // 这里从随机起点向后扫整个窗口，取第一条仍然有效的冲突；全部失效则本步放弃，
+    // 由下一步重新抽样（下次刷新会重建列表）。
+    let mut picked: Option<(usize, usize)> = None;
+    for k in 0..window {
+        let (g1, g2, _) = collisions[(start + k) % window];
+        // 两个组同键是「仍可能冲突」的必要条件（真正是否重码还取决于汉字拆分是否撞码）。
+        if assignment[g1] == assignment[g2] {
+            picked = Some((g1, g2));
+            break;
+        }
+    }
+    let (g1, g2) = match picked {
+        Some(p) => p,
+        None => return false,
     };
 
-    for &gi in &groups_to_try {
+    // 先搬哪一组：50/50 随机。
+    //
+    // 这里刻意不做「哪组所在键更超标就先搬它」的源侧加权：能进冲突列表的两组按定义
+    // 就在**同一键**上（`find_collision_groups` 按编码分组，采样前还要校验同键），
+    // 所以两组的 source pressure 恒等，加了也只会退化成随机——试过一轮（频序LS-*），
+    // 结果与纯随机落点无异。要真做源侧权衡，得用「该组自身承担的按键负载」
+    // （搬走小负载组损失小、搬走大负载组降载多），那是另一个维度，另开实验。
+    let groups_to_try: [usize; 2] = if rng.random_bool(0.5) {
+        [g1, g2]
+    } else {
+        [g2, g1]
+    };
+
+    for &gi in groups_to_try.iter() {
         let current_key = assignment[gi];
         let allowed = &ctx.groups[gi].allowed_keys;
 
-        let other_keys: Vec<u8> = allowed
-            .iter()
-            .filter(|&&k| k != current_key)
-            .copied()
-            .collect();
+        let new_key = if key_by_load {
+            match pick_key_by_headroom(ctx, evaluator, gi, current_key, rng) {
+                Some(k) => k,
+                None => continue,
+            }
+        } else {
+            let other_keys: Vec<u8> = allowed
+                .iter()
+                .filter(|&&k| k != current_key)
+                .copied()
+                .collect();
 
-        if other_keys.is_empty() {
-            continue;
-        }
+            if other_keys.is_empty() {
+                continue;
+            }
+            other_keys[rng.random_range(0..other_keys.len())]
+        };
 
-        let new_key = other_keys[rng.random_range(0..other_keys.len())];
         if evaluator.try_move(ctx, assignment, gi, new_key, temp, rng) {
             return true;
         }
@@ -409,7 +568,7 @@ fn try_key_reorganization(
     assignment: &mut [u8],
     evaluator: &mut Evaluator,
     temp: f64,
-    rng: &mut ThreadRng,
+    rng: &mut impl Rng,
 ) -> bool {
     let n = assignment.len();
     if n < 2 {
@@ -442,7 +601,7 @@ fn try_triple_swap(
     assignment: &mut [u8],
     evaluator: &mut Evaluator,
     temp: f64,
-    rng: &mut ThreadRng,
+    rng: &mut impl Rng,
 ) -> bool {
     let n = assignment.len();
     if n < 3 {
@@ -565,7 +724,7 @@ pub(crate) fn try_full_key_swap(
     assignment: &mut [u8],
     evaluator: &mut Evaluator,
     temp: f64,
-    rng: &mut ThreadRng,
+    rng: &mut impl Rng,
 ) -> bool {
     let n = assignment.len();
     if n < 2 {
@@ -678,7 +837,7 @@ pub(crate) fn try_full_key_swap(
 fn enhanced_hill_climb(
     ctx: &OptContext,
     init: Vec<u8>,
-    rng: &mut ThreadRng,
+    rng: &mut impl Rng,
     max_steps: usize,
     disable_simple: bool,
 ) -> (Vec<u8>, f64) {
@@ -712,7 +871,12 @@ fn enhanced_hill_climb(
                         &mut assignment,
                         &mut evaluator,
                         &collisions,
-                        20,
+                        ConflictSampling {
+                            window: 20,
+                            // 精炼段在 zero_temp 下只接受严格改进，落点策略对结果影响很小，
+                            // 这里保持改造前的均匀随机。
+                            key_by_load: false,
+                        },
                         zero_temp,
                         rng,
                     )
@@ -769,7 +933,7 @@ fn enhanced_hill_climb(
 fn hill_climb_warmup(
     ctx: &OptContext,
     init: Vec<u8>,
-    rng: &mut ThreadRng,
+    rng: &mut impl Rng,
     max_steps: usize,
     disable_simple: bool,
 ) -> (Vec<u8>, f64) {
@@ -897,8 +1061,36 @@ fn coordinate_descent(ctx: &OptContext, init: Vec<u8>, disable_simple: bool) -> 
 // 🎯 多起点初始化入口
 // =========================================================================
 
+/// 校准基准（尺度 / 温度）专用的固定种子：换它等于换一整套校准口径，务必别乱动。
+const 校准种子: u64 = 0x636F_6465_6765_6E69;
+
 pub fn multi_start_init(ctx: &OptContext, cfg: &Config, thread_id: usize) -> Vec<u8> {
     let mut rng = rand::rng();
+    multi_start_init_with(ctx, cfg, thread_id, &mut rng)
+}
+
+/// 固定种子的**确定性**多起点初始化。
+///
+/// 供尺度校准 / 温度校准当基准用：既保住 #8 要的「跨 run 可复现」
+/// （同输入同配置必得同一初解），又不会像 `deterministic_init` 那样给出劣质基准
+/// ——后者是 `allowed[gi % len]` 轮转分配，实测重码数是贪心解的 3 倍以上，
+/// 拿它当基准会把 `scale = 1/基准` 和自动调温同时带偏。
+pub fn multi_start_init_seeded(
+    ctx: &OptContext,
+    cfg: &Config,
+    thread_id: usize,
+    seed: u64,
+) -> Vec<u8> {
+    let mut rng = StdRng::seed_from_u64(seed);
+    multi_start_init_with(ctx, cfg, thread_id, &mut rng)
+}
+
+fn multi_start_init_with(
+    ctx: &OptContext,
+    cfg: &Config,
+    thread_id: usize,
+    rng: &mut impl Rng,
+) -> Vec<u8> {
     let n = ctx.num_groups;
     if n == 0 {
         return vec![];
@@ -916,23 +1108,23 @@ pub fn multi_start_init(ctx: &OptContext, cfg: &Config, thread_id: usize) -> Vec
         let candidate = match trial % 5 {
             0 => {
                 strategy_name = "均衡贪心";
-                greedy_balance_init(ctx, cfg, &mut rng)
+                greedy_balance_init(ctx, cfg, &mut *rng)
             }
             1 | 2 => {
                 strategy_name = "频率贪心";
-                frequency_greedy_init(ctx, &mut rng)
+                frequency_greedy_init(ctx, &mut *rng)
             }
             3 => {
                 strategy_name = "分散贪心";
-                spread_greedy_init(ctx, &mut rng)
+                spread_greedy_init(ctx, &mut *rng)
             }
             _ => {
                 strategy_name = "纯随机";
-                random_valid_init(ctx, &mut rng)
+                random_valid_init(ctx, &mut *rng)
             }
         };
 
-        let (refined, score) = hill_climb_warmup(ctx, candidate, &mut rng, warmup_steps, true);
+        let (refined, score) = hill_climb_warmup(ctx, candidate, &mut *rng, warmup_steps, true);
 
         if score < best_score {
             best_score = score;
@@ -985,9 +1177,14 @@ pub fn deterministic_init(ctx: &OptContext, _cfg: &Config) -> Vec<u8> {
         .collect()
 }
 
+/// 校准基准用的初始解：**确定性的贪心多起点**（固定种子）。
+///
+/// #8 一开始改成 `deterministic_init`，为了「改种子不改 scale」——方向对，但取错了基准：
+/// 轮转分配是劣质解（实测 1204 重码 / 2.53%，而贪心解 379 / 0.60%）。由于
+/// `scale = 1/基准`、自动调温也按基准的 Δ 分布标定，劣质基准会把评分口径整体带偏。
+/// 现在改为「固定种子的 multi_start_init」：确定性照样成立，基准质量与上游一致。
 pub fn smart_init(ctx: &OptContext, cfg: &Config) -> Vec<u8> {
-    // #8：校准基准用确定性分配，使 scale 与 SA 随机种子无关、可复现。
-    deterministic_init(ctx, cfg)
+    multi_start_init_seeded(ctx, cfg, usize::MAX, 校准种子)
 }
 
 // =========================================================================
@@ -1016,12 +1213,21 @@ pub fn simulated_annealing(
     (r.assignment, r.score, r.metrics, r.simple_metrics)
 }
 
-/// 舒适区温度（绝对值）：配置里给的是「降温曲线上的位置」`comfort_progress`（0~1），
-/// 这里按几何降温曲线换算成温度 `T(p) = t_start · (t_end/t_start)^p`。
+/// 舒适区温度（绝对值）。
 ///
-/// 用进度而不是温度比例表达，是因为温度本身随评分尺度变（自动标定），
-/// 而「减速带落在曲线的第几成」是尺度无关、且能直接看懂/直接调的。
+/// 两种口径，**绝对值优先**：
+/// - 配置里给了 `comfort_temp`（> 0）→ 直接用它，与上游 Dieken/code_genie 的
+///   `annealing.comfort_temp` 语义完全一致，两边可用同一个数直接对照；
+/// - 否则按「降温曲线上的位置」`comfort_progress`（0~1）换算：
+///   `T(p) = t_start · (t_end/t_start)^p`。用进度而不是温度比例表达，是因为温度本身
+///   随评分尺度变（自动标定），而「减速带落在曲线的第几成」是尺度无关、且能直接调的量。
 pub(crate) fn 舒适区温度(cfg: &Config) -> f64 {
+    // 绝对温度优先：显式配置时不参与任何曲线换算。
+    if let Some(t) = cfg.annealing.comfort_temp {
+        if t.is_finite() && t > 0.0 {
+            return t;
+        }
+    }
     let ts = cfg.annealing.temp_start;
     let te = cfg.annealing.temp_end;
     // 温度未标定（NaN 或非正数）时不换算，直接返回 t_start 由调用方兜底。
@@ -1240,6 +1446,8 @@ pub fn simulated_annealing_resumable(
     let conflict_refresh = cfg.annealing.conflict_refresh_interval;
     let conflict_window = cfg.annealing.conflict_sample_window;
     let conflict_weight_by_freq = cfg.annealing.conflict_weight_by_freq;
+    // 落点是否按负载（剩余配额）加权；关闭则退回改造前的均匀随机
+    let conflict_key_by_load = cfg.annealing.conflict_key_by_load;
     let conflict_enabled = conflict_prob > 0.0;
     let mut collisions: Vec<(usize, usize, usize)> = if conflict_enabled {
         find_collision_groups(ctx, &assignment, conflict_weight_by_freq)
@@ -1512,7 +1720,10 @@ pub fn simulated_annealing_resumable(
                     &mut assignment,
                     &mut evaluator,
                     &collisions,
-                    conflict_window,
+                    ConflictSampling {
+                        window: conflict_window,
+                        key_by_load: conflict_key_by_load,
+                    },
                     temp,
                     &mut rng,
                 );
@@ -1961,6 +2172,15 @@ mod conflict_tests {
     /// 构建最小 OptContext：每个频率对应一个动态组，每组含 1 个字根、1 个单部件汉字。
     /// 不同组的汉字被分到同一键位时即产生重码（用于驱动 find_collision_groups）。
     fn make_ctx(freqs: &[u64], allowed: &[u8]) -> OptContext {
+        make_ctx_with_dist(freqs, allowed, [KeyDistConfig::default(); EQUIV_TABLE_SIZE])
+    }
+
+    /// 同 `make_ctx`，但可指定各键的目标使用率/惩罚系数（驱动落点加权采样）。
+    fn make_ctx_with_dist(
+        freqs: &[u64],
+        allowed: &[u8],
+        key_dist: [KeyDistConfig; EQUIV_TABLE_SIZE],
+    ) -> OptContext {
         let n = freqs.len();
         let mut groups = Vec::with_capacity(n);
         let mut splits = Vec::with_capacity(n);
@@ -1975,7 +2195,6 @@ mod conflict_tests {
         }
         let fixed_roots: HashMap<String, u8> = HashMap::new();
         let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
-        let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
         let mut cfg = Config::default();
         cfg.weights.simple_code.enabled = false; // 关闭简码，简化上下文构造
         let weights = cfg.get_weight_config();
@@ -2007,7 +2226,7 @@ mod conflict_tests {
             let mut a = vec![0u8; FREQS.len()];
             let before = a.clone();
             let mut ev = Evaluator::new(&ctx, &a);
-            let r_empty = try_resolve_conflict(&ctx, &mut a, &mut ev, &[], window, 1.0, &mut rng);
+            let r_empty = try_resolve_conflict(&ctx, &mut a, &mut ev, &[], ConflictSampling { window, key_by_load: false }, 1.0, &mut rng);
             prop_assert!(!r_empty);
             prop_assert_eq!(&a, &before);
 
@@ -2018,14 +2237,14 @@ mod conflict_tests {
             // window=0 → false 且不变
             let mut a0 = a.clone();
             let mut ev0 = Evaluator::new(&ctx, &a0);
-            let r0 = try_resolve_conflict(&ctx, &mut a0, &mut ev0, &cols, 0, 1.0, &mut rng);
+            let r0 = try_resolve_conflict(&ctx, &mut a0, &mut ev0, &cols, ConflictSampling { window: 0, key_by_load: false }, 1.0, &mut rng);
             prop_assert!(!r0);
             prop_assert_eq!(&a0, &a);
 
             // 任意 window（包含 > len）不 panic：window+1 ∈ [1,12]，覆盖大于 len 的情形
             let mut a1 = a.clone();
             let mut ev1 = Evaluator::new(&ctx, &a1);
-            let _ = try_resolve_conflict(&ctx, &mut a1, &mut ev1, &cols, window + 1, 1.0, &mut rng);
+            let _ = try_resolve_conflict(&ctx, &mut a1, &mut ev1, &cols, ConflictSampling { window: window + 1, key_by_load: false }, 1.0, &mut rng);
         }
 
         // Feature: sa-conflict-operators, Property 2: 排序按所选权重降序
@@ -2080,7 +2299,10 @@ mod conflict_tests {
             &mut a,
             &mut ev,
             &[],
-            5,
+            ConflictSampling {
+                window: 5,
+                key_by_load: false,
+            },
             1.0,
             &mut rng
         ));
@@ -2090,12 +2312,22 @@ mod conflict_tests {
         let cols = find_collision_groups(&ctx, &a, false);
         assert!(!cols.is_empty());
         assert!(!try_resolve_conflict(
-            &ctx, &mut a, &mut ev, &cols, 0, 1.0, &mut rng
+            &ctx,
+            &mut a,
+            &mut ev,
+            &cols,
+            ConflictSampling {
+                window: 0,
+                key_by_load: false
+            },
+            1.0,
+            &mut rng
         ));
         assert_eq!(a, before);
     }
 
-    // 两种排序策略权重含义（需求 5.1 / 5.2）：全 0 分配下，count 权重为组数、freq 权重为字频之和
+    // 两种排序策略权重含义（需求 5.1 / 5.2）：全 0 分配下，count 权重为组数、
+    // freq 权重为「字频和 − 最高字频」（= 被挤到候选位之后的字频损失）
     #[test]
     fn test_weight_semantics_all_same_key() {
         let ctx = make_ctx(&FREQS, &ALLOWED);
@@ -2104,9 +2336,159 @@ mod conflict_tests {
         let frq = find_collision_groups(&ctx, &a, true);
         // count 策略：每个冲突对权重 = 共享该编码的汉字数 = 5
         assert!(cnt.iter().all(|t| t.2 == FREQS.len()));
-        // freq 策略：权重 = 字频之和 = 100+90+80+70+60 = 400
+        // freq 策略：权重 = 字频和 − 最高字频 = 400 − 100 = 300
         let sum: usize = FREQS.iter().map(|&f| f as usize).sum();
-        assert!(frq.iter().all(|t| t.2 == sum));
+        let max: usize = FREQS.iter().copied().max().unwrap() as usize;
+        assert!(frq.iter().all(|t| t.2 == sum - max));
+        // 每个冲突编码只产出一条代表对（不再按 C(k,2) 枚举重复对）
+        assert_eq!(cnt.len(), 1);
+        assert_eq!(frq.len(), 1);
+        // 代表对取字频贡献最大的两个组：FREQS[0]=100 与 FREQS[1]=90
+        assert_eq!((cnt[0].0, cnt[0].1), (0, 1));
+    }
+
+    // 缓存新鲜度：冲突记录里的两组已不在同一键时，不应驱动任何移动
+    #[test]
+    fn test_stale_collision_skipped() {
+        let ctx = make_ctx(&FREQS, &ALLOWED);
+        // 组 0 在键 0、组 1 在键 1 → 这条 (0,1) 冲突记录已过期
+        let mut a = vec![0u8, 1, 1, 1, 1];
+        let stale = vec![(0usize, 1usize, 100usize)];
+        let before = a.clone();
+        let mut ev = Evaluator::new(&ctx, &a);
+        let mut rng = rand::rng();
+        let moved = try_resolve_conflict(
+            &ctx,
+            &mut a,
+            &mut ev,
+            &stale,
+            ConflictSampling {
+                window: 5,
+                key_by_load: false,
+            },
+            1.0,
+            &mut rng,
+        );
+        assert!(!moved, "过期的冲突记录不应驱动移动");
+        assert_eq!(a, before, "过期记录不应改动 assignment");
+    }
+
+    // 每个冲突编码只产出一条代表对：2 字编码与 3 字编码各一条，不按 C(k,2) 膨胀
+    #[test]
+    fn test_one_pair_per_collision_code() {
+        let ctx = make_ctx(&FREQS, &ALLOWED);
+        // 前两组同占键 0（2 字重码）、后三组同占键 1（3 字重码）→ 两个冲突编码
+        let a = vec![0u8, 0, 1, 1, 1];
+        let cols = find_collision_groups(&ctx, &a, false);
+        assert_eq!(cols.len(), 2, "每个冲突编码只应产出一条代表对");
+        // count 策略权重 = 该编码下的汉字数 → {2, 3}
+        let mut weights: Vec<usize> = cols.iter().map(|t| t.2).collect();
+        weights.sort_unstable();
+        assert_eq!(weights, vec![2, 3]);
+
+        // 未去重时应为 C(2,2)+C(3,2)=4 条，去重后只剩 2 条
+        let frq = find_collision_groups(&ctx, &a, true);
+        assert_eq!(frq.len(), 2);
+    }
+
+    // =========================================================================
+    // 🎯 落点按负载（剩余配额）加权采样
+    // =========================================================================
+
+    /// 键 0/2 目标 50%（欠配额），键 1 目标 1%（必然超标）
+    fn lopsided_dist() -> [KeyDistConfig; EQUIV_TABLE_SIZE] {
+        let mut kd = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
+        for k in [0usize, 2] {
+            kd[k] = KeyDistConfig {
+                target_rate: 50.0,
+                low_penalty: 1.0,
+                high_penalty: 1.0,
+            };
+        }
+        kd[1] = KeyDistConfig {
+            target_rate: 1.0,
+            low_penalty: 1.0,
+            high_penalty: 1.0,
+        };
+        kd
+    }
+
+    #[test]
+    fn test_load_pick_avoids_overloaded_keys() {
+        let ctx = make_ctx_with_dist(&FREQS, &ALLOWED, lopsided_dist());
+        // 5 组全在键 1 → 键 1 实际 100%（远超 1% 目标），键 0/2 为 0%（欠 50%）
+        let a = vec![1u8; FREQS.len()];
+        let ev = Evaluator::new(&ctx, &a);
+        let mut rng = rand::rng();
+
+        let mut seen = [false; 3];
+        for _ in 0..500 {
+            let k = pick_key_by_headroom(&ctx, &ev, 0, 1, &mut rng).expect("应有候选键");
+            assert_ne!(k, 1, "已超目标使用率的键不应被选中");
+            seen[k as usize] = true;
+        }
+        assert!(seen[0] && seen[2], "两个欠配额的键都应被采到");
+    }
+
+    #[test]
+    fn test_load_pick_fallback_when_all_key_over() {
+        // 所有键目标 0% → 无一欠配额，应回退均匀采样（而非返回 None 卡死）
+        let mut kd = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
+        for slot in kd.iter_mut() {
+            *slot = KeyDistConfig {
+                target_rate: 0.0,
+                low_penalty: 1.0,
+                high_penalty: 1.0,
+            };
+        }
+        let ctx = make_ctx_with_dist(&FREQS, &ALLOWED, kd);
+        let a = vec![0u8; FREQS.len()];
+        let ev = Evaluator::new(&ctx, &a);
+        let mut rng = rand::rng();
+
+        let mut seen = [false; 3];
+        for _ in 0..300 {
+            let k = pick_key_by_headroom(&ctx, &ev, 0, 0, &mut rng).expect("回退也应给出候选");
+            assert_ne!(k, 0, "回退采样同样要排除当前键");
+            seen[k as usize] = true;
+        }
+        assert!(seen[1] && seen[2], "全部超标时应覆盖所有非当前键");
+    }
+
+    #[test]
+    fn test_load_pick_none_when_no_other_key() {
+        // 组只允许键 0 且当前就在键 0 → 无落点
+        let ctx = make_ctx(&FREQS, &[0u8]);
+        let a = vec![0u8; FREQS.len()];
+        let ev = Evaluator::new(&ctx, &a);
+        let mut rng = rand::rng();
+        assert!(pick_key_by_headroom(&ctx, &ev, 0, 0, &mut rng).is_none());
+    }
+
+    // 负载加权路径端到端：欠配额的键存在时，冲突移动能真正落子
+    #[test]
+    fn test_load_weighted_conflict_move_happens() {
+        let ctx = make_ctx_with_dist(&FREQS, &ALLOWED, lopsided_dist());
+        let mut a = vec![1u8; FREQS.len()];
+        let cols = find_collision_groups(&ctx, &a, false);
+        assert!(!cols.is_empty());
+        let mut ev = Evaluator::new(&ctx, &a);
+        let mut rng = rand::rng();
+
+        let moved = try_resolve_conflict(
+            &ctx,
+            &mut a,
+            &mut ev,
+            &cols,
+            ConflictSampling {
+                window: 5,
+                key_by_load: true,
+            },
+            1.0,
+            &mut rng,
+        );
+        assert!(moved, "欠配额键存在时冲突移动应被接受");
+        assert!(a.iter().any(|&k| k != 1), "至少一个组应离开超标的键 1");
     }
 }
 
