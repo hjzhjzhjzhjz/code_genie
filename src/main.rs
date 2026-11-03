@@ -1910,7 +1910,10 @@ fn run_optimize(
         "线程数: {}, 总步数: {}",
         cfg.annealing.threads, cfg.annealing.total_steps
     );
-    println!("温度: 自动标定（按初态采样 |Δscore|，运行时打印实际 t_start/t_end）");
+    println!(
+        "温度: 取自配置 t_start={:.3e} / t_end={:.3e}（运行时不做标定）",
+        cfg.annealing.temp_start, cfg.annealing.temp_end
+    );
     println!("全局允许键位: {}", cfg.keys.allowed);
     println!(
         "全码权重: 重码数={:.2}, 重码率={:.2}, 当量={:.2}, CV={:.2}, 分布={:.2}",
@@ -2753,7 +2756,7 @@ fn run_resume(dir: &str) {
     }
     println!("💡 提示: 按 Ctrl-C 可暂停并保存检查点");
 
-    // 复用首轮（可能自动标定的）温度与舒适区：以 checkpoint meta 为权威，避免续算口径漂移。
+    // 复用首轮的温度与舒适区：以 checkpoint meta 为权威，避免续算口径漂移。
     let mut sa_cfg = cfg.clone();
     sa_cfg.annealing.temp_start = meta.temp_start;
     sa_cfg.annealing.temp_end = meta.temp_end;

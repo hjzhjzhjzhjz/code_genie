@@ -153,15 +153,16 @@ pub struct AnnealingConfig {
     pub total_steps: usize,
     /// 初温：**直接取配置值**，运行时不再标定（与上游 Dieken/code_genie 同模式）。
     ///
-    /// 默认 `0.005` 与上游 moling 方案一致；配合末温 `5e-5` 得到 100 倍跨度，
-    /// 曲线中点温度 `5e-4` 正好落在上游 `comfort_temp` 的量级。
+    /// 默认 `0.01` 来自固定种子温度扫描：以上游 `0.005` 为基准，升初温至 `0.01`
+    /// 并压末温至 `1e-5`（1000 倍跨度），重码率 -1.87%（种B 盆地更明显，种A 无响应）。
+    /// 注意该收益未达统计显著（配对 t=-1.19, n=16），且分布偏差 +11%，属权衡取舍。
     #[serde(default = "default_temp_start")]
     pub temp_start: f64,
     /// 末温：直接取配置值。
     ///
-    /// 建议保持 `temp_start / 100` 的量级。跨度太小 → 末段仍在高温游走、来不及精修；
-    /// 跨度太大（如 1e6）→ 几何曲线的尺度被压坏，退火走到一半就进入冻结状态，
-    /// 后半程的算力全部浪费。
+    /// 与初温 `0.01` 配合得到 1000 倍跨度、曲线中点 `1e-3`。跨度太小 → 末段仍在
+    /// 高温游走、来不及精修；跨度太大（如 1e6）→ 几何曲线的尺度被压坏，退火走到
+    /// 一半就进入冻结状态，后半程的算力全部浪费。
     #[serde(default = "default_temp_end")]
     pub temp_end: f64,
     /// 舒适区在**降温曲线上的位置**（0~1，0=刚起步、1=临近结束）。
@@ -257,10 +258,10 @@ fn default_checkpoint_interval_ratio() -> f64 {
     0.05
 }
 fn default_temp_start() -> f64 {
-    0.005
+    0.01
 }
 fn default_temp_end() -> f64 {
-    5e-5
+    1e-5
 }
 fn default_comfort_progress() -> f64 {
     0.5
@@ -1264,15 +1265,17 @@ dist_max = 8.0
     }
 
     #[test]
-    fn test_温度直接取自配置且默认与上游对齐() {
-        // 默认值是上游 moling 方案那一组，跨度为 100 倍（曲线中点 t_start/10）。
+    fn test_温度直接取自配置且默认跨度一千倍() {
+        // 默认值是固定种子温度扫描选出的那一组（初温 0.01 / 末温 1e-5），跨度 1000 倍，
+        // 曲线中点温度 1e-3。注意它**不再等于上游 0.005/5e-5**，是有意偏离。
         let d = Config::default().annealing;
         assert_eq!(d.temp_start, default_temp_start());
         assert_eq!(d.temp_end, default_temp_end());
+        let 跨度 = d.temp_start / d.temp_end;
         assert!(
-            (d.temp_start / d.temp_end - 100.0).abs() < 1e-9,
-            "默认末温应为初温的 1/100，实际跨度 {}",
-            d.temp_start / d.temp_end
+            (跨度 - 1000.0).abs() < 1e-6,
+            "默认末温应为初温的 1/1000，实际跨度 {}",
+            跨度
         );
 
         // 配置里写了什么就生效什么（不再有运行时标定覆盖这一步）。

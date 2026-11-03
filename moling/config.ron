@@ -42,9 +42,9 @@
         threads: 4,
         total_steps: 2000000,
         // 退火温度：直接取这里的值，运行时不做标定（与上游 Dieken/code_genie 同模式）。
-        // 跨度保持 100 倍：曲线中点 sqrt(t_start*t_end)=5e-4，与上游 comfort_temp 同量级。
-        temp_start: 0.005,
-        temp_end: 0.00005,
+        // 跨度 1000 倍：温度扫描（固定种子）比上游 0.005/5e-5 重码率低 1.87%，曲线中点 1e-3。
+        temp_start: 0.01,
+        temp_end: 0.00001,
         comfort_progress: 0.5,
         comfort_width: 0.15,
         comfort_slowdown: 0.6,

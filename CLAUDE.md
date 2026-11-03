@@ -147,8 +147,8 @@ cargo test --release
 - 小规模问题额外执行坐标下降
 
 **SA 主循环** (`simulated_annealing_resumable`):
-- **自动调温**：进入主循环前按初态采样 100 次随机单组移动估 `Δ̄`，闭式给出
-  `t_start = Δ̄ / ln(1/0.98)`、`t_end = Δ̄ / ln(1/0.02)` —— 温度随权重/scale 自动标定，配置里不写死
+- **温度**：直接取配置 `temp_start` / `temp_end`（默认 `0.01` / `1e-5`，1000 倍跨度），
+  运行时不做标定 —— 同配置跨运行可复现，与上游 Dieken/code_genie 同模式
 - **舒适区位置**：配置给的是 `comfort_progress`（曲线上的位置 0~1，默认 0.5 = 正中），
   `annealing::舒适区温度()` 按 `T(p) = t_start·(t_end/t_start)^p` 换算成温度。
   用进度而非温度比例，是因为温度随尺度变、进度不变，且「曲线走到几成」能直接看懂

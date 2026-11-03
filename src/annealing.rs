@@ -1307,10 +1307,10 @@ pub fn multi_start_init(ctx: &OptContext, cfg: &Config, thread_id: usize) -> Vec
 
 /// 固定种子的**确定性**多起点初始化。
 ///
-/// 供尺度校准 / 温度校准当基准用：既保住 #8 要的「跨 run 可复现」
+/// 供尺度校准当基准用：既保住 #8 要的「跨 run 可复现」
 /// （同输入同配置必得同一初解），又不会像 `deterministic_init` 那样给出劣质基准
 /// ——后者是 `allowed[gi % len]` 轮转分配，实测重码数是贪心解的 3 倍以上，
-/// 拿它当基准会把 `scale = 1/基准` 和自动调温同时带偏。
+/// 拿它当基准会把 `scale = 1/基准` 带偏。
 pub fn multi_start_init_seeded(
     ctx: &OptContext,
     cfg: &Config,
@@ -1418,7 +1418,7 @@ pub fn deterministic_init(ctx: &OptContext, _cfg: &Config) -> Vec<u8> {
 ///
 /// #8 一开始改成 `deterministic_init`，为了「改种子不改 scale」——方向对，但取错了基准：
 /// 轮转分配是劣质解（实测 1204 重码 / 2.53%，而贪心解 379 / 0.60%）。由于
-/// `scale = 1/基准`、自动调温也按基准的 Δ 分布标定，劣质基准会把评分口径整体带偏。
+/// `scale = 1/基准`，劣质基准会把评分口径整体带偏。
 /// 现在改为「固定种子的 multi_start_init」：确定性照样成立，基准质量与上游一致。
 pub fn smart_init(ctx: &OptContext, cfg: &Config) -> Vec<u8> {
     multi_start_init_seeded(ctx, cfg, usize::MAX, 校准种子)
@@ -1457,7 +1457,7 @@ pub fn simulated_annealing(
 ///   `annealing.comfort_temp` 语义完全一致，两边可用同一个数直接对照；
 /// - 否则按「降温曲线上的位置」`comfort_progress`（0~1）换算：
 ///   `T(p) = t_start · (t_end/t_start)^p`。用进度而不是温度比例表达，是因为温度本身
-///   随评分尺度变（自动标定），而「减速带落在曲线的第几成」是尺度无关、且能直接调的量。
+///   随评分尺度变（由配置显式给出），而「减速带落在曲线的第几成」是尺度无关、且能直接调的量。
 pub(crate) fn 舒适区温度(cfg: &Config) -> f64 {
     // 绝对温度优先：显式配置时不参与任何曲线换算。
     if let Some(t) = cfg.annealing.comfort_temp {
