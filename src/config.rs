@@ -199,8 +199,8 @@ pub struct AnnealingConfig {
     /// 冲突组排序是否按频率加权（true=按字频之和，false=按汉字数量）
     #[serde(default = "default_conflict_weight_by_freq")]
     pub conflict_weight_by_freq: bool,
-    /// 冲突组的新落点是否按键位剩余配额加权采样
-    /// （true=避开已超目标使用率的键，false=均匀随机）
+    /// 冲突组的新落点是否按键位剩余配额加权采样（默认 true）
+    /// （true=避开已超目标使用率的键、用指分布更匀；false=均匀随机、综合得分略优）
     #[serde(default = "default_conflict_key_by_load")]
     pub conflict_key_by_load: bool,
 
@@ -228,12 +228,13 @@ fn default_conflict_sample_window() -> usize {
 fn default_conflict_weight_by_freq() -> bool {
     true
 }
-/// 默认 **关闭**：实测（n=32/臂）启用后分布偏差 −6.4%（t=−0.94，不显著），
-/// 但重码 +1.2%（t=1.71）、CV +1.5%（t=2.28）、综合得分 +2.3%（t=1.58）。
-/// 原因是分布权重只有 0.02，而限制落点会挤掉拆重码最有效的键位——得不偿失。
-/// 仅当把「用指分布」当硬指标时才值得打开（见 `冲突导向邻域-字频排序改造.md` 5.4）。
+/// 默认 **开启**：实测（n=32/臂）启用后用指分布偏差 −6.4%（t=−0.94），
+/// 代价是重码 +1.2%（t=1.71）、CV +1.5%（t=2.28）、综合得分 +2.3%（t=1.58）。
+/// 即拿综合分换更均匀的用指分布（分布项权重只有 0.02，而限制落点会挤掉
+/// 拆重码最有效的键位）。若只追求综合得分，配置里置 `false` 回到均匀随机。
+/// 详见 `冲突导向邻域-字频排序改造.md` 5.4。
 fn default_conflict_key_by_load() -> bool {
-    false
+    true
 }
 fn default_checkpoint_interval_ratio() -> f64 {
     0.05
@@ -1226,7 +1227,7 @@ dist_max = 8.0
         assert_eq!(a.conflict_refresh_interval, 1000);
         assert_eq!(a.conflict_sample_window, 20);
         assert!(a.conflict_weight_by_freq);
-        assert!(!a.conflict_key_by_load); // 默认关闭（实测综合得分变差）
+        assert!(a.conflict_key_by_load); // 默认开启（拿综合分换更均匀的用指分布）
     }
 
     #[test]
@@ -1242,7 +1243,7 @@ dist_max = 8.0
         assert!(a.conflict_weight_by_freq); // 显式
         assert_eq!(a.conflict_refresh_interval, 1000); // 默认
         assert_eq!(a.conflict_sample_window, 20); // 默认
-        assert!(!a.conflict_key_by_load); // 默认关闭
+        assert!(a.conflict_key_by_load); // 默认开启
     }
 
     #[test]
@@ -1252,7 +1253,7 @@ dist_max = 8.0
         assert_eq!(a.conflict_refresh_interval, 1000);
         assert_eq!(a.conflict_sample_window, 20);
         assert!(a.conflict_weight_by_freq);
-        assert!(!a.conflict_key_by_load); // 默认关闭（实测综合得分变差）
+        assert!(a.conflict_key_by_load); // 默认开启（拿综合分换更均匀的用指分布）
     }
 
     // -----------------------------------------------------------------------

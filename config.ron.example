@@ -61,7 +61,7 @@
         conflict_refresh_interval: 1000,   // 冲突缓存重建间隔步数
         conflict_sample_window: 20,        // 冲突采样窗口（前 N 个冲突编码；实测 20/25/30 无差异）
         conflict_weight_by_freq: true,     // 冲突排序：false = 按字数；true = 按重码损失（字频和 − 最高字频），优先修高频重码
-        conflict_key_by_load: false,       // 落点选键：true = 按键位剩余配额加权（避开已超目标使用率的键，分布更匀但重码变差）；false = 均匀随机（默认）
+        conflict_key_by_load: true,        // 落点选键：true = 按键位剩余配额加权（分布更匀，代价重码略升）；false = 均匀随机
         checkpoint_interval_ratio: 0.05,   // checkpoint 间隔（占 total_steps 比例）
         full_key_swap_probability: 0.01,   // 整键互换算子概率（0 = 关闭）
     ),
