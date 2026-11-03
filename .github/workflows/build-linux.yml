@@ -144,19 +144,13 @@ jobs:
               raise SystemExit("缺少打包所需文件（应在 code_genie prepare 步骤生成）："
                                + ", ".join(missing))
 
-          # prepare 的上游源文件：包内重跑 optimize 时自动 prepare 需要
-          for f in ["moling/input-division.txt", "moling/input-roots.txt",
-                    "moling/input-fixed.txt"]:
-              dst = pkg / f
-              dst.parent.mkdir(parents=True, exist_ok=True)
-              shutil.copy2(f, dst)
-
           for f in required:
               dst = pkg / f
               dst.parent.mkdir(parents=True, exist_ok=True)
               shutil.copy2(f, dst)
 
           shutil.copytree("ceping-data", pkg / "ceping-data")
+          shutil.copytree("yuhao-data", pkg / "yuhao-data")
 
           # 宇浩测评：源码（不含 .git），并把测评数据放进它的 public/
           shutil.copytree("yuhao-assess", pkg / "yuhao-assess",
@@ -246,7 +240,7 @@ jobs:
               "",
               "数据目录",
               "  moling/          prepare 产物（字根约束/单字拆分/字根声韵/拆分全表）",
-              "                   与其上游源文件；当量/用指分布走程序内嵌表",
+              "  yuhao-data/      prepare 输入（星摩/字集字典）与宇浩测评数据源",
               "  ceping-data/     诊断用的当量/字频/词表",
               "  yuhao-assess/    宇浩测评 CLI 源码与数据（public/ 已含测评数据与语料；",
               "                   node_modules 首次 pnpm install 生成）",
