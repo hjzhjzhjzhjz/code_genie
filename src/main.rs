@@ -45,6 +45,7 @@ mod run;
 mod schedule;
 mod sentence;
 mod simple;
+mod tune;
 mod types;
 mod validate;
 mod zigen;
@@ -96,6 +97,33 @@ enum Commands {
         /// 复用尺度文件（尺度.json）：跳过校准，保证跨运行口径一致
         #[arg(long = "scale")]
         scale: Option<String>,
+    },
+
+    /// 种子微调：只以「全码当量」为目标，对既有 keymap 做穷尽式下降搜索（不跑退火）
+    Tune {
+        /// 待微调的种子 keymap（字根<TAB>编码[<TAB>使用次数]）
+        #[arg(short = 'k', long = "seed-keymap")]
+        seed_keymap: String,
+
+        /// 输出目录
+        #[arg(short = 'd', long = "output-dir", default_value = "output-tune")]
+        output_dir: String,
+
+        /// 当量目标：达到即停止
+        #[arg(long = "target")]
+        target: Option<f64>,
+
+        /// 重码硬上限：交换后重码数超过该值则拒绝
+        #[arg(long = "max-collisions")]
+        max_collisions: Option<usize>,
+
+        /// 最大交换轮数
+        #[arg(long = "rounds", default_value_t = 5000)]
+        rounds: usize,
+
+        /// 每轮精确试算的候选数（从代理估价最优的前 K 个里挑）
+        #[arg(long = "candidates", default_value_t = 400)]
+        candidates: usize,
     },
 
     /// 基准测试：压测目标函数评估、邻域算子（含 full_key_swap）与 SA 吞吐
@@ -875,6 +903,22 @@ fn main() {
             );
         }
         Some(Commands::Resume { dir }) => run_resume(&dir),
+        Some(Commands::Tune {
+            seed_keymap,
+            output_dir,
+            target,
+            max_collisions,
+            rounds,
+            candidates,
+        }) => run_tune(
+            &cfg,
+            &seed_keymap,
+            &output_dir,
+            target,
+            max_collisions,
+            rounds,
+            candidates,
+        ),
         Some(Commands::ExportTable {
             keymap,
             chaifen,
@@ -1878,6 +1922,114 @@ fn 停止标志() -> Arc<AtomicBool> {
     flag
 }
 
+// =========================================================================
+// tune 子命令：种子当量微调（只优化全码平均当量）
+// =========================================================================
+
+fn run_tune(
+    cfg: &Config,
+    seed_path: &str,
+    output_dir: &str,
+    target: Option<f64>,
+    max_collisions: Option<usize>,
+    rounds: usize,
+    candidates: usize,
+) {
+    println!("=== CodeGenie 种子微调器（只优化全码当量）===");
+    println!("  种子: {}", seed_path);
+
+    let splits = must(loader::load_splits(&cfg.files.splits));
+    let (fixed_roots, constrained) = must(loader::load_fixed(&cfg.files.fixed));
+    let equiv_table = or_warn_default(loader::load_pair_equivalence(&cfg.files.pair_equiv));
+    let key_dist_config = or_warn_default(loader::load_key_distribution(&cfg.files.key_dist));
+    let simple_config = if cfg.weights.simple_code.enabled {
+        cfg.get_simple_code_config()
+    } else {
+        SimpleCodeConfig { levels: vec![] }
+    };
+    let ctx = OptContext::new_with_fixed_and_termination(
+        &splits,
+        &fixed_roots,
+        &constrained,
+        equiv_table,
+        key_dist_config,
+        ScaleConfig::default(),
+        simple_config,
+        cfg.get_weight_config(),
+        cfg.get_targets_config(),
+        &cfg.get_fixed_simple_codes(),
+        &cfg.keys.termination_keys,
+    );
+    println!(
+        "  约束: {}（可动码位 {} 个，锁死单键 {} 个，汉字 {} 个）",
+        cfg.files.fixed,
+        ctx.num_groups,
+        fixed_roots.len(),
+        splits.len()
+    );
+
+    let map = must(loader::load_keymap(seed_path, &cfg.files.splits));
+    let mut rng = rand::rng();
+    let (asg0, filled) = must(loader::keymap_to_assignment(&ctx, &map, &mut rng));
+    if filled > 0 {
+        println!("⚠️ 种子有 {} 个组未被覆盖，已随机合法填充", filled);
+    }
+
+    let opts = tune::TuneOpts {
+        max_rounds: rounds,
+        candidates,
+        max_collisions,
+        target_equiv: target,
+        max_rounds_without_gain: 3,
+        allow_move: true,
+    };
+    let t0 = Instant::now();
+    let (asg, rep) = tune::tune(&ctx, asg0, &opts);
+    let elapsed = t0.elapsed().as_secs_f64();
+
+    // === 保存 keymap ===
+    std::fs::create_dir_all(output_dir).expect("无法创建输出目录");
+    let usage = output::count_root_usage(&ctx);
+    let mut keymap_text = String::new();
+    output::write_keymap_output(&mut keymap_text, &fixed_roots, &constrained, &asg, &usage);
+    let keymap_path = format!("{}/字根键位表.txt", output_dir);
+    std::fs::write(&keymap_path, &keymap_text).expect("写 keymap 失败");
+
+    let delta = rep.equiv_end - rep.equiv_start;
+    let pct = if rep.equiv_start > 0.0 {
+        delta / rep.equiv_start * 100.0
+    } else {
+        0.0
+    };
+    let report = format!(
+        "# 种子微调报告\n\
+         # 种子: {}\n\
+         # 约束: {}\n\
+         # 轮数: {}  接受交换: {}  耗时: {:.1}s\n\
+         #\n\
+         # 当量: {:.6} → {:.6}  ({:+.6}, {:+.3}%)\n\
+         # 重码: {} → {}\n",
+        seed_path,
+        cfg.files.fixed,
+        rep.rounds,
+        rep.applied,
+        elapsed,
+        rep.equiv_start,
+        rep.equiv_end,
+        delta,
+        pct,
+        rep.collisions_start,
+        rep.collisions_end,
+    );
+    std::fs::write(format!("{}/微调报告.txt", output_dir), &report).expect("写报告失败");
+
+    println!();
+    println!("  当量: {:.6} → {:.6}  ({:+.6}, {:+.3}%)", rep.equiv_start, rep.equiv_end, delta, pct);
+    println!("  重码: {} → {}", rep.collisions_start, rep.collisions_end);
+    println!("  接受交换: {} 次 / {} 轮，耗时 {:.1}s", rep.applied, rep.rounds, elapsed);
+    println!("  已写出: {}", keymap_path);
+}
+
 fn run_optimize(
     cfg: &Config,
     cli_config_path: &str,
@@ -2275,21 +2427,6 @@ fn run_optimize(
     );
     let sa_cfg = cfg.clone();
 
-    // 固化尺度：下一次运行可用 --scale 复用，保证跨运行口径一致。
-    {
-        let 尺度路径 = format!("{}/尺度.json", output_dir);
-        match serde_json::to_string_pretty(&scale_config) {
-            Ok(json) => {
-                if let Err(e) = std::fs::write(&尺度路径, json) {
-                    eprintln!("⚠️ 尺度固化失败: {}", e);
-                } else {
-                    println!("📐 尺度已固化: {}", 尺度路径);
-                }
-            }
-            Err(e) => eprintln!("⚠️ 尺度序列化失败: {}", e),
-        }
-    }
-
     // 写出 checkpoint 元信息（需求 6）：校准已完成，scale_config 固定，运行期不再修改。
     let ckpt_dir = checkpoint::checkpoint_dir(&output_dir);
     std::fs::create_dir_all(&ckpt_dir).expect("无法创建 checkpoint 目录");
@@ -2389,21 +2526,28 @@ fn run_optimize(
     finalize_and_save(cfg, &ctx, sa_results, &output_dir, start_time, interrupted);
 }
 
-/// 取「全量拆分表」路径：**只认 `files.full_splits` 的手动配置**，不做任何自动猜测。
+/// 内嵌全量拆分表：`assets/拆分全表.txt`（12.3 万字，含全部字根）。
 ///
-/// 优化为了速度只喂常用字（`files.splits`），而码表要覆盖全部字（如 12 万字）。
-/// 想生成 `完整码表.txt` 就在配置里显式写：
-/// ```toml
-/// [files]
-/// full_splits = "moling/拆分全表.txt"
-/// ```
-/// 留空表示不生成。
-fn 全量拆分路径(cfg: &Config) -> Option<String> {
+/// 优化为了速度只喂常用字（`files.splits`），而码表要覆盖全部字。
+/// `files.full_splits` 留空时默认用这份内嵌表出「完整码表」；
+/// 显式配置了路径则优先用该文件。
+const 内嵌拆分全表: &str = include_str!("../assets/拆分全表.txt");
+
+/// 全量拆分表的来源。
+enum 全量来源 {
+    /// 配置里 `files.full_splits` 显式指定的文件
+    文件(String),
+    /// 内嵌默认表（`assets/拆分全表.txt`）
+    内嵌,
+}
+
+/// 取「全量拆分表」来源：`files.full_splits` 留空 → 内嵌默认表；否则用配置的文件。
+fn 全量拆分路径(cfg: &Config) -> 全量来源 {
     let p = cfg.files.full_splits.trim();
     if p.is_empty() {
-        None
+        全量来源::内嵌
     } else {
-        Some(p.to_string())
+        全量来源::文件(p.to_string())
     }
 }
 
@@ -2533,73 +2677,81 @@ fn finalize_and_save(
 
     // 全量码表：算完用「手动指定的全量拆分表」再编码一遍，覆盖全部字（如 12 万字）。
     // 只在 [files] full_splits 显式配置时生成，不做自动猜测。
-    let 出了完整码表 = match 全量拆分路径(cfg) {
-        Some(p) => {
+    type 全量拆分条目 = (String, Vec<String>, u64);
+    type 全量拆分及来源 = (Vec<全量拆分条目>, String);
+    let 全量: Option<全量拆分及来源> = match 全量拆分路径(cfg) {
+        全量来源::文件(p) => {
             if !std::path::Path::new(&p).is_file() {
                 eprintln!("❌ files.full_splits 指向的文件不存在: {}，跳过完整码表", p);
-                false
+                None
             } else {
-                let 全量 = crate::export_table::加载拆分表(&p);
-                if 全量.len() > ctx.raw_splits.len() {
-                    let 统计 =
-                        output::save_full_code_table(ctx, &best_assignment, &全量, output_dir);
-                    println!(
-                        "\n📄 完整码表: {} 条（简码 {} 在前 / 全码 {}，缺字根 {}），来源 {}",
-                        统计.简码条数 + 统计.全码条数,
-                        统计.简码条数,
-                        统计.全码条数,
-                        统计.缺根条数,
-                        p
-                    );
-                    if 统计.缺根条数 > 0 {
-                        let 样例: Vec<String> = 统计
-                            .缺失字根
-                            .iter()
-                            .map(|(根, 数)| format!("{}({} 字)", 根, 数))
-                            .collect();
-                        if 样例.is_empty() {
-                            println!(
-                                "   ⚠️ 有 {} 个字因字根缺键位被跳过（键位表没覆盖全量拆分的字根）",
-                                统计.缺根条数
-                            );
-                        } else {
-                            println!(
-                                "   ⚠️ 有 {} 个字因字根缺键位被跳过；缺失最多的字根: {}",
-                                统计.缺根条数,
-                                样例.join(", ")
-                            );
-                        }
-                        // 过半缺失基本不可能是真缺根，而是两套表用了不同的根名体系。
-                        if 统计.缺根条数 * 2 > 全量.len() {
-                            println!(
-                                "   💡 缺失超过一半：files.full_splits 与 files.splits 多半不是同一套根名体系"
-                            );
-                            println!(
-                                "      （如一份用真实部件名、另一份用映射后的根名）。两者必须取自同一套字根，否则全量字无法编码。"
-                            );
-                        }
-                    }
-                    if 统计.简码条数 == 0 {
-                        println!(
-                            "   💡 简码段为空：简码优化未启用（[weights.simple_code] enabled = false），码表只有全码行"
-                        );
-                    }
-                    true
-                } else {
-                    println!(
-                        "\n📄 完整码表: 全量拆分表 {} 只有 {} 字，不大于当前拆分表（{} 字），跳过",
-                        p,
-                        全量.len(),
-                        ctx.raw_splits.len()
-                    );
-                    false
-                }
+                Some((crate::export_table::加载拆分表(&p), p))
             }
         }
-        None => {
-            println!("\n📄 完整码表: 未配置 [files] full_splits，跳过");
-            false
+        全量来源::内嵌 => Some((
+            crate::export_table::加载拆分表内容(内嵌拆分全表),
+            "内嵌 assets/拆分全表.txt".to_string(),
+        )),
+    };
+    let 出了完整码表 = match 全量 {
+        Some((全量, 来源)) => {
+            if 全量.len() > ctx.raw_splits.len() {
+                let 统计 = output::save_full_code_table(ctx, &best_assignment, &全量, output_dir);
+                // 合并码表 = 简码段 + 全量全码段（与完整码表同 encoder、同覆盖范围）
+                output::save_combined_from_full(ctx, &best_assignment, &全量, output_dir);
+                println!(
+                    "\n📄 完整码表: {} 条（简码 {} 在前 / 全码 {}，缺字根 {}），来源 {}",
+                    统计.简码条数 + 统计.全码条数,
+                    统计.简码条数,
+                    统计.全码条数,
+                    统计.缺根条数,
+                    来源
+                );
+                if 统计.缺根条数 > 0 {
+                    let 样例: Vec<String> = 统计
+                        .缺失字根
+                        .iter()
+                        .map(|(根, 数)| format!("{}({} 字)", 根, 数))
+                        .collect();
+                    if 样例.is_empty() {
+                        println!(
+                            "   ⚠️ 有 {} 个字因字根缺键位被跳过（键位表没覆盖全量拆分的字根）",
+                            统计.缺根条数
+                        );
+                    } else {
+                        println!(
+                            "   ⚠️ 有 {} 个字因字根缺键位被跳过；缺失最多的字根: {}",
+                            统计.缺根条数,
+                            样例.join(", ")
+                        );
+                    }
+                    // 过半缺失基本不可能是真缺根，而是两套表用了不同的根名体系。
+                    if 统计.缺根条数 * 2 > 全量.len() {
+                        println!(
+                            "   💡 缺失超过一半：files.full_splits 与 files.splits 多半不是同一套根名体系"
+                        );
+                        println!(
+                            "      （如一份用真实部件名、另一份用映射后的根名）。两者必须取自同一套字根，否则全量字无法编码。"
+                        );
+                    }
+                }
+                if 统计.简码条数 == 0 {
+                    println!(
+                        "   💡 简码段为空：简码优化未启用（[weights.simple_code] enabled = false），码表只有全码行"
+                    );
+                }
+                true
+            } else {
+                println!(
+                    "\n📄 完整码表: 全量拆分表 {} 只有 {} 字，不大于当前拆分表（{} 字），跳过",
+                    来源,
+                    全量.len(),
+                    ctx.raw_splits.len()
+                );
+                false
+            }
         }
+        None => false,
     };
 
     save_summary(cfg, &all_results, best_thread, output_dir, elapsed);
@@ -2625,8 +2777,15 @@ fn backup_inputs(cfg: &Config, cli_config_path: &str, output_dir: &str) {
         eprintln!("⚠️ 创建 inputs 目录失败: {}", e);
         return;
     }
-    // config 文件固定备份为 config.ron，确保 resume 能用硬编码路径找到它。
-    let dst = format!("{}/config.ron", inputs_dir);
+    // config 文件备份成 `config.<源扩展名>`（`.ron`/`.toml`），resume 按这两个名字找。
+    // 保留扩展名是为了备份件能自己说明格式；内容仍以解析结果为准（加载器两种都认）。
+    let 源扩展 = std::path::Path::new(cli_config_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .filter(|e| e == "ron" || e == "toml")
+        .unwrap_or_else(|| "ron".to_string());
+    let dst = format!("{}/config.{}", inputs_dir, 源扩展);
     if let Err(e) = fsutil::copy_with_backup(cli_config_path, &dst) {
         eprintln!("⚠️ 备份输入文件 {} 失败: {}", cli_config_path, e);
     }
@@ -2670,7 +2829,12 @@ fn run_resume(dir: &str) {
 
     // 2) 从备份的 inputs/ 读取配置与输入（只读，需求 7.2/7.3）。
     let inputs_dir = format!("{}/inputs", dir);
-    let config_path = format!("{}/config.ron", inputs_dir);
+    // 备份件按源扩展名命名（config.ron / config.toml），两个都认，先 ron 后 toml。
+    let config_path = ["config.ron", "config.toml"]
+        .iter()
+        .map(|名| format!("{}/{}", inputs_dir, 名))
+        .find(|p| std::path::Path::new(p).is_file())
+        .unwrap_or_else(|| format!("{}/config.ron", inputs_dir));
     // #1：resume 同样不能静默回退默认配置，解析失败直接报错退出。
     let mut cfg = match Config::load_from_path(&config_path) {
         Ok(c) => c,
@@ -2680,7 +2844,12 @@ fn run_resume(dir: &str) {
         }
     };
     // 将 files.* 重定向到 inputs/ 下的备份副本（按 basename），确保用一致输入重建。
+    // 空串（= 用内嵌默认表，如 pair_equiv / key_dist / full_splits）原样返回，
+    // 否则会拼成 "inputs/" 这个目录去当文件读，反而刷出「读…失败」的假告警。
     let redirect = |p: &str| -> String {
+        if p.trim().is_empty() {
+            return p.to_string();
+        }
         let base = std::path::Path::new(p)
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
@@ -2847,9 +3016,10 @@ mod backup_tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// config 文件名非 config.ron 时，备份后应固定叫 config.ron，确保 resume 能找到它。
+    /// config 文件名非默认名时，备份应统一成 `config.<扩展名>`，保证 resume 找得到；
+    /// 扩展名要保留（`.ron`/`.toml`），否则备份件会自称 RON 而其实是 TOML。
     #[test]
-    fn backup_inputs_renames_config_to_config_ron() {
+    fn backup_inputs_renames_config_keeping_extension() {
         let base = std::env::temp_dir().join(format!("cg_backup_rename_{}", std::process::id()));
         let src = base.join("src");
         let out = base.join("output-test");
@@ -2880,7 +3050,7 @@ mod backup_tests {
         backup_inputs(&cfg, &config_path, &out.to_string_lossy());
 
         let inputs = out.join("inputs");
-        // 固定备份为 config.ron，内容与源文件一致
+        // 统一命名为 config.ron（扩展名沿用源文件），内容与源文件一致
         let dst = inputs.join("config.ron");
         assert!(dst.exists(), "备份的 config 文件应命名为 config.ron");
         assert_eq!(
@@ -2891,6 +3061,35 @@ mod backup_tests {
         assert!(
             !inputs.join(custom_config).exists(),
             "不应以原始文件名备份 config"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// TOML 配置备份成 `config.toml`（而不是硬改名为 config.ron），
+    /// 这样备份件自带的扩展名与实际格式一致，resume 也能按名找到。
+    #[test]
+    fn backup_inputs_keeps_toml_extension() {
+        let base = std::env::temp_dir().join(format!("cg_backup_toml_{}", std::process::id()));
+        let src = base.join("src");
+        let out = base.join("output-test-toml");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+
+        std::fs::write(src.join("cfg.toml"), "x = 1\n").unwrap();
+        let cfg = Config::default();
+        let config_path = src.join("cfg.toml").to_string_lossy().to_string();
+
+        backup_inputs(&cfg, &config_path, &out.to_string_lossy());
+
+        let inputs = out.join("inputs");
+        assert!(
+            inputs.join("config.toml").exists(),
+            "TOML 配置应备份成 config.toml"
+        );
+        assert!(
+            !inputs.join("config.ron").exists(),
+            "TOML 配置不应被改名为 config.ron"
         );
 
         let _ = std::fs::remove_dir_all(&base);

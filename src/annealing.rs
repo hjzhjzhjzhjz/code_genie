@@ -3,7 +3,9 @@
 // =========================================================================
 
 use rand::prelude::*;
-use std::collections::{HashMap, HashSet};
+use smallvec::SmallVec;
+use rayon::prelude::*;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -95,6 +97,12 @@ pub(crate) fn ramp_log_points(p_start: f64, p_ramp: f64, w_target: f64) -> Vec<(
     }
     points
 }
+
+/// 简码「零梯度」判定阈值：简码综合得分低于该值即视为各分项全部达标。
+///
+/// 得分由各分项的**超额部分**（`max(0, 实际 − 目标)`）平方和构成，全部达标时严格为 0；
+/// 取一个极小正数而非 `== 0.0`，避免浮点残差（如 1e-18）导致永不触发冻结。
+const SIMPLE_FREEZE_EPS: f64 = 1e-12;
 
 /// 计算周期对账间隔 `M`（纯函数，需求 15.2）。
 ///
@@ -281,6 +289,9 @@ fn random_valid_init(ctx: &OptContext, rng: &mut impl Rng) -> Vec<u8> {
 ///
 /// 单个汉字独占的编码永远不可能冲突，全表 9868 条里绝大多数是这种；提前裁掉
 /// 能让后续遍历/增量维护都只在「真正可能冲突」的几百个桶上进行。
+///
+/// 低温扰动移除后，正式路径已改由 [`CollisionCache`] 增量维护，本函数只服务测试。
+#[cfg(test)]
 fn build_code_to_chars(ctx: &OptContext, assignment: &[u8]) -> HashMap<usize, Vec<usize>> {
     let mut code_to_chars: HashMap<usize, Vec<usize>> = HashMap::new();
     for ci in 0..ctx.char_infos.len() {
@@ -377,6 +388,10 @@ fn sort_collisions(collisions: &mut [(usize, usize, usize)]) {
 /// （该编码下字频贡献最大的两个组），使窗口内 20 条对应 20 个不同的冲突编码。
 ///
 /// 排序：主键 weight 降序；次键 (g1, g2) 升序裁决，保证结果可复现、不依赖 HashMap 遍历顺序。
+///
+/// 低温扰动功能已移除，此函数现在只被测试（重码排序/权重）使用，正式路径改由
+/// [`CollisionCache`] 增量维护冲突条目。
+#[cfg(test)]
 fn find_collision_groups(
     ctx: &OptContext,
     assignment: &[u8],
@@ -572,7 +587,13 @@ impl CollisionCache {
 }
 
 /// 找出特定键位上的所有字根组
-fn find_groups_on_key(ctx: &OptContext, assignment: &[u8], key: u8) -> Vec<usize> {
+/// 返回 SmallVec：同键组数常态 ≤ 每键平均组数（数十个），内联在栈上即可，
+/// 避免 sa 主循环每步一次堆分配（长跑下分配器堆段只增不减，是内存膨胀主因）。
+fn find_groups_on_key(
+    ctx: &OptContext,
+    assignment: &[u8],
+    key: u8,
+) -> SmallVec<[usize; 64]> {
     (0..ctx.num_groups)
         .filter(|&gi| assignment[gi] == key)
         .collect()
@@ -764,7 +785,8 @@ fn try_resolve_conflict(
                 None => continue,
             }
         } else {
-            let other_keys: Vec<u8> = allowed
+            // 键集最多 KEY_SPACE 个，栈上内联，消除每步堆分配。
+            let other_keys: SmallVec<[u8; KEY_SPACE]> = allowed
                 .iter()
                 .filter(|&&k| k != current_key)
                 .copied()
@@ -798,7 +820,7 @@ fn try_key_reorganization(
     }
 
     let k1 = assignment[rng.random_range(0..n)];
-    let groups_on_k1: Vec<usize> = find_groups_on_key(ctx, assignment, k1);
+    let groups_on_k1 = find_groups_on_key(ctx, assignment, k1);
 
     if groups_on_k1.is_empty() {
         return false;
@@ -807,7 +829,12 @@ fn try_key_reorganization(
     let gi = groups_on_k1[rng.random_range(0..groups_on_k1.len())];
     let allowed = &ctx.groups[gi].allowed_keys;
 
-    let other_keys: Vec<u8> = allowed.iter().filter(|&&k| k != k1).copied().collect();
+    // 同上：栈上内联，随机序列与 collect 顺序完全不变。
+    let other_keys: SmallVec<[u8; KEY_SPACE]> = allowed
+        .iter()
+        .filter(|&&k| k != k1)
+        .copied()
+        .collect();
 
     if other_keys.is_empty() {
         return false;
@@ -977,7 +1004,8 @@ pub(crate) fn try_full_key_swap(
         return false;
     }
 
-    let affected: Vec<usize> = groups_a.iter().chain(groups_b.iter()).copied().collect();
+    let affected: SmallVec<[usize; 64]> =
+        groups_a.iter().chain(groups_b.iter()).copied().collect();
 
     let old_score = evaluator.get_score(ctx);
     let needs_simple = affected
@@ -1298,6 +1326,7 @@ fn coordinate_descent(ctx: &OptContext, init: Vec<u8>, disable_simple: bool) -> 
 // =========================================================================
 
 /// 校准基准（尺度 / 温度）专用的固定种子：换它等于换一整套校准口径，务必别乱动。
+#[allow(dead_code)]
 const 校准种子: u64 = 0x636F_6465_6765_6E69;
 
 pub fn multi_start_init(ctx: &OptContext, cfg: &Config, thread_id: usize) -> Vec<u8> {
@@ -1311,6 +1340,7 @@ pub fn multi_start_init(ctx: &OptContext, cfg: &Config, thread_id: usize) -> Vec
 /// （同输入同配置必得同一初解），又不会像 `deterministic_init` 那样给出劣质基准
 /// ——后者是 `allowed[gi % len]` 轮转分配，实测重码数是贪心解的 3 倍以上，
 /// 拿它当基准会把 `scale = 1/基准` 带偏。
+#[allow(dead_code)]
 pub fn multi_start_init_seeded(
     ctx: &OptContext,
     cfg: &Config,
@@ -1336,33 +1366,44 @@ fn multi_start_init_with(
     let n_candidates: usize = if n < 1000 { 50 } else { 30 };
     let warmup_steps = (n * 30).clamp(2000, 50_000);
 
+    // 先按顺序把「每个候选的独立随机种子」抽出来。
+    //
+    // 这样每个候选各自持有一份独立的 `StdRng`，候选之间再无任何共享可变状态，
+    // 于是既能并行跑，又保住了 #8 的「同输入同配置 → 同一结果」：
+    // 种子序列由传入的 `rng` 顺序生成，与并行调度顺序完全无关。
+    // （代价是候选 i+1 的初始解不再受候选 i 消耗 rng 的影响——多起点本来就要求
+    //   各候选相互独立，这里反而更符合本意。）
+    let seeds: Vec<u64> = (0..n_candidates).map(|_| rng.random()).collect();
+
+    // Init T0 的全部成本就是「n_candidates × warmup_steps 步爬山」，而候选之间彼此独立
+    // （各自的 Evaluator、各自的 rng，`ctx`/`cfg` 只读）。按候选并行后，
+    // 4 核时 Init 段墙钟约降到 1/4，而初始解质量一字不变——这是纯提速、零风险的一刀。
+    //
+    // 注：外层 SA 也是 rayon 并行，这里是嵌套并行；rayon 的 work-stealing 支持嵌套，
+    // 不会死锁，且空闲 worker 会来帮忙，实际并行度仍受全局线程池大小约束。
+    let results: Vec<(usize, &'static str, Vec<u8>, f64)> = (0..n_candidates)
+        .into_par_iter()
+        .map(|trial| {
+            let mut crng = StdRng::seed_from_u64(seeds[trial]);
+            let (strategy_name, candidate) = match trial % 5 {
+                0 => ("均衡贪心", greedy_balance_init(ctx, cfg, &mut crng)),
+                1 | 2 => ("频率贪心", frequency_greedy_init(ctx, &mut crng)),
+                3 => ("分散贪心", spread_greedy_init(ctx, &mut crng)),
+                _ => ("纯随机", random_valid_init(ctx, &mut crng)),
+            };
+
+            let (refined, score) =
+                hill_climb_warmup(ctx, cfg, candidate, &mut crng, warmup_steps, true);
+            (trial, strategy_name, refined, score)
+        })
+        .collect();
+
+    // 按 trial 顺序回放择优。`into_par_iter().collect::<Vec<_>>()` 保证保序，
+    // 因此「严格更优才替换」的语义与打印顺序都与串行版逐字一致（含多候选同分时取靠前者）。
     let mut best_assignment: Option<Vec<u8>> = None;
     let mut best_score = f64::MAX;
 
-    for trial in 0..n_candidates {
-        let strategy_name;
-        let candidate = match trial % 5 {
-            0 => {
-                strategy_name = "均衡贪心";
-                greedy_balance_init(ctx, cfg, &mut *rng)
-            }
-            1 | 2 => {
-                strategy_name = "频率贪心";
-                frequency_greedy_init(ctx, &mut *rng)
-            }
-            3 => {
-                strategy_name = "分散贪心";
-                spread_greedy_init(ctx, &mut *rng)
-            }
-            _ => {
-                strategy_name = "纯随机";
-                random_valid_init(ctx, &mut *rng)
-            }
-        };
-
-        let (refined, score) =
-            hill_climb_warmup(ctx, cfg, candidate, &mut *rng, warmup_steps, true);
-
+    for (trial, strategy_name, refined, score) in results {
         if score < best_score {
             best_score = score;
             best_assignment = Some(refined);
@@ -1420,6 +1461,7 @@ pub fn deterministic_init(ctx: &OptContext, _cfg: &Config) -> Vec<u8> {
 /// 轮转分配是劣质解（实测 1204 重码 / 2.53%，而贪心解 379 / 0.60%）。由于
 /// `scale = 1/基准`，劣质基准会把评分口径整体带偏。
 /// 现在改为「固定种子的 multi_start_init」：确定性照样成立，基准质量与上游一致。
+#[allow(dead_code)]
 pub fn smart_init(ctx: &OptContext, cfg: &Config) -> Vec<u8> {
     multi_start_init_seeded(ctx, cfg, usize::MAX, 校准种子)
 }
@@ -1540,6 +1582,8 @@ pub fn simulated_annealing_resumable(
     let w_target = ctx.weights.weight_simple_code;
     let reconcile_ratio = cfg.weights.simple_code.reconcile_interval_ratio;
     let weight_full = ctx.weights.weight_full_code;
+    // 简码零梯度区间跳过维护：全达标后冻结增量，仅在对账点校验并决定是否解冻。
+    let simple_freeze_enable = simple_enabled && cfg.annealing.simple_freeze_enable;
 
     // 激活闩锁：一旦激活后保持为真（需求 8.3/8.4）。
     let mut simple_activated = false;
@@ -1668,15 +1712,8 @@ pub fn simulated_annealing_resumable(
     let mut last_best_score = best_score;
 
     let report_interval = (steps / 20).max(1);
-    let perturb_interval = cfg.perturb_interval();
 
     let swap_prob_base = cfg.annealing.swap_probability;
-    // 舒适区温度（绝对值）：由 `comfort_progress` 按降温曲线换算
-    let comfort_abs = 舒适区温度(cfg);
-    // 低温扰动参数（此前硬编码 0.01 / 2.0 / 10，现由配置驱动）
-    let perturb_trigger_temp = comfort_abs * cfg.annealing.perturb_trigger_temp_ratio;
-    let perturb_temp_mult = cfg.annealing.perturb_temp_multiplier;
-    let perturb_pairs_limit = cfg.annealing.perturb_collision_pairs_limit;
 
     // 冲突导向算子状态（仅在启用时维护；关闭时零开销且不消耗额外随机数，保持 RNG 序列与原实现一致）
     let conflict_prob = cfg.annealing.conflict_probability;
@@ -1915,6 +1952,24 @@ pub fn simulated_annealing_resumable(
             evaluator.score_dirty = true;
         }
 
+        // === 简码零梯度冻结（性能）：分项全部达标后暂停逐步增量维护 ===
+        // 简码得分恒为 0 ⟹ 简码对综合得分没有梯度 ⟹ 维护与否不改变搜索轨迹，
+        // 但每步维护要重选数百个简码桶（星陈均 343 桶/移动），是 SA 段的主要开销。
+        // 冻结后由周期对账 reconcile 重算真实简码指标，若重新超标则立刻解冻（下方对账段）。
+        if simple_freeze_enable
+            && simple_activated
+            && !evaluator.simple_frozen
+            && evaluator.simple_score_component(ctx) <= SIMPLE_FREEZE_EPS
+        {
+            evaluator.freeze_simple();
+            if thread_id == 0 {
+                println!(
+                    "   [T0] 步数 {}/{} | 进度 {:.3}: 简码各项已全部达标 → 冻结增量维护（仅对账点校验）",
+                    step, steps, p
+                );
+            }
+        }
+
         // === 权重渐进期 10 点输出（任务 11.1，需求 16.2/16.3）===
         // 当进度首次到达每个预计算点时输出 p/α/有效权重；渐进结束输出「已达目标权重 W」。
         if thread_id == 0 && simple_enabled && p_ramp > 0.0 {
@@ -2017,7 +2072,7 @@ pub fn simulated_annealing_resumable(
             }
         }
 
-        // 窗口接受率累计（每步一次提议；智能扰动的额外移动不计入，保持接受率口径纯净）。
+        // 窗口接受率累计（每步一次提议）。
         win_proposed += 1;
         if proposal_accepted {
             win_accepted += 1;
@@ -2090,70 +2145,6 @@ pub fn simulated_annealing_resumable(
             }
         }
 
-        // 智能低温扰动
-        if perturb_interval > 0
-            && step > 0
-            && step % perturb_interval == 0
-            && base_temp < perturb_trigger_temp
-        {
-            let collisions = find_collision_groups(ctx, &assignment, conflict_weight_by_freq);
-            let n_perturb = (n_groups as f64 * cfg.annealing.perturb_strength) as usize;
-
-            if !collisions.is_empty() {
-                let mut perturbed_groups: HashSet<usize> = HashSet::new();
-                for (g1, g2, _) in collisions.iter().take(perturb_pairs_limit) {
-                    perturbed_groups.insert(*g1);
-                    perturbed_groups.insert(*g2);
-                }
-                let groups: Vec<usize> = perturbed_groups.into_iter().collect();
-                for &gi in groups.iter().take(n_perturb) {
-                    let allowed = &ctx.groups[gi].allowed_keys;
-                    if allowed.len() > 1 {
-                        let new_k = allowed[rng.random_range(0..allowed.len())];
-                        evaluator.try_move(
-                            ctx,
-                            &mut assignment,
-                            gi,
-                            new_k,
-                            temp * perturb_temp_mult,
-                            &mut rng,
-                        );
-                    }
-                }
-            } else {
-                for _ in 0..n_perturb {
-                    let r1 = rng.random_range(0..n_groups);
-                    let r2 = rng.random_range(0..n_groups);
-                    if r1 != r2 {
-                        let ka = assignment[r1];
-                        let kb = assignment[r2];
-                        let can = ctx.groups[r1].allowed_keys.contains(&kb)
-                            && ctx.groups[r2].allowed_keys.contains(&ka);
-                        if can {
-                            evaluator.try_swap(
-                                ctx,
-                                &mut assignment,
-                                r1,
-                                r2,
-                                temp * perturb_temp_mult,
-                                &mut rng,
-                            );
-                        }
-                    }
-                }
-            }
-
-            if thread_id == 0 {
-                let m = evaluator.get_metrics(ctx);
-                println!(
-                    "   [T0] 步数 {}: 智能扰动 | 重码={} | 当前: {:.4}",
-                    step,
-                    m.collision_count,
-                    evaluator.get_score(ctx)
-                );
-            }
-        }
-
         if thread_id == 0 && step % report_interval == 0 && step > 0 {
             let pct = step * 100 / steps;
             let m = evaluator.get_metrics(ctx);
@@ -2214,15 +2205,22 @@ pub fn simulated_annealing_resumable(
             if simple_enabled {
                 let sm = evaluator.get_simple_metrics(ctx);
                 let ss = evaluator.get_simple_metric_scores(ctx);
+                // 冻结期指标停在对账时刻（简码状态不再随移动更新），显式标注避免误读为实时值。
+                let freeze_tag = if evaluator.simple_frozen {
+                    " [已冻结·仅对账点校准]"
+                } else {
+                    ""
+                };
                 println!(
-                    "   [T0] 简码: {:>3}% |                  重码={}({:.4}) 重码率={:.4}%({:.4}) 当量={:.4}({:.4}) 覆盖={:.2}%({:.4}) 分布={:.4}({:.4}) | 当前简码:{:.4} 🏆最优简码:{:.4}",
+                    "   [T0] 简码: {:>3}% |                  重码={}({:.4}) 重码率={:.4}%({:.4}) 当量={:.4}({:.4}) 覆盖={:.2}%({:.4}) 分布={:.4}({:.4}) | 当前简码:{:.4} 🏆最优简码:{:.4}{}",
                     pct,
                     sm.collision_count, ss.collision_count,
                     sm.collision_rate * 100.0, ss.collision_rate,
                     sm.equiv_mean, ss.equiv,
                     sm.weighted_freq_coverage * 100.0, ss.freq,
                     sm.dist_deviation, ss.dist,
-                    cur_simple_comp, best_simple_comp
+                    cur_simple_comp, best_simple_comp,
+                    freeze_tag
                 );
             }
             println!(
@@ -2259,6 +2257,21 @@ pub fn simulated_annealing_resumable(
         if simple_activated && step > 0 && step % reconcile_m == 0 {
             evaluator.reconcile(ctx, &assignment);
             evaluator.score_dirty = true;
+            // === 冻结审计：对账已用当前分配全量重建简码状态，此处读到的即真实简码得分 ===
+            // 冻结期间简码状态与 assignment 脱节，若真实得分重新超标（冻结前是全达标），
+            // 说明后半程的全码移动把简码拖回了不达标区间，必须解冻恢复逐步维护。
+            if evaluator.simple_frozen {
+                let audited = evaluator.simple_score_component(ctx);
+                if audited > SIMPLE_FREEZE_EPS {
+                    evaluator.resume_simple();
+                    if thread_id == 0 {
+                        println!(
+                            "   [T0] 步数 {}/{} | 进度 {:.3}: 对账发现简码重新超标（得分 {:.6}）→ 解冻增量维护",
+                            step, steps, p, audited
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -2860,13 +2873,13 @@ mod conflict_tests {
 // 覆盖需求 12.2/12.3/12.4：
 //   - 12.2：简码计算被激活时应用 `simple_activation_reheat` 作为升温倍率；
 //   - 12.3：`simple_activation_reheat` 独立于 `reheat_factor`，不复用后者取值；
-//   - 12.4：关闭 reheat 与扰动等配置时，仍正确执行简码激活与权重渐进核心逻辑。
+//   - 12.4：关闭 reheat 时，仍正确执行简码激活与权重渐进核心逻辑。
 //
 // 由于 `simulated_annealing` 仅返回最终结果、内部激活事件不可直接观测，
 // 本测试以「纯函数语义断言 + 小规模端到端冒烟」两条务实路径验证上述需求：
 //   1. 直接对升温乘子语义与配置独立性断言（无需内部钩子）；
 //   2. 端到端跑数十步，断言完成且返回有限得分与合理 SimpleMetrics；
-//   3. 关闭 reheat/扰动后仍能完成并产出简码指标。
+//   3. 关闭 reheat 后仍能完成并产出简码指标。
 // =========================================================================
 #[cfg(test)]
 mod activation_reheat_tests {
@@ -3131,10 +3144,10 @@ mod activation_reheat_tests {
         let _ = sm.collision_count;
     }
 
-    /// 默认配置（含 reheat 与扰动开启）下小规模端到端运行：
+    /// 默认配置（含 reheat 开启）下小规模端到端运行：
     /// 断言激活会在运行内发生（start_progress 很低）、运行无 panic、返回有限得分与合理简码指标。
     #[test]
-    fn test_end_to_end_small_run_with_reheat_and_perturb() {
+    fn test_end_to_end_small_run_with_reheat() {
         let ctx = make_simple_ctx(&[100, 90, 80, 70, 60, 50]);
         let cfg = make_run_cfg(120);
 
@@ -3148,25 +3161,22 @@ mod activation_reheat_tests {
         assert_sane_simple_metrics(&simple_metrics);
     }
 
-    /// 关闭 reheat 与扰动、且激活升温为 1.0 时，仍应正确激活并渐进、完成运行并产出简码指标
-    /// （需求 12.4：核心激活/渐进逻辑不依赖 reheat 与扰动）。
+    /// 关闭 reheat、且激活升温为 1.0 时，仍应正确激活并渐进、完成运行并产出简码指标
+    /// （需求 12.4：核心激活/渐进逻辑不依赖 reheat）。
     #[test]
-    fn test_end_to_end_small_run_reheat_and_perturb_disabled() {
+    fn test_end_to_end_small_run_reheat_disabled() {
         let ctx = make_simple_ctx(&[100, 90, 80, 70, 60, 50]);
         let mut cfg = make_run_cfg(150);
         // 关闭 reheat（reheat_factor=1.0）、激活升温为 1.0（不升温）。
         cfg.annealing.reheat_factor = 1.0;
         cfg.weights.simple_code.simple_activation_reheat = 1.0;
-        // 关闭扰动。
-        cfg.annealing.perturb_interval_ratio = 0.0;
-        cfg.annealing.perturb_strength = 0.0;
 
         let (assignment, score, _metrics, simple_metrics) = simulated_annealing(&ctx, &cfg, 1);
 
         assert_eq!(assignment.len(), ctx.num_groups);
         assert!(
             score.is_finite(),
-            "关闭 reheat/扰动后最终得分仍应有限：{score}"
+            "关闭 reheat 后最终得分仍应有限：{score}"
         );
         assert_sane_simple_metrics(&simple_metrics);
         // 候选覆盖率=1.0 且 code_num=1，激活后应确有出简，覆盖率 > 0 佐证简码确实生效。

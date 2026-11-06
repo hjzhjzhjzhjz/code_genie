@@ -320,7 +320,8 @@ fn 加载简码(path: &Path) -> HashMap<String, String> {
         }
         let 列: Vec<&str> = 行.split_whitespace().collect();
         if 列.len() >= 2 {
-            表.insert(列[0].to_string(), 列[1].to_string());
+            // 一级简码带尾 `_`（优化器的顶屏键标记），测评器不认这个记号，去掉
+            表.insert(列[0].to_string(), 列[1].trim_end_matches('_').to_string());
         }
     }
     表
@@ -730,6 +731,10 @@ struct 根信息 {
     频次: Vec<u64>,
     字频: String,
     繁体: bool,
+    /// 在「繁体字根.txt」清单里（只出现在繁体/生僻字拆分中的根）
+    繁体根: bool,
+    /// 在「罕用字根.txt」清单里（繁体专用字集里也几乎不出现的部件根）
+    罕用根: bool,
     例字: Vec<String>,
 }
 
@@ -748,6 +753,18 @@ fn 生成页面(
     let chaifen = 读取带行号(chaifen_tsv)?;
     let 字频表 = 读取带行号(全字频文件)?;
 
+    // 繁体根 / 罕用字根清单：显式标注用（文件缺失就不标，不影响其他方案）
+    let 繁体根集 = 读根清单(&[目录.to_path_buf(), 源.to_path_buf()], "繁体字根.txt");
+    let 罕用根集 = 读根清单(&[目录.to_path_buf(), 源.to_path_buf()], "罕用字根.txt");
+    if !繁体根集.is_empty() || !罕用根集.is_empty() {
+        println!(
+            "  ⑥ 繁体根 {} 个 / 罕用根 {} 个（{:?}）",
+            繁体根集.len(),
+            罕用根集.len(),
+            ["繁体字根.txt", "罕用字根.txt"]
+        );
+    }
+
     // 前 N 个高频字：字 → 序号（1 起）
     let mut 高频: HashMap<String, usize> = HashMap::new();
     for (i, 行) in fs::read_to_string(全字频文件)
@@ -761,9 +778,10 @@ fn 生成页面(
         }
     }
 
+    // `读取带行号` 的布局是 `[行号, 字, 频次]`，频次在索引 2
     let 总字频: f64 = 字频表
         .values()
-        .filter_map(|v| v.get(1).and_then(|s| s.parse::<f64>().ok()))
+        .filter_map(|v| v.get(2).and_then(|s| s.parse::<f64>().ok()))
         .sum();
     let 页数 = if 高频.is_empty() {
         1
@@ -805,7 +823,7 @@ fn 生成页面(
         let 简体 = unihan.map(|u| u.简体字.contains(&字.chars().next().unwrap_or('\0')));
         let 该字频 = 字频表
             .get(字)
-            .and_then(|v| v.get(1))
+            .and_then(|v| v.get(2))
             .and_then(|s| s.parse::<f64>().ok())
             .unwrap_or(0.0);
 
@@ -848,12 +866,14 @@ fn 生成页面(
     let mut 全单字根 = true;
 
     for (根, 列) in &roots {
-        let 码 = 列.get(1).cloned().unwrap_or_default();
+        // 列来自 `读取带行号`，布局是 `[行号, 名, 码, 拼音, 备注…]`，
+        // 故码/拼音/备注分别从 2/3/4 起取（错取 1 会把字根名当成码，页面编码全空）
+        let 码 = 列.get(2).cloned().unwrap_or_default();
         if 码.chars().count() > 1 {
             全单字根 = false;
         }
-        let mut 拼音 = 列.get(2).cloned().unwrap_or_default();
-        let 备注 = 列.iter().skip(3).cloned().collect::<Vec<_>>().join(" ");
+        let mut 拼音 = 列.get(3).cloned().unwrap_or_default();
+        let 备注 = 列.iter().skip(4).cloned().collect::<Vec<_>>().join(" ");
 
         // 非花括号字根、且拼音是空或纯小写字母时，用 Unihan 的 kMandarin 覆盖
         if !根.contains('{') && (拼音.is_empty() || !拼音.chars().any(|c| !c.is_ascii_lowercase()))
@@ -905,6 +925,8 @@ fn 生成页面(
                     频次,
                     字频: format!("{百分比:.2}%"),
                     繁体: 根繁体.get(根).copied().flatten().unwrap_or(false),
+                    繁体根: 繁体根集.contains(根),
+                    罕用根: 罕用根集.contains(根),
                     例字: 根例字.get(根).cloned().unwrap_or_default(),
                 },
             );
@@ -1004,6 +1026,30 @@ fn 读取带行号(path: &Path) -> Result<HashMap<String, Vec<String>>, String> 
     Ok(表)
 }
 
+/// 读根清单（`繁体字根.txt` / `罕用字根.txt`）：一行一个根，`#` 开头是注释
+///
+/// 找不到文件就返回空集 —— 老方案没有这两份清单时页面照旧生成，不标注。
+fn 读根清单(目录们: &[PathBuf], 名: &str) -> HashSet<String> {
+    let Some(路径) = 找文件(目录们, 名) else {
+        return HashSet::new();
+    };
+    let Ok(文本) = fs::read_to_string(&路径) else {
+        return HashSet::new();
+    };
+    let mut 集 = HashSet::new();
+    for 行 in 文本.lines() {
+        let 行 = 行.trim();
+        if 行.is_empty() || 行.starts_with('#') {
+            continue;
+        }
+        // 只取行首那个 token，容忍行尾跟着注释
+        if let Some(根) = 行.split_whitespace().next() {
+            集.insert(根.to_string());
+        }
+    }
+    集
+}
+
 /// `roots-mapping.tsv`（花括号名 → 显示字）→ 映射表
 fn 加载映射(path: &Path) -> HashMap<String, String> {
     let mut 表 = HashMap::new();
@@ -1055,6 +1101,14 @@ fn chart_json(chart: &BTreeMap<String, BTreeMap<String, BTreeMap<String, 根信�
                 出.push_str(&format!(
                     "\"traditional\":{},",
                     if 信息.繁体 { 1 } else { 0 }
+                ));
+                出.push_str(&format!(
+                    "\"trad_root\":{},",
+                    if 信息.繁体根 { 1 } else { 0 }
+                ));
+                出.push_str(&format!(
+                    "\"rare_root\":{},",
+                    if 信息.罕用根 { 1 } else { 0 }
                 ));
                 出.push_str(&format!(
                     "\"examples\":[{}]}}",
@@ -1250,7 +1304,8 @@ mod 测试 {
         let p = 写临时("simple.txt", "# 注释\n的\tfjek\n一\to_\n\n了\tll\n");
         let m = 加载简码(&p);
         assert_eq!(m.get("的").unwrap(), "fjek");
-        assert_eq!(m.get("一").unwrap(), "o_");
+        // 尾下划线是优化器内部顶屏标记，测评器不认，加载时已剥离
+        assert_eq!(m.get("一").unwrap(), "o");
         assert_eq!(m.get("了").unwrap(), "ll");
         assert_eq!(m.len(), 3);
     }

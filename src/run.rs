@@ -227,20 +227,21 @@ fn 绝对化(p: &Path) -> PathBuf {
     std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
-/// `config-<方案>.ron` 优先，其次 `config.ron`
+/// `config-<方案>.ron` → `config-<方案>.toml` → `config.ron` → `config.toml` 的顺序找
 fn 选配置(工作: &Path, 方案名: &str) -> Result<String, String> {
-    let 专用 = format!("config-{方案名}.ron");
-    if 工作.join(&专用).is_file() {
-        return Ok(专用);
+    // 同名优先 ron 再说 toml：老目录里 ron 是主格式，新机器上可能只剩 toml。
+    let 候选 = [
+        format!("config-{方案名}.ron"),
+        format!("config-{方案名}.toml"),
+        "config.ron".to_string(),
+        "config.toml".to_string(),
+    ];
+    for 名 in &候选 {
+        if 工作.join(名).is_file() {
+            return Ok(名.clone());
+        }
     }
-    let 默认 = "config.ron".to_string();
-    if 工作.join(&默认).is_file() {
-        return Ok(默认);
-    }
-    Err(format!(
-        "{} 下既没有 {专用} 也没有 config.ron",
-        工作.display()
-    ))
+    Err(format!("{} 下找不到任何配置文件（试过 {:?}）", 工作.display(), 候选))
 }
 
 /// 缺省输出目录：`<方案>-output/output-<时间戳>`

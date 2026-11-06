@@ -41,3 +41,17 @@ moling/单字拆分.txt
 
 # 本地优化存档（某次退火的本地留档，不入库，仅本地参考）
 runs/0.0220-0.1113/
+
+# 本地实验 / 测评 / 退火产物与日志（只在本地参考，不入库）
+# `**/log*` 只匹配以 log 开头的文件名，实验日志多为 `*.log`，需单独排除。
+*.log
+.verify_run
+assess-in*/
+assess-out*/
+exp-simple-*/
+rel-*/
+verify-3000-*/
+proptest-regressions/
+# 本地方案配置与下载的原始语料（体量大、机器相关；确需入库用 git add -f）
+dlrk/
+unihan/

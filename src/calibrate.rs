@@ -21,6 +21,7 @@ use crate::types::{Metrics, ScaleConfig, SimpleMetrics, WeightConfig};
 /// - 初态观测值 > eps → 用观测值（主路径）；
 /// - 观测值≈0（如零重码）→ 退回配置 `[targets]` 的典型值；
 /// - 两者都不可用 → `1.0` 兜底，避免 `1/eps` 爆炸。
+#[allow(dead_code)]
 pub fn calibrate_scales(
     initial_metrics: &Metrics,
     initial_simple: &SimpleMetrics,

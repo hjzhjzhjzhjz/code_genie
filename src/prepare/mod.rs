@@ -25,10 +25,11 @@
 
 pub(crate) mod inputs;
 pub mod names;
-mod roots;
+pub(crate) mod roots;
 pub(crate) mod schema;
 mod tables;
 pub(crate) mod text;
+pub(crate) mod yustar;
 
 use std::path::{Path, PathBuf};
 
@@ -168,14 +169,17 @@ pub fn run(参: &参数) -> Result<(), String> {
     println!("  字根表:   {}", 上.字根表);
     println!("  聚类表:   {}", 上.聚类表);
 
+    // 星陈 有自己的链路（见 `yustar`）：不生成 字根声韵.txt、约束直接写 .0/.1。
+    // 其余方案（魔灵/灵明）走下面这张步骤表。
+    let 星陈 = 方案.名 == schema::星陈.名;
+
     for 步骤 in 参.从步骤..=参.到步骤 {
+        if 星陈 {
+            yustar::步骤(&上, 步骤)?;
+            continue;
+        }
         match 步骤 {
-            0 => tables::步骤0_全字频表(&上)?,
-            1 => tables::步骤1_字符集(&上)?,
-            2 => tables::步骤2_算码字频(&上)?,
-            3 => tables::步骤3_拆分表(&上)?,
-            4 => tables::步骤4_字根频率(&上)?,
-            5 => roots::步骤5_字根读音(&上)?,
+            0..=5 => 共用步骤(&上, 步骤)?,
             6 => roots::步骤6_字根声韵码(&上)?,
             7 => {} // 原「飞键候选」步骤已移除：不再有飞键根，无需分析首根冲突
             8 => inputs::步骤8_大码约束(&上)?,
@@ -197,17 +201,40 @@ pub fn run(参: &参数) -> Result<(), String> {
     Ok(())
 }
 
-/// 定位配置文件（`config-<schema>.ron` 优先，其次 `config.ron`）
+/// 步骤 0~5：全字频、字符集、算码字频、拆分表、字根频率、字根读音
+///
+/// 这几步只吃 `混合字频权重` 这类方案参数、不吃编码规则，因此魔灵/灵明 与
+/// 星陈 两条链路共用（星陈 的链路见 [`yustar`]）。
+pub(crate) fn 共用步骤(上: &上下文, 步骤: usize) -> Result<(), String> {
+    match 步骤 {
+        0 => tables::步骤0_全字频表(上),
+        1 => tables::步骤1_字符集(上),
+        2 => tables::步骤2_算码字频(上),
+        3 => tables::步骤3_拆分表(上),
+        4 => tables::步骤4_字根频率(上),
+        5 => roots::步骤5_字根读音(上),
+        other => Err(format!("共用步骤只覆盖 0~5，收到 {other}")),
+    }
+}
+
+/// 定位配置文件（`config-<schema>.ron` → `.toml` → `config.ron` → `config.toml`）
 fn 解析配置(参: &参数, 上: &上下文) -> Option<PathBuf> {
     if let Some(p) = &参.配置 {
         return Some(PathBuf::from(p));
     }
-    let 专用 = 上.目录.join(format!("config-{}.ron", 上.方案.名));
-    if 专用.exists() {
-        return Some(专用);
+    let 候选 = [
+        format!("config-{}.ron", 上.方案.名),
+        format!("config-{}.toml", 上.方案.名),
+        "config.ron".to_string(),
+        "config.toml".to_string(),
+    ];
+    for 名 in &候选 {
+        let p = 上.目录.join(名);
+        if p.exists() {
+            return Some(p);
+        }
     }
-    let 默认 = 上.目录.join("config.ron");
-    默认.exists().then_some(默认)
+    None
 }
 
 /// 逐字节对照产物与基线目录，打印首个差异段落

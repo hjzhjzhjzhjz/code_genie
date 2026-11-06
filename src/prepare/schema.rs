@@ -46,14 +46,25 @@ pub struct 方案 {
     pub 混合字频权重: f64,
     /// `MAX_CODE_LEN`
     pub 最大码长: usize,
-    /// `TOP_ROOT_FREQ` / `TOP_ROOT_KEYS`
-    pub 高频字根频率: f64,
-    pub 高频字根键位: &'static str,
-    /// `HOT_ROOT_FREQ` / `HOT_ROOT_KEYS`
-    pub 中频字根频率: f64,
-    pub 中频字根键位: &'static str,
-    /// `ALL_ROOT_KEYS`
-    pub 低频字根键位: &'static str,
+    /// 字根键位全集。
+    ///
+    /// 上游脚本原本按根频分三档（`TOP_ROOT_FREQ`/`TOP_ROOT_KEYS`、
+    /// `HOT_ROOT_FREQ`/`HOT_ROOT_KEYS`、`ALL_ROOT_KEYS`）给不同频率的字根
+    /// 不同的候选键集。现已**取消按根频自动分派**：聚类簇内字根共享一键，
+    /// 键位候选一律给全集，交给退火自己挑。
+    pub 全部字根键位: &'static str,
+    /// 声码（小码）统一候选键位。
+    ///
+    /// `None` = 沿用各字根拼音声母（现状：声码与读音绑定，逐根钉死）；
+    /// `Some(键集)` = 所有 `.S` 约束统一给这组候选键，交给退火在集合内分配
+    /// （星陈用这条：声码不再按声母固定，而是在指定键集里统一优化）。
+    pub 声码键位: Option<&'static str>,
+    /// 是否让**每个字根都有小码槽**（星陈口径）。
+    ///
+    /// `false`（魔灵/灵明）= 老规矩：声码长度 > 1 才算「有声母」，才给 `.S` 槽；
+    /// `true`（星陈）= 不看声母，`声码键位` 里的候选键对所有字根一视同仁，
+    /// 查不到读音的花括号部件、符号根同样分到一个小码。
+    pub 小码恒有: bool,
     /// `OPTIMIZE_KEY_<声母>` 重映射表
     pub 优化键: &'static [(char, char)],
     /// `OPTIMIZE_KEYS`：交给退火优化、不写死约束的声母集合。
@@ -77,17 +88,6 @@ impl 方案 {
             .find(|(源, _)| *源 == 声母)
             .map(|(_, 目标)| *目标)
     }
-
-    /// 字根频率分档选键位串
-    pub fn 分档键位(&self, 频率: f64) -> &'static str {
-        if 频率 >= self.高频字根频率 {
-            self.高频字根键位
-        } else if 频率 >= self.中频字根频率 {
-            self.中频字根键位
-        } else {
-            self.低频字根键位
-        }
-    }
 }
 
 /// 魔灵（@qq3qq）：仓库默认方案，`moling/config.ron` 用它
@@ -98,11 +98,9 @@ pub const 魔灵: 方案 = 方案 {
     韵码: 韵码来源::首笔,
     混合字频权重: 0.1,
     最大码长: 4,
-    高频字根频率: 2.5,
-    高频字根键位: "sdfghjkl",
-    中频字根频率: 1.5,
-    中频字根键位: "wr sdfghjkl vnm",
-    低频字根键位: "qwrtyp sdfghjkl xcvbnm",
+    全部字根键位: "qwertyuiopasdfghjklxcvbnm",
+    声码键位: None,
+    小码恒有: false,
     优化键: &[('0', 'w'), ('y', 'k'), ('z', 'v')],
     优化声母集: "",
     土用杜音: true,
@@ -119,11 +117,9 @@ pub const 灵明: 方案 = 方案 {
     韵码: 韵码来源::韵腹,
     混合字频权重: 1.0,
     最大码长: 4,
-    高频字根频率: 2.5,
-    高频字根键位: "sdfghjkl",
-    中频字根频率: 1.5,
-    中频字根键位: "wr sdfghjkl vnm",
-    低频字根键位: "qwrtyp sdfghjkl xcvbnm",
+    全部字根键位: "qwertyuiopasdfghjklxcvbnm",
+    声码键位: None,
+    小码恒有: false,
     优化键: &[('0', 'j'), ('q', 'k'), ('z', 'v')],
     优化声母集: "",
     土用杜音: false,
@@ -141,11 +137,9 @@ pub const 星陈: 方案 = 方案 {
     韵码: 韵码来源::无,
     混合字频权重: 0.1,
     最大码长: 4,
-    高频字根频率: 2.5,
-    高频字根键位: "sdfghjkl",
-    中频字根频率: 1.5,
-    中频字根键位: "wr sdfghjkl vnm",
-    低频字根键位: "qwrtyp sdfghjkl xcvbnm",
+    全部字根键位: "qwertyuiopasdfghjklxcvbnm",
+    声码键位: Some("weisdfjklmvnhgur"),
+    小码恒有: true,
     优化键: &[],
     优化声母集: "",
     土用杜音: false,

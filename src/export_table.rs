@@ -91,6 +91,11 @@ pub(crate) fn 加载键位表(path: &str) -> HashMap<String, Vec<char>> {
 /// 读取纯拆分表：`字 <TAB> 根 根 … <TAB> 频次`
 pub(crate) fn 加载拆分表(path: &str) -> Vec<(String, Vec<String>, u64)> {
     let 文本 = fs::read_to_string(path).expect("无法读取拆分表");
+    加载拆分表内容(&文本)
+}
+
+/// 从内存文本解析拆分表（供内嵌的全量拆分表使用）
+pub(crate) fn 加载拆分表内容(文本: &str) -> Vec<(String, Vec<String>, u64)> {
     let mut 表 = Vec::new();
     for 行 in 文本.lines() {
         let 行 = 行.trim();

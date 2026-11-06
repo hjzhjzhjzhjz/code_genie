@@ -23,12 +23,13 @@ serde_json = { version = "1.0", features = ["float_roundtrip"] }
 sha2 = "0.10"
 smallvec = "1"
 ron = "0.8"
+# 配置文件同时支持 RON 与 TOML（加载器按扩展名优先、另一格式兜底）
+toml = "0.8"
 # 图表：PNG 落盘用于正式报告（Word 对 SVG 支持一般），SVG 用于 Markdown/浏览器。
 charts-rs = { version = "2", features = ["png"], optional = true }
 
 [dev-dependencies]
 proptest = { version = "1", default-features = false, features = ["std"] }
-toml = "0.8"
 
 [profile.release]
 opt-level = 3

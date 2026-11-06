@@ -118,20 +118,9 @@ fn evaluator_simple_selection(ctx: &OptContext, assignment: &[u8]) -> Vec<(usize
 }
 
 /// 保存简码+全码编码文件
-pub fn save_combined_code_output(ctx: &OptContext, assignment: &[u8], dir: &str) {
+/// 简码段文本（2 列 `字<TAB>码`）：镜像评估器出简选择，按级别升序、桶内排序键输出。
+fn 简码段文本(ctx: &OptContext, assignment: &[u8]) -> String {
     let mut out = String::new();
-
-    // 按字频排序（供下方全码部分输出）
-    let n_chars = ctx.char_infos.len();
-    let mut sorted_chars: Vec<usize> = (0..n_chars).collect();
-    sorted_chars.sort_by(|&a, &b| {
-        ctx.char_infos[b]
-            .frequency
-            .cmp(&ctx.char_infos[a].frequency)
-    });
-
-    // 简码部分（需求 23）：镜像评估器出简选择，按分配顺序（级别升序、桶内排序键）输出，
-    // 与被优化方案逐字一致（含 efficiency 模式 / sel_len / 上屏键偏好 / 固定占用扣减 / 跨级排除）。
     let ordered = evaluator_simple_selection(ctx, assignment);
     let n_levels = ctx.simple_config.levels.len();
     let mut per_level: Vec<Vec<(usize, String)>> = vec![Vec::new(); n_levels];
@@ -158,9 +147,21 @@ pub fn save_combined_code_output(ctx: &OptContext, assignment: &[u8], dir: &str)
             out.push_str(&format!("{}\t{}\n", ch, fc.code_str));
         }
     }
+    out
+}
+
+pub fn save_combined_code_output(ctx: &OptContext, assignment: &[u8], dir: &str) {
+    let mut out = 简码段文本(ctx, assignment);
 
     // 全码部分 - 所有字都输出全码（按槽位直取，与单字编码表同口径）
     let 字根表 = 根键位串(ctx, assignment);
+    let n_chars = ctx.char_infos.len();
+    let mut sorted_chars: Vec<usize> = (0..n_chars).collect();
+    sorted_chars.sort_by(|&a, &b| {
+        ctx.char_infos[b]
+            .frequency
+            .cmp(&ctx.char_infos[a].frequency)
+    });
     for &ci in &sorted_chars {
         let ch = ctx.raw_splits[ci].0;
         let (_, roots, _) = &ctx.raw_splits[ci];
@@ -171,6 +172,27 @@ pub fn save_combined_code_output(ctx: &OptContext, assignment: &[u8], dir: &str)
         }
     }
 
+    crate::fsutil::write_with_backup(format!("{}/合并码表.txt", dir), out).unwrap();
+}
+
+/// 合并码表（覆盖全部字）：简码段 + 全量拆分表按星月 encoder 出的全码段。
+///
+/// 全码部分与 `完整码表.txt` 同口径（`rime_convert::单字码`），覆盖全量拆分表里的所有字。
+pub fn save_combined_from_full(
+    ctx: &OptContext,
+    assignment: &[u8],
+    全量: &[(String, Vec<String>, u64)],
+    dir: &str,
+) {
+    let mut out = 简码段文本(ctx, assignment);
+    let 字根表 = 根键位串(ctx, assignment);
+    for (字, 根们, _) in 全量 {
+        if let Ok(code) = crate::rime_convert::单字码(根们, &字根表) {
+            if !code.is_empty() {
+                out.push_str(&format!("{}\t{}\n", 字, code));
+            }
+        }
+    }
     crate::fsutil::write_with_backup(format!("{}/合并码表.txt", dir), out).unwrap();
 }
 
@@ -212,31 +234,6 @@ fn 按槽位取码(
         out.push(ch.to_ascii_lowercase());
     }
     Ok(out)
-}
-
-/// 生成完整码表：每字先出简码（若有），再出全码，格式 `字<TAB>码<TAB>频次`。
-///
-/// 全码按**槽位直取**（与优化器 `CharInfo.parts` 同口径），见 [`按槽位取码`]。
-fn 完整码表文本(ctx: &OptContext, assignment: &[u8]) -> String {
-    let 字根表 = 根键位串(ctx, assignment);
-
-    let mut out = String::with_capacity(ctx.raw_splits.len() * 16);
-
-    // 简码在前
-    for (_, ci, code) in evaluator_simple_selection(ctx, assignment) {
-        let (ch, _, freq) = &ctx.raw_splits[ci];
-        out.push_str(&format!("{}\t{}\t{}\n", ch, code, freq));
-    }
-
-    // 全码（按槽位取码）
-    for (ch, roots, freq) in &ctx.raw_splits {
-        if let Ok(code) = 按槽位取码(roots, &字根表) {
-            if !code.is_empty() {
-                out.push_str(&format!("{}\t{}\t{}\n", ch, code, freq));
-            }
-        }
-    }
-    out
 }
 
 /// 保存简码输出
@@ -405,10 +402,6 @@ pub fn save_thread_results(
     );
     crate::fsutil::write_with_backup(format!("{}/字根键位表.txt", thread_dir), &root_out).unwrap();
 
-    // 保存完整码表：简码在前，全码按星月 encoder 规则算（不是「每根拼一个键」）
-    let code_out = 完整码表文本(ctx, assignment);
-    crate::fsutil::write_with_backup(format!("{}/单字编码表.txt", thread_dir), code_out).unwrap();
-
     save_key_distribution_to_dir(ctx, assignment, &thread_dir);
     save_equiv_distribution_to_dir(ctx, assignment, &thread_dir);
     save_simple_code_output(ctx, assignment, &thread_dir);
@@ -565,17 +558,13 @@ pub fn save_results(
     );
     crate::fsutil::write_with_backup(format!("{}/字根键位表.txt", output_dir), &root_out).unwrap();
 
-    // 保存完整码表：简码在前，全码按星月 encoder 规则算（不是「每根拼一个键」）
-    let code_out = 完整码表文本(ctx, assignment);
-    crate::fsutil::write_with_backup(format!("{}/单字编码表.txt", output_dir), code_out).unwrap();
-
     save_key_distribution_to_dir(ctx, assignment, output_dir);
     save_equiv_distribution_to_dir(ctx, assignment, output_dir);
     save_simple_code_output(ctx, assignment, output_dir);
     save_combined_code_output(ctx, assignment, output_dir);
 
     println!(
-        "结果已保存至 {}/字根键位表.txt, 单字编码表.txt, 简码表.txt, 合并码表.txt 等",
+        "结果已保存至 {}/字根键位表.txt, 简码表.txt, 合并码表.txt 等",
         output_dir
     );
 }
@@ -619,8 +608,8 @@ pub(crate) fn 全量码表文本(
     let mut 简码段 = String::new();
     let mut 简条 = 0usize;
     for (_, ci, code) in evaluator_simple_selection(ctx, assignment) {
-        let (ch, _, freq) = &ctx.raw_splits[ci];
-        简码段.push_str(&format!("{}\t{}\t{}\n", ch, code, freq));
+        let (ch, _, _) = &ctx.raw_splits[ci];
+        简码段.push_str(&format!("{}\t{}\n", ch, code));
         简条 += 1;
     }
 
@@ -629,10 +618,10 @@ pub(crate) fn 全量码表文本(
     let mut 全条 = 0usize;
     let mut 缺根 = 0usize;
     let mut 缺根计数: HashMap<&str, usize> = HashMap::new();
-    for (字, 根们, 频) in 全量拆分 {
+    for (字, 根们, _) in 全量拆分 {
         match crate::rime_convert::单字码(根们, &字根表) {
             Ok(code) if !code.is_empty() => {
-                全码段.push_str(&format!("{}\t{}\t{}\n", 字, code, 频));
+                全码段.push_str(&format!("{}\t{}\n", 字, code));
                 全条 += 1;
             }
             _ => {
@@ -667,7 +656,7 @@ pub(crate) fn 全量码表文本(
     )
 }
 
-/// 保存「全量码表」到 `{output_dir}/完整码表.txt`：格式 `字<TAB>码<TAB>频次`，
+/// 保存「全量码表」到 `{output_dir}/完整码表.txt`：格式 `字<TAB>码`（不带频次列），
 /// **简码段整体在前、全码段整体在后**（顺序见 [`全量码表文本`]）。
 pub fn save_full_code_table(
     ctx: &OptContext,

@@ -110,36 +110,33 @@ fn 下载(目录: &Path, 网址: &str, 名: &str) -> Result<(), String> {
     }
 }
 
-/// 步骤 1：从 `yuhao_charsets.lua` 提取简繁常用字符集 `算码字集.txt`
+/// 内嵌默认算码字集：`assets/算码字集.txt`（8059 字，含 43 个繁体根的代表字）。
 ///
-/// Perl 侧是 `(/\[\[/ .. eof) && /^\p{Han}$/`：从首个含 `[[` 的行起，只保留
-/// 「整行恰好一个汉字」的行，最后 `LC_ALL=C sort -u`。
+/// 方案提供了 `算码字集-<schema>.txt` 时优先用那份，否则一律用本内嵌表，
+/// 不再依赖 `yuhao_charsets.lua`。
+const 内嵌算码字集: &str = include_str!("../../assets/算码字集.txt");
+
+/// 步骤 1：生成算码字符集 `算码字集.txt`
+///
+/// 优先级：方案自带 `算码字集-<schema>.txt` → 内嵌默认字集。
+/// 两种来源都只保留「整行恰好一个汉字」的行。
 pub fn 步骤1_字符集(上: &上下文) -> Result<(), String> {
-    println!("(1) 从 yuhao_charsets.lua 生成简繁常用字符集 算码字集.txt ...");
-    let mut 字表: Vec<String> = Vec::new();
-    let mut 已开始 = false;
-    for 行 in 上.读("yuhao_charsets.lua")? {
-        if !已开始 {
-            if !行.contains("[[") {
-                continue;
-            }
-            已开始 = true;
-        }
-        let mut 字符 = 行.chars();
-        if let (Some(字), None) = (字符.next(), 字符.next()) {
-            if text::是汉字(字) {
-                字表.push(行);
-            }
-        }
-    }
-    字表.sort();
-    字表.dedup();
-    let 输出: String = 字表.iter().map(|s| format!("{s}\n")).collect();
-    上.写(names::算码字集, &输出)?;
     if 上.算码字集 != names::算码字集 {
-        println!("    !!! 使用方案自行提供的算码字集 {} ...", 上.算码字集);
+        println!("(1) 使用方案自行提供的算码字集 {} ...", 上.算码字集);
+        let 行 = 上.读(&上.算码字集)?;
+        let 输出: String = 行.iter().map(|s| format!("{s}\n")).collect();
+        return 上.写(names::算码字集, &输出);
     }
-    Ok(())
+    println!("(1) 使用内嵌默认算码字集 算码字集.txt ...");
+    let 输出: String = 内嵌算码字集
+        .lines()
+        .filter(|l| {
+            let mut 字符 = l.chars();
+            matches!((字符.next(), 字符.next()), (Some(字), None) if text::是汉字(字))
+        })
+        .map(|l| format!("{l}\n"))
+        .collect();
+    上.写(names::算码字集, &输出)
 }
 
 /// 步骤 2：按算码字符集过滤字频表，生成 `算码字频.txt`

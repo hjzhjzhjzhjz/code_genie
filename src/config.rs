@@ -39,7 +39,11 @@ pub struct Config {
 pub struct FilesConfig {
     pub fixed: String,
     pub splits: String,
+    /// 当量表（可选）：留空或省略时用内嵌 `assets/` 默认表。
+    #[serde(default)]
     pub pair_equiv: String,
+    /// 用指分布（可选）：留空或省略时用内嵌默认表。
+    #[serde(default)]
     pub key_dist: String,
     /// 全量拆分表（可选）：优化为了速度通常只用常用字（`splits`），
     /// 但码表要覆盖全部字。配置此项后，收尾会用它另出一份 `完整码表.txt`。
@@ -90,7 +94,6 @@ pub struct SimpleCodeWeights {
     pub dist: f64,
     pub collision_count: f64,
     pub collision_rate: f64,
-
     // ---- 简码评估性能优化新增项（需求 17/18） ----
     /// 简码计算激活进度阈值（默认 0.4）
     #[serde(default = "default_simple_start_progress")]
@@ -182,17 +185,6 @@ pub struct AnnealingConfig {
     pub comfort_slowdown: f64,
     pub swap_probability: f64,
     pub min_improve_steps_ratio: f64,
-    pub perturb_interval_ratio: f64,
-    pub perturb_strength: f64,
-    /// 低温扰动触发阈值：`base_temp < 舒适区温度 × 本比例` 时触发。缺省 0.01。
-    #[serde(default = "default_perturb_trigger_temp_ratio")]
-    pub perturb_trigger_temp_ratio: f64,
-    /// 扰动时临时把温度乘以本倍率（更容易接受上坡）。缺省 2.0。
-    #[serde(default = "default_perturb_temp_multiplier")]
-    pub perturb_temp_multiplier: f64,
-    /// 扰动时优先采样冲突对的上限。缺省 10。
-    #[serde(default = "default_perturb_collision_pairs_limit")]
-    pub perturb_collision_pairs_limit: usize,
     pub reheat_factor: f64,
 
     /// 冲突导向移动的执行概率（0.0~1.0），0.0 表示关闭本特性（默认）
@@ -227,6 +219,17 @@ pub struct AnnealingConfig {
     /// 整键互换（full_key_swap）算子执行概率（0.0~1.0），0 关闭。缺省 0.01。
     #[serde(default = "default_full_key_swap_probability")]
     pub full_key_swap_probability: f64,
+
+    /// 简码零梯度区间跳过维护（默认开启）。
+    ///
+    /// 简码各分项（重码数/重码率/当量/覆盖/分布）在统一目标下全部达标后，简码得分恒为 0，
+    /// 对综合得分没有梯度——此时每步继续增量维护数百个简码桶是纯开销。开启后一旦检测到
+    /// 简码得分为 0 就冻结增量维护；周期对账 `reconcile` 会重算真实简码指标，若重新超标
+    /// 则立即解冻恢复维护。因此最坏情况下简码也会在每个对账周期（默认 5% 步数）纠正一次。
+    ///
+    /// 置 `false` 可回到「全程逐步维护」的旧行为（用于对照实验或排查简码相关回归）。
+    #[serde(default = "default_simple_freeze_enable")]
+    pub simple_freeze_enable: bool,
 }
 
 /// 默认 **关闭**（0.0）：这是新增算子，不应改变未显式开启的用户的搜索轨迹。
@@ -266,17 +269,13 @@ fn default_temp_end() -> f64 {
 fn default_comfort_progress() -> f64 {
     0.5
 }
-fn default_perturb_trigger_temp_ratio() -> f64 {
-    0.01
-}
-fn default_perturb_temp_multiplier() -> f64 {
-    2.0
-}
-fn default_perturb_collision_pairs_limit() -> usize {
-    10
-}
 fn default_full_key_swap_probability() -> f64 {
     0.01
+}
+/// 默认 **开启**：简码全达标后跳过增量维护，只在对账周期校准一次。
+/// 实测（星陈 368 根、5 万步）简码增量占 SA 段 64% 时间，而 75% 进度后简码已零梯度。
+fn default_simple_freeze_enable() -> bool {
+    true
 }
 
 /// 全码目标配置（对应 [targets.full_code] 段）
@@ -404,17 +403,60 @@ pub struct ScaleConfigToml {
 // =========================================================================
 
 impl Config {
-    /// 从指定路径加载配置
+    /// 从指定路径加载配置（支持 `.ron` 与 `.toml`，按扩展名决定先试哪个）
     ///
     /// #1：解析/读取失败不再静默回退默认配置，而是返回 `Err`，由调用方 `exit(1)`。
     /// 这样「配置写错却没生效」不会再被默认值掩盖。
+    ///
+    /// #2：两种格式互为兜底。`optimize` 会把配置备份成 `inputs/config.<源扩展名>`，
+    /// 但历史输出目录里备份件可能叫 `config.ron` 却是 TOML 内容（反过来也一样），
+    /// 所以不能只靠扩展名硬判——先按扩展名试，失败再试另一种，两种都失败才报错。
     pub fn load_from_path(path: &str) -> Result<Self, String> {
         let content =
             fs::read_to_string(path).map_err(|e| format!("无法读取配置文件 {}: {}", path, e))?;
-        let config: Self =
-            ron::from_str(&content).map_err(|e| format!("配置文件解析失败 {}: {}", path, e))?;
-        println!("✅ 已加载配置文件: {}", path);
-        Ok(config)
+        let 优先_toml = std::path::Path::new(path)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("toml"));
+
+        let 先 = |文本: &str| -> Result<Self, String> {
+            if 优先_toml {
+                toml::from_str(文本).map_err(|e| e.to_string())
+            } else {
+                ron::from_str(文本).map_err(|e| e.to_string())
+            }
+        };
+        let 后 = |文本: &str| -> Result<Self, String> {
+            if 优先_toml {
+                ron::from_str(文本).map_err(|e| e.to_string())
+            } else {
+                toml::from_str(文本).map_err(|e| e.to_string())
+            }
+        };
+
+        let (首选名, 备用名) = if 优先_toml {
+            ("TOML", "RON")
+        } else {
+            ("RON", "TOML")
+        };
+        match 先(&content) {
+            Ok(c) => {
+                println!("✅ 已加载配置文件: {}（{}）", path, 首选名);
+                Ok(c)
+            }
+            Err(e1) => match 后(&content) {
+                Ok(c) => {
+                    println!(
+                        "✅ 已加载配置文件: {}（{}，扩展名与实际格式不符）",
+                        path, 备用名
+                    );
+                    Ok(c)
+                }
+                Err(e2) => Err(format!(
+                    "配置文件解析失败 {}\n  按{}解析: {}\n  按{}解析: {}",
+                    path, 首选名, e1, 备用名, e2
+                )),
+            },
+        }
     }
 
     /// 获取简码配置（转换为内部格式）。
@@ -535,11 +577,6 @@ impl Config {
     /// 计算最小改进步数
     pub fn min_improve_steps(&self) -> usize {
         (self.annealing.total_steps as f64 * self.annealing.min_improve_steps_ratio) as usize
-    }
-
-    /// 计算扰动间隔
-    pub fn perturb_interval(&self) -> usize {
-        (self.annealing.total_steps as f64 * self.annealing.perturb_interval_ratio) as usize
     }
 
     /// 获取 TargetsConfig，缺失时返回默认值（全部 disabled）
@@ -829,11 +866,6 @@ impl Default for Config {
                 comfort_slowdown: 0.8,
                 swap_probability: 0.3,
                 min_improve_steps_ratio: 0.1,
-                perturb_interval_ratio: 0.05,
-                perturb_strength: 0.15,
-                perturb_trigger_temp_ratio: default_perturb_trigger_temp_ratio(),
-                perturb_temp_multiplier: default_perturb_temp_multiplier(),
-                perturb_collision_pairs_limit: default_perturb_collision_pairs_limit(),
                 reheat_factor: 1.25,
                 conflict_probability: default_conflict_probability(),
                 conflict_refresh_interval: default_conflict_refresh_interval(),
@@ -842,6 +874,7 @@ impl Default for Config {
                 conflict_key_by_load: default_conflict_key_by_load(),
                 checkpoint_interval_ratio: default_checkpoint_interval_ratio(),
                 full_key_swap_probability: default_full_key_swap_probability(),
+                simple_freeze_enable: default_simple_freeze_enable(),
             },
             simple_levels: vec![
                 SimpleLevelConfig {
@@ -1006,8 +1039,6 @@ comfort_width = 0.15
 comfort_slowdown = 0.8
 swap_probability = 0.3
 min_improve_steps_ratio = 0.1
-perturb_interval_ratio = 0.0
-perturb_strength = 0.0
 reheat_factor = 1.0
 
 [scale]
@@ -1079,8 +1110,6 @@ comfort_width = 0.1
 comfort_slowdown = 0.8
 swap_probability = 0.3
 min_improve_steps_ratio = 0.1
-perturb_interval_ratio = 0.0
-perturb_strength = 0.0
 reheat_factor = 1.0
 "#;
         let cfg: Config = toml::from_str(toml_str).expect("解析失败");
@@ -1132,8 +1161,6 @@ comfort_width = 0.1
 comfort_slowdown = 0.8
 swap_probability = 0.3
 min_improve_steps_ratio = 0.1
-perturb_interval_ratio = 0.0
-perturb_strength = 0.0
 reheat_factor = 1.0
 "#
     }
@@ -1495,5 +1522,40 @@ dist_max = 8.0
             back.weights.full_code.collision_count,
             cfg.weights.full_code.collision_count
         );
+    }
+
+    /// 加载器要认两种格式：`.ron` 走 RON、`.toml` 走 TOML，且同一份配置两种写法
+    /// 解析出来的结构必须逐字段相同（否则「换成 TOML」就成了改配置）。
+    #[test]
+    fn load_from_path_两种格式解析结果一致() {
+        let 基 = Config::default();
+        let ron文本 =
+            ron::ser::to_string_pretty(&基, ron::ser::PrettyConfig::default()).unwrap();
+        let toml文本 = toml::to_string(&基).expect("Config 应能序列化成 TOML");
+
+        let 目录 = std::env::temp_dir().join(format!("cg_cfg_fmt_{}", std::process::id()));
+        std::fs::create_dir_all(&目录).unwrap();
+        let ron路径 = 目录.join("a.ron");
+        let toml路径 = 目录.join("a.toml");
+        std::fs::write(&ron路径, &ron文本).unwrap();
+        std::fs::write(&toml路径, &toml文本).unwrap();
+
+        let 甲 = Config::load_from_path(&ron路径.to_string_lossy()).expect("RON 加载失败");
+        let 乙 = Config::load_from_path(&toml路径.to_string_lossy()).expect("TOML 加载失败");
+        // Config 没实现 PartialEq，用序列化文本比，等价于逐字段比较。
+        assert_eq!(
+            ron::ser::to_string(&甲).unwrap(),
+            ron::ser::to_string(&乙).unwrap(),
+            "RON 与 TOML 两种写法解析出的配置不一致"
+        );
+
+        // 扩展名与实际格式不符时也要能兜底（resume 的备份件曾出现这种情况）。
+        let 错名路径 = 目录.join("b.toml");
+        std::fs::write(&错名路径, &ron文本).unwrap();
+        let 丙 = Config::load_from_path(&错名路径.to_string_lossy())
+            .expect("扩展名与实际格式不符时应兜底成功");
+        assert_eq!(ron::ser::to_string(&丙).unwrap(), ron::ser::to_string(&甲).unwrap());
+
+        let _ = std::fs::remove_dir_all(&目录);
     }
 }

@@ -37,6 +37,46 @@ __FONT_FACE__
     background-color: lightgrey;
   }
 
+  /* 繁体根 / 罕用根：清单来自 繁体字根.txt / 罕用字根.txt，显式标注 */
+  .trad_root {
+    background-color: #ffe6c7;
+  }
+
+  .rare_root {
+    background-color: #e8d5f7;
+  }
+
+  .mark {
+    font-size: 0.5em;
+    font-family: sans-serif;
+    vertical-align: super;
+    margin-left: 1px;
+    font-weight: bold;
+  }
+
+  .mark.trad {
+    color: #d2691e;
+  }
+
+  .mark.rare {
+    color: #8e24aa;
+  }
+
+  #legend {
+    display: none;
+    justify-content: center;
+    gap: 18px;
+    margin: 0 0 12px 0;
+    font-size: medium;
+    align-items: center;
+  }
+
+  #legend .swatch {
+    display: inline-block;
+    padding: 0 5px;
+    border: 1px solid #aaa;
+  }
+
   #listing table {
     font-size: x-large;
     overflow-x: auto;
@@ -178,6 +218,7 @@ Please enable JavaScript to experience the full functionality of our site.
   <div><label for="chaifen">拆分： </label><input type="text" id="chaifen" placeholder="输入文本查询拆分" size="30" autofocus oninput="onChangeChaifen(this.value)"/></div>
   <!--div><label for="practice">练习： </label><input type="text" id="practice"/></div>
   <div><label for="progress">进度： </label><progress id="progress" value="10" max="100"></progress></div-->
+  <div id="d_trad"><input type="checkbox" id="show_trad" onchange="onToggleTrad(this.checked)"/><label for="show_trad">显示繁体/罕用字根</label></div>
   <div id="d_font"><input type="checkbox" id="enable_font" checked onchange="onUpdateFont(this.checked)"/><label for="enable_font">启用字根字体</label></div>
   <div><button onclick="showHelp()">帮助</button></div>
 </div>
@@ -206,6 +247,11 @@ Please enable JavaScript to experience the full functionality of our site.
 <div id="detail">
   <div id="detail_content"></div>
   <button style="margin-left: 20px" onclick="hideDetail()">隐藏</button>
+</div>
+
+<div id="legend">
+  <span><span class="swatch trad_root">繁</span> 繁体字根（只在繁体/生僻字拆分里出现）</span>
+  <span><span class="swatch rare_root">罕</span> 罕用字根（繁体专用集里也几乎不出现）</span>
 </div>
 
 <div id="keyboard"></div>
@@ -240,6 +286,52 @@ function mr(r) {    // map root
   } else {
     return r;
   }
+}
+
+function mk(d) {    // 繁体根 / 罕用根角标（清单标注，优先显示「罕」）
+  if (d.rare_root) {
+    return ' <sup class="mark rare">罕</sup>';
+  }
+  if (d.trad_root) {
+    return ' <sup class="mark trad">繁</sup>';
+  }
+  return "";
+}
+
+function rootClass(d) {   // 繁体根 / 罕用根底色
+  if (d.rare_root) return " rare_root";
+  if (d.trad_root) return " trad_root";
+  return "";
+}
+
+// 是否显示繁体/罕用字根：默认关（用户要求默认不显示）
+var showTrad = false;
+
+function onToggleTrad(v) {
+  showTrad = v;
+  // 图例只在勾选时出现：关掉后页面上没有标记，图例没有意义
+  document.getElementById("legend").style.display =
+    (v && hasMarkedRoots()) ? "flex" : "none";
+  onChangeFreq(page);
+}
+
+// 当前页该根是否展示：关掉开关时隐藏 繁体根（含罕用根）
+function visible(l, c, r) {
+  if (showTrad) return true;
+  const d = chart_json[l][c][r];
+  return !(d.trad_root || d.rare_root);
+}
+
+function hasMarkedRoots() {
+  for (let l in chart_json) {
+    for (let c in chart_json[l]) {
+      for (let r in chart_json[l][c]) {
+        const d = chart_json[l][c][r];
+        if (d.trad_root || d.rare_root) return true;
+      }
+    }
+  }
+  return false;
 }
 
 function createFreqSelectBox() {
@@ -358,7 +450,7 @@ function showDetail(tag) {
   let r = tag.dataset.root;
   let d = chart_json[l][c][r];
 
-  let type = d.traditional ? "(繁)" : "";
+  let type = d.rare_root ? "(罕用根)" : d.trad_root ? "(繁体根)" : (d.traditional ? "(繁)" : "");
   let hot = isHotRoot(r) ? "(前25%)" : "";
 
   let table = `<table><thead><tr>
@@ -410,7 +502,7 @@ function createKeyboard() {
         let codes = Object.keys(chart_json[l]).sort();
 
         for (let c of codes) {
-          let roots = Object.keys(chart_json[l][c]).filter(r => chart_json[l][c][r].freq[page] > 0).sort(
+          let roots = Object.keys(chart_json[l][c]).filter(r => chart_json[l][c][r].freq[page] > 0 && visible(l, c, r)).sort(
                           (a, b) => chart_json[l][c][b].freq[page] - chart_json[l][c][a].freq[page]);
 
           keyboard += `<span id="code_${c}">`;
@@ -420,7 +512,8 @@ function createKeyboard() {
             let clz = "root";
             if (d.traditional) clz += " traditional";
             if (isHotRoot(r)) clz += " hot_root";
-            keyboard +=`<span class="${clz}" data-letter="${l}" data-code="${c}" data-root="${r}" onclick="showDetail(this)">${mr(r)}</span>`;
+            clz += rootClass(d);
+            keyboard +=`<span class="${clz}" data-letter="${l}" data-code="${c}" data-root="${r}" onclick="showDetail(this)">${mr(r)}</span>${mk(d)}`;
           }
           keyboard += '</span>';
 
@@ -457,12 +550,12 @@ function createTable() {
     let codes = Object.keys(chart_json[l]).sort();
     let letter_rowspan = 0;
     for (let c of codes) {
-        letter_rowspan += Object.keys(chart_json[l][c]).filter(r => chart_json[l][c][r].freq[page] > 0).length;
+        letter_rowspan += Object.keys(chart_json[l][c]).filter(r => chart_json[l][c][r].freq[page] > 0 && visible(l, c, r)).length;
     }
     let td_l = `<td rowspan="${letter_rowspan}" class="letter">${l}</td>`;
 
     for (let c of codes) {
-      let roots = Object.keys(chart_json[l][c]).filter(r => chart_json[l][c][r].freq[page] > 0).sort(
+      let roots = Object.keys(chart_json[l][c]).filter(r => chart_json[l][c][r].freq[page] > 0 && visible(l, c, r)).sort(
                    (a, b) => chart_json[l][c][b].freq[page] - chart_json[l][c][a].freq[page]);
 
       let code_rowspan = roots.length;
@@ -475,13 +568,14 @@ function createTable() {
         let clz = d.traditional ? "traditional" : "simplified";
         let clz2 = "";
         if (isHotRoot(r)) clz2 = "hot_root";
+        let clz3 = rootClass(d);
 
         table += `
     <tr>
       <td class="seq ${clz} ${clz2}">${i}</td>
       ${isSingleCharRoot ? "" : td_l}
       ${td_c}
-      <td class="root ${clz} ${clz2}"><ruby>${mr(r)}<rp>(</rp><rt>${d.pinyin}</rt><rp>)</rp></ruby></td>
+      <td class="root ${clz} ${clz2}${clz3}"><ruby>${mr(r)}<rp>(</rp><rt>${d.pinyin}</rt><rp>)</rp></ruby>${mk(d)}</td>
       <td class="rank ${clz} ${clz2}">${rootsRank.get(r)}</td>
       <td class="freq ${clz} ${clz2}">${d.freq[page]} (${d.char_freq})</td>
       <td class="examples ${clz}">${d.examples.join("")}</td>
@@ -504,6 +598,10 @@ function createTable() {
 window.onload = function() {
   if (!roots_mapping) {
     document.getElementById("d_font").style.display = "none";
+  }
+  // 默认不显示繁体/罕用字根：有清单才给开关，图例等勾选后再出
+  if (!hasMarkedRoots()) {
+    document.getElementById("d_trad").style.display = "none";
   }
   document.getElementById("s_freq").innerHTML = createFreqSelectBox();
   onChangeFreq(0);

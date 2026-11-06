@@ -259,6 +259,16 @@ pub struct SimpleEvaluator {
     /// 同阶，**不随候选字总集规模增长**——证明阶段 2 不再做 O(候选字集 × 级数) 的整体重算。
     /// 空交集（无候选归属变化且无首选翻转）移动时为 0。每次 `apply_move_incremental` 复位。
     pub(crate) stage2_visits: usize,
+    /// `reselect_bucket` 复用成员缓冲：把桶成员一次性取出到本地，既避免「逐成员一次桶查找」
+    /// （稀疏后端即每成员一次哈希查找），也让后续分划/遍历不再与桶存储交替借用。
+    reselect_members: Vec<u32>,
+    /// `reselect_bucket` 复用排序键缓冲：`(排序键, 字频, ci)`，与 `reselect_members` 同序。
+    ///
+    /// 分划前一次性算好键，把比较器从「每次比较重算两边键」（含二维数组索引与乘法）
+    /// 降为纯整数比较——这是简码增量里最大的单点开销。
+    reselect_keys: Vec<(i64, u64, u32)>,
+    /// `reselect_bucket` 快路径（名额 ≤ 1）复用缓冲：桶内当前已出简的成员（通常 0/1 个）。
+    reselect_old_sel: Vec<usize>,
 }
 
 impl SimpleEvaluator {
@@ -347,6 +357,9 @@ impl SimpleEvaluator {
             affected_full_buckets: Vec::new(),
             full_rebuild_calls: 0,
             stage2_visits: 0,
+            reselect_members: Vec::new(),
+            reselect_keys: Vec::new(),
+            reselect_old_sel: Vec::new(),
         };
 
         se.rebuild_internal(ctx, assignment, full_buckets, is_first_candidate);
@@ -420,9 +433,25 @@ impl SimpleEvaluator {
     fn is_code_blocked(
         &self,
         ctx: &OptContext,
+        li: usize,
         code: usize,
         full_buckets: &BucketStore<FullBucket>,
     ) -> bool {
+        // 带固定上屏键的级别（本项目只有一简用空格）：实际击键 = 核心码 + 上屏键，比核心码长 1，
+        // 与「核心码同长」的全码不构成同码歧义。而编码是纯数字、不携带长度，单根字（拆分只给
+        // 1 个根、内部全码按 1 位计）的编码恰恰与 1 位一简核心码数值完全相同，于是每个
+        // 「有单根字落座」的键，一简整桶都被误判为「撞全码」而名额归零——实测 5 个单根字
+        // （亍/尢/彳/𠂎/𦣝）导致一简永远只填 20 个键、25 键填不满。这类字按取码规则实际输出
+        // 是 3 键（如 丶=`eee`），与「1 键 + 空格」并不相同，不属于需求 33 要防的同码歧义，
+        // 故带固定上屏键的级别不做数值阻断（与上一条备注「实际击键应为 S+上屏键」同一取向）。
+        if ctx
+            .simple_config
+            .levels
+            .get(li)
+            .is_some_and(|l| l.has_commit())
+        {
+            return false;
+        }
         // 备注（需求 33.10，已知近似）：始终以核心简码桶编码 S（不含上屏键）与受保护全码比较。
         // 当某级 commit_keys 非空时，实际击键码为「S + 上屏键」（比 S 长 1），理论上应以
         // 「S+上屏键」与全码比较才精确；本设计有意保持按 S 判定不变（实现简单、且上屏键使实际
@@ -613,7 +642,7 @@ impl SimpleEvaluator {
                 let code = touched[ti];
                 // 简码占用保护（需求 33）：编码撞受保护全码的桶不出简（名额=0）；
                 // 其候选字 all_assigned_flags 保持 false → 由更高级别（更长简码）继续尝试。
-                let code_num = if self.is_code_blocked(ctx, code, full_buckets) {
+                let code_num = if self.is_code_blocked(ctx, li, code, full_buckets) {
                     0
                 } else {
                     // 退火可出简名额（需求 21.7，方案 A）：每有效简码至多 code_num 字，桶名额
@@ -1002,7 +1031,6 @@ impl SimpleEvaluator {
         } else {
             0.0
         };
-
         // 分布偏差增量结算（需求 29 方向 B）：仅在出简选择可能变化（已取聚合快照）时；
         // presses 不变则只更新被触碰键，presses 变化则退回全量重算。
         if selection_may_change {
@@ -1320,7 +1348,7 @@ impl SimpleEvaluator {
         // 否则取退火可出简名额（需求 21.7，方案 A）：每有效简码至多 code_num 字，桶名额
         // = Σ_{有效上屏键} max(0, code_num−占用)；该口径已含异手过滤（需求 37.5：无可用
         // 上屏键 → 0）与每上屏键占用扣减。
-        let code_num = if self.is_code_blocked(ctx, code, full_buckets) {
+        let code_num = if self.is_code_blocked(ctx, li, code, full_buckets) {
             0
         } else {
             ctx.simple_annealing_slots(li, code)
@@ -1330,30 +1358,114 @@ impl SimpleEvaluator {
         // 按 `cmp_in_bucket` 排序键最优的 code_num 个（严格全序 ⟹ 该集合唯一确定）。
         // 仅 `0 < code_num < len` 时需分划：code_num==0（无人出简）或 code_num>=len（全员出简）
         // 时选中集合与桶内顺序无关，跳过。
-        let len = self.levels[li]
-            .buckets
-            .get(code as u32)
-            .map_or(0, |b| b.members.len());
-        // 桶为空（成员已全部移除）：无可出简，直接返回，且不经 get_mut_or_insert 创建空条目
-        // （否则会破坏稀疏后端「键存在 ⟺ 非空」不变量并泄漏空桶）。
+        // 一次性把桶成员取出到复用缓冲：后续分划与遍历都不再碰桶存储
+        // （原实现遍历时每成员一次 `buckets.get(code)`，稀疏后端即每成员一次哈希查找）。
+        self.reselect_members.clear();
+        match self.levels[li].buckets.get(code as u32) {
+            Some(b) => self.reselect_members.extend_from_slice(&b.members),
+            // 桶为空（成员已全部移除）：无可出简，直接返回，且不经 get_mut_or_insert 创建空条目
+            // （否则会破坏稀疏后端「键存在 ⟺ 非空」不变量并泄漏空桶）。
+            None => return,
+        }
+        let len = self.reselect_members.len();
         if len == 0 {
+            return;
+        }
+        // ===== 快路径：名额 ≤ 1 =====
+        // 每桶至多出简 1 字（星陈三级简码即 `code_num = 1`、单上屏键，名额恒 ∈ {0,1}）。
+        // 此时无需整桶分划排序、也无需遍历整桶做「新选中/落选/保持」三态判断：
+        // 一次线性扫描同时找出「排序键最优成员」与「原已出简成员」，之后至多处理这两个成员。
+        //
+        // 语义与通用路径逐字等价：选中集合仍是排序键最好者（键降序 → 字频降序 → ci 升序，
+        // 严格全序 ⟹ 唯一），其余原出简者一律取消出简。
+        if code_num <= 1 {
+            self.reselect_old_sel.clear();
+            let mut best_pos = 0usize;
+            let mut best_ci = self.reselect_members[0] as usize;
+            let mut best_key = Self::bucket_sort_key(ctx, is_first_candidate, li, best_ci);
+            let mut best_freq = ctx.char_infos[best_ci].frequency;
+            for idx in 0..len {
+                let ci = self.reselect_members[idx] as usize;
+                if self.levels[li].selected[ci] {
+                    self.reselect_old_sel.push(ci);
+                }
+                if idx == 0 {
+                    continue;
+                }
+                let k = Self::bucket_sort_key(ctx, is_first_candidate, li, ci);
+                let f = ctx.char_infos[ci].frequency;
+                let better = k > best_key
+                    || (k == best_key
+                        && (f > best_freq
+                            || (f == best_freq && self.reselect_members[idx] < best_ci as u32)));
+                if better {
+                    best_key = k;
+                    best_freq = f;
+                    best_pos = idx;
+                    best_ci = ci;
+                }
+            }
+            self.stage2_visits += len;
+            // 维持「members[0] 即最优」的不变量（与通用路径分划后的形态一致）。
+            if best_pos != 0 {
+                self.reselect_members.swap(0, best_pos);
+            }
+            if code_num == 1 {
+                // 上屏键只依赖名次，最优者名次恒为 0，故只需算一次。
+                let commit_key = ctx.commit_key_for_rank(li, code, 0);
+                if self.levels[li].selected[best_ci] {
+                    self.refresh_char(ctx, assignment, li, best_ci, commit_key);
+                } else {
+                    self.select_char(ctx, assignment, li, best_ci, commit_key);
+                    self.newly_sel_buf.push(best_ci);
+                }
+            }
+            // 除最优者外的原出简成员一律取消（名额 ≤ 1）。`code_num == 0` 时全部取消。
+            for k in 0..self.reselect_old_sel.len() {
+                let ci = self.reselect_old_sel[k];
+                if code_num == 1 && ci == best_ci {
+                    continue;
+                }
+                if self.levels[li].selected[ci] {
+                    self.deselect_char(ctx, li, ci);
+                    self.newly_desel_buf.push(ci);
+                }
+            }
             return;
         }
         // 局部选择前 code_num（C 优化）：用部分选择取代整桶全排序。
         if code_num > 0 && code_num < len {
-            let members = &mut self.levels[li]
-                .buckets
-                .get_mut(code as u32)
-                .unwrap()
-                .members;
-            members.select_nth_unstable_by(code_num - 1, |&a, &b| {
-                Self::cmp_in_bucket(ctx, is_first_candidate, li, a as usize, b as usize)
-            });
+            // 排序键预计算（本次优化）：每个成员只算一次键，比较器里不再重算。
+            // 原实现在比较器内调 `cmp_in_bucket`，每次比较算两遍 `bucket_sort_key`
+            // （含二维数组索引与 i64 乘法），实测占简码增量总耗时约三成。
+            // 比较语义与 `cmp_in_bucket` 逐字等价：键降序 → 字频降序 → ci 升序（严格全序）。
+            self.reselect_keys.clear();
+            for &ci32 in &self.reselect_members {
+                let ci = ci32 as usize;
+                self.reselect_keys.push((
+                    Self::bucket_sort_key(ctx, is_first_candidate, li, ci),
+                    ctx.char_infos[ci].frequency,
+                    ci32,
+                ));
+            }
+            self.reselect_keys
+                .select_nth_unstable_by(code_num - 1, |a, b| {
+                    b.0.cmp(&a.0)
+                        .then_with(|| b.1.cmp(&a.1))
+                        .then_with(|| a.2.cmp(&b.2))
+                });
+            for (i, e) in self.reselect_keys.iter().enumerate() {
+                self.reselect_members[i] = e.2;
+            }
+            // 写回桶成员顺序：分划后前 `code_num` 个即「应出简」集合（不变量）。
+            if let Some(b) = self.levels[li].buckets.get_mut(code as u32) {
+                b.members.copy_from_slice(&self.reselect_members);
+            }
         }
         // 北极星计数：脏桶局部重排访问的成员数（与桶规模同阶，非候选字总集）。
         self.stage2_visits += len;
         for idx in 0..len {
-            let ci = self.levels[li].buckets.get(code as u32).unwrap().members[idx] as usize;
+            let ci = self.reselect_members[idx] as usize;
             let now_sel = idx < code_num;
             let was_sel = self.levels[li].selected[ci];
             // 退火出简字按名次取上屏键（需求 36.3/36.4）：仅对选中者计算（O(1)）。
@@ -2022,6 +2134,15 @@ pub struct Evaluator {
     pub full_score_dirty: bool,
     /// 简码计算是否已激活（需求 8）。未激活时简码分量对综合得分贡献恒为 0（需求 10.2）。
     pub simple_active: bool,
+    /// 简码零梯度冻结标志：简码各分项全部达标（简码得分为 0）后暂停增量维护。
+    ///
+    /// 冻结期间 `has_simple_impact` 恒为 false，`try_move`/`try_swap`/`try_full_key_swap`
+    /// 不再调用 `apply_simple_for_move`，省去每次移动重选数百个简码桶的开销；简码得分
+    /// 保持缓存值（0），对综合得分的贡献不变（本来就是 0）。
+    ///
+    /// 冻结后简码状态与 assignment 脱节，只能由周期对账 `reconcile`（全量重建）纠正：
+    /// 对账会保留本标志，随后由退火主循环检查真实得分，一旦重新超标立即解冻恢复维护。
+    pub simple_frozen: bool,
     /// 当前有效简码权重（需求 9/10）。未激活时为 0；激活后由退火主循环按权重曲线维护。
     pub current_simple_weight: f64,
 
@@ -2225,6 +2346,7 @@ impl Evaluator {
             cached_full_score: 0.0,
             full_score_dirty: true,
             simple_active,
+            simple_frozen: false,
             current_simple_weight,
             simple_eval,
             full_rebuild_calls: 0,
@@ -2912,7 +3034,31 @@ impl Evaluator {
         if !ctx.enable_simple_code || self.simple_eval.is_none() || !self.simple_active {
             return false;
         }
+        // 零梯度冻结期（简码各分项全部达标、得分为 0）：维护与否不影响目标函数，
+        // 直接跳过增量维护，省去每步重选数百个简码桶的开销。
+        if self.simple_frozen {
+            return false;
+        }
         !ctx.group_to_simple_affected[group].is_empty()
+    }
+
+    /// 冻结简码增量维护（简码零梯度区间跳过维护）。
+    ///
+    /// 仅当简码各分项得分全部达标（`get_simple_score(ctx) == 0`）时调用：此时简码对综合
+    /// 得分无任何梯度，继续每步维护数百个简码桶纯属浪费。冻结后简码指标停留在冻结时刻，
+    /// 由周期对账 `reconcile` 负责重新校准（对账会保留本标志）。
+    pub fn freeze_simple(&mut self) {
+        if self.simple_active {
+            self.simple_frozen = true;
+        }
+    }
+
+    /// 解除简码冻结，恢复逐步增量维护。
+    ///
+    /// **调用前提**：简码状态已反映当前 `assignment`（即刚执行过 `reconcile`/全量重建）。
+    /// 若在状态陈旧时解冻，随后的增量会基于过期快照计算，结果不可信。
+    pub fn resume_simple(&mut self) {
+        self.simple_frozen = false;
     }
 
     /// 重建简码评估
@@ -2983,6 +3129,10 @@ impl Evaluator {
     /// 由任务 9/10 完成；此处提供可调用入口并保证与全量重建结果一致。
     pub fn apply_simple_for_move(&mut self, ctx: &OptContext, assignment: &[u8], groups: &[usize]) {
         if self.simple_eval.is_none() {
+            return;
+        }
+        // 零梯度冻结期：不做增量维护（双保险，正常路径已被 has_simple_impact 拦住）。
+        if self.simple_frozen {
             return;
         }
 
@@ -3151,6 +3301,9 @@ impl Evaluator {
         // 保留激活状态与有效简码权重（这两项是退火过程的时变量，不属于全量重算范畴）
         fresh.simple_active = active;
         fresh.current_simple_weight = weight;
+        // 保留零梯度冻结标志：对账只重建状态，不改变「是否跳过维护」的决策
+        // （是否解冻由退火主循环据对账后的真实简码得分判定）。
+        fresh.simple_frozen = self.simple_frozen;
         // 携带全量重建观测计数（reconcile 自身不计数：它走 Evaluator::new，不经
         // rebuild_simple / full_rebuild 入口，是需求 15 认可的周期性全量）。
         fresh.full_rebuild_calls = prev_ev_calls;
@@ -4185,7 +4338,22 @@ mod bucket_selection_tests {
     ///
     /// - `simple_protect_top_n == 0`（保护全部）：等价于「全码桶 `full_code_to_chars[code]` 非空」。
     /// - `simple_protect_top_n > 0`：等价于「某受保护汉字（`simple_is_topn`）全码 == code」。
-    fn oracle_is_blocked(ctx: &OptContext, full_code_to_chars: &[Vec<usize>], code: usize) -> bool {
+    fn oracle_is_blocked(
+        ctx: &OptContext,
+        li: usize,
+        full_code_to_chars: &[Vec<usize>],
+        code: usize,
+    ) -> bool {
+        // 带固定上屏键的级别不做数值阻断：实际击键 = 核心码 + 上屏键，与核心码同长的全码不构成同码。
+        // （详见产线 `is_code_blocked` 的说明：单根字的 1 位内部全码会误封一简整桶。）
+        if ctx
+            .simple_config
+            .levels
+            .get(li)
+            .is_some_and(|l| l.has_commit())
+        {
+            return false;
+        }
         if ctx.simple_protect_top_n == 0 {
             code < full_code_to_chars.len() && !full_code_to_chars[code].is_empty()
         } else {
@@ -4245,7 +4413,7 @@ mod bucket_selection_tests {
             // 简码占用保护（需求 33）：被阻断的编码名额=0，桶内字不出简、不跨级排除。
             let mut selected: HashMap<usize, Vec<usize>> = HashMap::new();
             for (&code, members) in buckets.iter() {
-                let eff_code_num = if oracle_is_blocked(ctx, &full_code_to_chars, code) {
+                let eff_code_num = if oracle_is_blocked(ctx, li, &full_code_to_chars, code) {
                     0
                 } else {
                     code_num

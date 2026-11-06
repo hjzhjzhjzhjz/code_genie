@@ -108,23 +108,38 @@ pub fn 加载(路径: Option<&Path>) -> Result<Vec<簇>, String> {
 mod tests {
     use super::*;
 
+    /// 数据快照：改 `assets/roots_cluster.ron` 后这里会失败，属预期提醒——
+    /// 确认新数据无误，就把下面两个数字改成实测值即可。
     #[test]
     fn 内嵌表簇数与字根数符合预期() {
         let 簇们 = 内嵌().unwrap();
-        assert_eq!(簇们.len(), 92, "原 roots-cluster.txt 是 92 簇");
+        assert_eq!(簇们.len(), 86, "当前 roots_cluster.ron 是 86 簇");
         let 根数: usize = 簇们.iter().map(|c| c.roots.len()).sum();
-        assert_eq!(根数, 257, "原文件共 257 个字根；改数据时同步这条断言");
+        assert_eq!(根数, 235, "当前文件共 235 个字根；改数据时同步这条断言");
+        // 现表全部按字根频率分档取键，没有写死的键位；
+        // 若将来特意把某簇钉到某个键上（`("一", "f")` 那种写法），把这条放宽即可。
+        assert!(
+            簇们.iter().all(|c| c.keys.is_empty()),
+            "内嵌表已全部分档取键，不应出现写死的键位：{:?}",
+            簇们
+                .iter()
+                .filter(|c| !c.keys.is_empty())
+                .map(|c| (&c.roots, &c.keys))
+                .collect::<Vec<_>>()
+        );
     }
 
+    /// 钉键写法 `("一", "f")` 仍要能解析——`prepare` 第 8 步遇到非空 keys 会直接用，
+    /// 所以即使当前数据表不钉键，这条代码路径也得有覆盖。
     #[test]
-    fn 一被钉在f键() {
-        let 簇们 = 内嵌().unwrap();
-        let 一 = 簇们
-            .iter()
-            .find(|c| c.roots.iter().any(|r| r == "一"))
-            .expect("聚类表里应有「一」");
-        assert_eq!(一.keys, "f");
-        assert_eq!(一.roots, ["一"]);
+    fn 钉键条目解析为固定键位() {
+        let 簇们 = 解析(r#"(clusters: [("一", "f"), "ス マ"])"#, "测试").unwrap();
+        assert_eq!(簇们.len(), 2);
+        assert_eq!(簇们[0].roots, ["一"]);
+        assert_eq!(簇们[0].keys, "f");
+        // 只给字根的那种写法，keys 落空 → 由 prepare 按频率分档
+        assert_eq!(簇们[1].roots, ["ス", "マ"]);
+        assert!(簇们[1].keys.is_empty());
     }
 
     #[test]

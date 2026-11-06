@@ -198,7 +198,7 @@ fn 删首个非韵母(码: &str) -> String {
 }
 
 /// `s/^./$consonant/`：把首字符换成 `OPTIMIZE_KEY_<首字符>`
-fn 按优化键重映射(码: String, 方案: &方案) -> String {
+pub(crate) fn 按优化键重映射(码: String, 方案: &方案) -> String {
     let Some(首) = 码.chars().next() else {
         return 码;
     };
@@ -212,7 +212,7 @@ fn 按优化键重映射(码: String, 方案: &方案) -> String {
 }
 
 /// 声母 + 韵腹：`/^([^aeuio]).*?(?:[iu])?([aeuio])/`
-fn 声韵(拼音: &str) -> Option<(char, char)> {
+pub(crate) fn 声韵(拼音: &str) -> Option<(char, char)> {
     let mut 字符 = 拼音.chars();
     let 声母 = 字符.next()?;
     if "aeuio".contains(声母) {
@@ -232,7 +232,7 @@ fn 声韵(拼音: &str) -> Option<(char, char)> {
 }
 
 /// NFKD + 去 `\p{M}`：pinyin 数据里只会出现带调元音，逐个映射即可
-fn 去调(拼音: &str) -> String {
+pub(crate) fn 去调(拼音: &str) -> String {
     拼音
         .chars()
         .filter_map(|c| {
@@ -255,7 +255,7 @@ fn 去调(拼音: &str) -> String {
 }
 
 /// 脚本里的 `%fixes` 硬编码表：数据错误的字根读音人工归并
-fn 修正表(根: &str, 方案: &方案) -> Option<&'static str> {
+pub(crate) fn 修正表(根: &str, 方案: &方案) -> Option<&'static str> {
     Some(match 根 {
         "冫" | "⺀" | "{飞右}" => "0e", // bi / o，与「二」归并
         "屮" => "ca",                   // ce，取 cao
