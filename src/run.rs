@@ -13,7 +13,7 @@
 //      不是纯粹留档；
 //   4. 落日志 `<OUT>/optimize-<时间戳>.log`：环境变量、git 版本、两条子命令的
 //      完整输出；
-//   5. 收尾把 `summary.txt` 打出来（`optimize` 只写文件、不打印表格）。
+//   5. 收尾把 `汇总.txt` 打出来（`optimize` 只写文件、不打印表格）。
 //
 // 与原脚本的差异：
 //
@@ -179,8 +179,8 @@ pub fn run(参: &参数) -> Result<(), String> {
         chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
     ));
 
-    // `optimize` 只把汇总写进 summary.txt，不打印表格，这里替它打出来
-    let 汇总 = 输出路径.join("summary.txt");
+    // `optimize` 只把汇总写进 汇总.txt，不打印表格，这里替它打出来
+    let 汇总 = 输出路径.join("汇总.txt");
     if 汇总.is_file() {
         let 文本 = std::fs::read_to_string(&汇总)
             .map_err(|e| format!("读 {} 失败：{e}", 汇总.display()))?;

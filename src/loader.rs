@@ -61,7 +61,11 @@ pub fn load_splits(path: &str) -> Result<Vec<(char, Vec<String>, u64)>, String> 
     let content =
         fs::read_to_string(path).map_err(|e| format!("无法读取拆分表 {}: {}", path, e))?;
     let mut res = Vec::new();
-    for line in content.lines() {
+    // 频次列解析失败时静默按 1 计，会把当量/重码率/分布的加权整体拉平，且屏幕上毫无迹象；
+    // 这里统一收集后告警（逐行打会把十万行的表刷满屏，只留前几个样例 + 总数）。
+    let mut 频次异常行数 = 0usize;
+    let mut 频次异常样例: Vec<(usize, String)> = Vec::new();
+    for (行号, line) in content.lines().enumerate() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
@@ -74,13 +78,38 @@ pub fn load_splits(path: &str) -> Result<Vec<(char, Vec<String>, u64)>, String> 
                 None => continue,
             };
             let roots: Vec<String> = parts[1].split_whitespace().map(|s| s.to_string()).collect();
-            let freq: u64 = if parts.len() >= 3 {
-                parts[2].trim().parse().unwrap_or(1)
-            } else {
-                1
+            // 第三列可省略（默认 1）；给了但解析不了才告警。
+            let freq: u64 = match parts.get(2).map(|s| s.trim()) {
+                None | Some("") => 1,
+                Some(原文) => match 原文.parse::<u64>() {
+                    Ok(v) => v,
+                    // 容忍 `1234.0` 这类浮点/带小数的字频写法（字频表常带小数点）
+                    Err(_) => match 原文.parse::<f64>() {
+                        Ok(f) if f.is_finite() && f >= 0.0 => f as u64,
+                        _ => {
+                            频次异常行数 += 1;
+                            if 频次异常样例.len() < 5 {
+                                频次异常样例.push((行号 + 1, 原文.to_string()));
+                            }
+                            1
+                        }
+                    },
+                },
             };
             res.push((ch, roots, freq));
         }
+    }
+    if 频次异常行数 > 0 {
+        let 样例: Vec<String> = 频次异常样例
+            .iter()
+            .map(|(号, 原)| format!("第{号}行「{原}」"))
+            .collect();
+        eprintln!(
+            "⚠️ 拆分表 {} 有 {频次异常行数} 行频次无法解析，已按 1 计（样例：{}）。\
+             若是「1,234」或带单位写法，请改成纯数字，否则当量/重码加权会失真。",
+            path,
+            样例.join("、")
+        );
     }
     Ok(res)
 }
@@ -591,5 +620,32 @@ mod 内嵌用指分布_tests {
     fn 缺失文件回落内嵌() {
         let cfg = load_key_distribution("不存在的路径/用指分布.txt").unwrap();
         assert!(cfg.iter().any(|c| c.target_rate != 0.0));
+    }
+}
+
+#[cfg(test)]
+mod splits_freq_tests {
+    use super::*;
+
+    fn 临时拆分表(内容: &str) -> std::path::PathBuf {
+        let 目录 = std::env::temp_dir().join(format!("cg_splits_{}", std::process::id()));
+        std::fs::create_dir_all(&目录).unwrap();
+        let 路径 = 目录.join("splits.txt");
+        std::fs::write(&路径, 内容).unwrap();
+        路径
+    }
+
+    /// 频次列：纯整数、浮点写法、带千分位、缺列。
+    /// 浮点要能正确取整（字频表常带小数点）；真解析不了才回落 1 并告警，
+    /// 不能像原来那样一律静默按 1 计。
+    #[test]
+    fn 频次支持浮点且异常值不再静默() {
+        let 路径 = 临时拆分表("一\ta b\t1234.0\n二\tc d\n三\te f\t1,234\n四\tg h\t37\n");
+        let 行 = load_splits(路径.to_str().unwrap()).unwrap();
+        assert_eq!(行.len(), 4);
+        assert_eq!(行[0].2, 1234, "浮点字频应取整，而不是回落 1");
+        assert_eq!(行[1].2, 1, "缺第三列按 1（原有约定）");
+        assert_eq!(行[2].2, 1, "无法解析的频次按 1，但会告警");
+        assert_eq!(行[3].2, 37);
     }
 }

@@ -741,12 +741,17 @@ fn main() {
         return;
     }
 
-    // 加载配置（#1：解析失败直接报错退出，不再静默回退默认配置）
-    let cfg = match Config::load_from_path(&cli.config) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("❌ {}", e);
-            std::process::exit(1);
+    // 配置**按需**加载（#1：解析失败直接报错退出，不再静默回退默认配置）。
+    // 只有 encode / evaluate / optimize 需要主配置的缺省值；resume 读 `<dir>/inputs/` 里
+    // 的备份配置，export-table / chart / assess 等只用命令行参数，若一律在分派前加载，
+    // 在没放 config.ron 的目录里就会被一句「无法读取配置文件」直接拦掉。
+    let 载入配置 = || -> Config {
+        match Config::load_from_path(&cli.config) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("❌ {}", e);
+                std::process::exit(1);
+            }
         }
     };
 
@@ -756,6 +761,7 @@ fn main() {
             keymap,
             output,
         }) => {
+            let cfg = 载入配置();
             let division_path = division.as_deref().unwrap_or(&cfg.files.splits);
             run_encode(division_path, &keymap, &output);
         }
@@ -767,6 +773,7 @@ fn main() {
             simple,
             output,
         }) => {
+            let cfg = 载入配置();
             let division_path = division.as_deref().unwrap_or(&cfg.files.splits);
             let keydist_path = keydist.as_deref().unwrap_or(&cfg.files.key_dist);
             let equiv_path = equiv.as_deref().unwrap_or(&cfg.files.pair_equiv);
@@ -962,21 +969,27 @@ fn main() {
             seed_dir,
             seed_keymap,
             scale,
-        }) => run_optimize(
-            &cfg,
-            &cli.config,
-            output_dir,
-            seed_dir,
-            seed_keymap,
-            scale,
-            &停止标志(),
-        ),
+        }) => {
+            let cfg = 载入配置();
+            run_optimize(
+                &cfg,
+                &cli.config,
+                output_dir,
+                seed_dir,
+                seed_keymap,
+                scale,
+                &停止标志(),
+            )
+        }
         // prepare 在加载配置之前就已返回，这里只是让 match 完备
         Some(Commands::Prepare { .. }) => unreachable!("prepare 已在加载配置前处理"),
         Some(Commands::Clusters { .. }) => unreachable!("clusters 已在加载配置前处理"),
         Some(Commands::Zigen { .. }) => unreachable!("zigen 已在加载配置前处理"),
         Some(Commands::Run { .. }) => unreachable!("run 已在加载配置前处理"),
-        None => run_optimize(&cfg, &cli.config, None, None, None, None, &停止标志()),
+        None => {
+            let cfg = 载入配置();
+            run_optimize(&cfg, &cli.config, None, None, None, None, &停止标志())
+        }
     }
 }
 

@@ -592,7 +592,8 @@ pub struct 全量码表统计 {
 ///
 /// 优化为了速度通常只喂常用字（`files.splits`），而码表要覆盖全部字（如 12 万字）。
 /// 这里用优化得到的键位（`assignment`）对全量拆分重新编码：简码仍取优化结果
-/// （只覆盖被优化过的字），全码覆盖全量。
+/// （只覆盖被优化过的字），外加配置里的固定简码（不参与优化，但要与 `合并码表.txt`
+/// 口径一致，否则两份码表会静默分歧），全码覆盖全量。
 ///
 /// 「简码在前」是**结构性保证**而非书写顺序：两段各写各的缓冲，末尾显式拼接，
 /// 因此任何单段内部的改动都不可能把简码行插到全码段之后。见
@@ -605,12 +606,38 @@ pub(crate) fn 全量码表文本(
     let 字根表 = 根键位串(ctx, assignment);
 
     // —— 第一段：简码（按级别升序 → 级内简码桶升序 → 桶内选择排序键，短码自然在前）——
+    // 固定简码不进候选集，必须在这里按所属级别补上，否则 `完整码表.txt` 会比同轮的
+    // `合并码表.txt` / `简码表.txt` 少一批简码行（口径不一致，测评会低估覆盖率）。
     let mut 简码段 = String::new();
     let mut 简条 = 0usize;
-    for (_, ci, code) in evaluator_simple_selection(ctx, assignment) {
-        let (ch, _, _) = &ctx.raw_splits[ci];
-        简码段.push_str(&format!("{}\t{}\n", ch, code));
-        简条 += 1;
+    let n_levels = ctx.simple_config.levels.len();
+    let mut 每级: Vec<Vec<(usize, String)>> = vec![Vec::new(); n_levels];
+    for (li, ci, code) in evaluator_simple_selection(ctx, assignment) {
+        if let Some(层) = 每级.get_mut(li) {
+            层.push((ci, code));
+        }
+    }
+    for li in 0..n_levels {
+        for (ci, code) in &每级[li] {
+            let (ch, _, _) = &ctx.raw_splits[*ci];
+            简码段.push_str(&format!("{}\t{}\n", ch, code));
+            简条 += 1;
+        }
+        for fc in &ctx.simple_fixed_codes {
+            if fc.li == Some(li) {
+                let (ch, _, _) = &ctx.raw_splits[fc.ci];
+                简码段.push_str(&format!("{}\t{}\n", ch, fc.code_str));
+                简条 += 1;
+            }
+        }
+    }
+    // 无归属级别的固定简码（仍输出、仍排除候选，只是不占上屏名额）
+    for fc in &ctx.simple_fixed_codes {
+        if fc.li.is_none() {
+            let (ch, _, _) = &ctx.raw_splits[fc.ci];
+            简码段.push_str(&format!("{}\t{}\n", ch, fc.code_str));
+            简条 += 1;
+        }
     }
 
     // —— 第二段：全码（覆盖全量拆分）——
@@ -1098,5 +1125,41 @@ mod full_code_table_order_tests {
             "缺失字根应按涉及字数聚合"
         );
         assert!(!文本.contains("囧\t"), "缺根的字不应写进码表");
+    }
+
+    /// 固定简码不在优化出简里，但必须进简码段——否则同轮生成的
+    /// `完整码表.txt` 会比 `合并码表.txt` / `简码表.txt` 少一批简码行。
+    #[test]
+    fn 固定简码也写入简码段() {
+        // 固定「一」(ci=0) 为 "a"（键 0，占该桶 1 个名额）
+        let fixed = vec![('\u{4e00}', "a".to_string())];
+        let ctx = make_ctx(&[100, 90, 80, 70], 2, &fixed);
+        let asg = vec![0u8; ctx.num_groups];
+
+        let 优化选择 = evaluator_simple_selection(&ctx, &asg);
+        assert!(
+            !优化选择.iter().any(|(_, ci, _)| *ci == 0),
+            "固定字不应出现在优化出简中"
+        );
+
+        let (文本, 统计) = 全量码表文本(&ctx, &asg, &全量拆分(&ctx));
+        assert_eq!(
+            统计.简码条数,
+            优化选择.len() + 1,
+            "统计的简码条数应把固定简码算进去"
+        );
+
+        let 固定行 = format!("{}\t{}", '\u{4e00}', "a");
+        let 行们: Vec<&str> = 文本.lines().collect();
+        let 简码段 = &行们[..统计.简码条数];
+        assert!(
+            简码段.contains(&固定行.as_str()),
+            "固定简码 `{固定行}` 应在简码段内，实际简码段: {简码段:?}"
+        );
+        // 简码段之后才是全码段，固定行不能跑到全码段里
+        assert!(
+            !行们[统计.简码条数..].contains(&固定行.as_str()),
+            "固定简码不应落到全码段"
+        );
     }
 }

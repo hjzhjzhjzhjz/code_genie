@@ -17,7 +17,8 @@ use crate::context::OptContext;
 use crate::evaluator::Evaluator;
 use crate::schedule::TemperatureSchedule;
 use crate::types::{
-    char_to_key_index, Metrics, SimpleMetrics, EQUIV_TABLE_SIZE, GROUP_MARKER, KEY_SPACE,
+    char_to_key_index, Metrics, SimpleMetrics, EQUIV_TABLE_SIZE, GROUP_MARKER, KEY_INDEX_SPACE,
+    KEY_SPACE,
 };
 
 /// 退火主循环结果（可续算变体返回）。
@@ -217,8 +218,10 @@ fn frequency_greedy_init(ctx: &OptContext, rng: &mut impl Rng) -> Vec<u8> {
         .collect();
     group_info.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
-    let mut key_freq_load = vec![0.0f64; KEY_SPACE];
-    let mut key_group_count = vec![0usize; KEY_SPACE];
+    // 按键位索引寻址，长度必须是键位索引空间（31），不能是 KEY_SPACE（26，仅空格键索引）：
+    // 允许键含 `_ ; , . /` 时索引可达 30。
+    let mut key_freq_load = vec![0.0f64; KEY_INDEX_SPACE];
+    let mut key_group_count = vec![0usize; KEY_INDEX_SPACE];
 
     for &(gi, weight) in &group_info {
         let allowed = &ctx.groups[gi].allowed_keys;
@@ -254,7 +257,7 @@ fn spread_greedy_init(ctx: &OptContext, rng: &mut impl Rng) -> Vec<u8> {
     let mut order: Vec<usize> = (0..n).collect();
     order.shuffle(rng);
 
-    let mut key_last_used = vec![0usize; KEY_SPACE];
+    let mut key_last_used = vec![0usize; KEY_INDEX_SPACE];
 
     for (step, &gi) in order.iter().enumerate() {
         let allowed = &ctx.groups[gi].allowed_keys;
@@ -669,6 +672,10 @@ fn pick_key_by_headroom(
             } else {
                 headroom
             };
+            // 定长数组防越界：允许键若含重复项（约束文件手写重复列）会超过键位索引空间。
+            if n >= KEY_INDEX_SPACE {
+                break;
+            }
             keys[n] = k;
             weights[n] = weight;
             total += weight;
@@ -682,6 +689,9 @@ fn pick_key_by_headroom(
         let mut m = 0usize;
         for &k in allowed {
             if k != current_key {
+                if m >= KEY_INDEX_SPACE {
+                    break;
+                }
                 others[m] = k;
                 m += 1;
             }
@@ -1521,12 +1531,27 @@ pub fn simulated_annealing_resumable(
 
     // 初始化或从检查点恢复（需求 11.1）。
     // - fresh：multi_start_init 起步，SA 起始用 new_full_only（简码延迟激活，激活前不构建/维护简码）。
-    // - resume：用检查点 assignment 重建评估器（Evaluator::new 急切构建简码），从 current_step 续算。
+    // - resume：用检查点 assignment 重建评估器，从 current_step 续算。
+    //
+    // 简码是否启用（启用时延迟到进度阈值后再激活，早期探索阶段简码不贡献）。
+    // 提前到这里，是为了在重建评估器时决定「要不要急切构建简码」。
+    let simple_enabled = ctx.enable_simple_code && !ctx.simple_config.levels.is_empty();
+
     let mut evaluator;
     if let Some(tc) = resume {
         assignment = tc.assignment.clone();
         start_step = tc.current_step;
-        evaluator = Evaluator::new(ctx, &assignment);
+        // resume 时必须区分两种情形，否则简码状态会永久陈旧：
+        // - 检查点已激活简码：用 `new` 急切构建，简码桶即续算点的真实状态；
+        // - 尚未激活：必须用 `new_full_only`。激活前的移动不维护简码（`has_simple_impact`
+        //   在 `!simple_active` 时短路），此刻构建出的简码桶会立刻与 assignment 脱节；
+        //   而 `activate_simple` 只在 `simple_eval.is_none()` 时才重建，若这里先建了，
+        //   激活时会沿用续算点的旧快照，简码得分/重码一直漂到下一个对账点。
+        evaluator = if simple_enabled && !tc.simple_activated {
+            Evaluator::new_full_only(ctx, &assignment)
+        } else {
+            Evaluator::new(ctx, &assignment)
+        };
     } else {
         // fresh：seed 存在则用种子作为初始解（从既有结果播种），否则 multi_start_init。
         // 两种情形均走 fresh 路径：起始步 0、new_full_only（简码延迟激活）。
@@ -1539,8 +1564,6 @@ pub fn simulated_annealing_resumable(
     }
 
     // === 简码延迟激活与权重渐进曲线配置（任务 10.1，需求 8/9/12/13/15）===
-    // 简码是否启用（启用时延迟到进度阈值后再激活，早期探索阶段简码不贡献）。
-    let simple_enabled = ctx.enable_simple_code && !ctx.simple_config.levels.is_empty();
     // 钳制激活/渐进配置并取得硬激活标记。`validate_simple_activation` 需 `&mut self`，
     // 而本函数仅持有 `&Config`，故克隆一份 cfg 调用校验，不修改入参（最小改动）。
     let (p_start, p_ramp, hard_activate, simple_reheat) = {

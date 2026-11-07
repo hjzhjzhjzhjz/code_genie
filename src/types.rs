@@ -6,10 +6,20 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-/// 键位空间大小（a-z + _ + ; + , + . + /）
+/// 空格键的键位索引（`_`）。注意它只是**一个键的索引**，不是键位数组的长度。
 pub const KEY_SPACE: usize = 26;
-/// 当量表大小
-pub const EQUIV_TABLE_SIZE: usize = 31;
+/// 键位索引空间：`char_to_key_index` 的最大返回值 + 1（a-z 共 26 个，外加 `_ ; , . /` 5 个）。
+///
+/// 凡「按键位索引寻址」的数组都必须用这个长度。用 [`KEY_SPACE`] 当长度是历史遗留写法：
+/// 允许键里一旦出现标点键，`k as usize` 会取到 26..=30，直接越界 panic
+/// （release 配置 `panic = "abort"`，整轮退火无 checkpoint 直接终止）。
+pub const KEY_INDEX_SPACE: usize = 31;
+/// 当量表大小（与键位索引空间同宽：每个键都可能出现在末位转移里）
+pub const EQUIV_TABLE_SIZE: usize = KEY_INDEX_SPACE;
+
+// 编译期不变量：键位索引空间必须比空格键索引大（还要容纳 `; , . /`），当量表与之同宽。
+const _: () = assert!(KEY_SPACE < KEY_INDEX_SPACE);
+const _: () = assert!(EQUIV_TABLE_SIZE == KEY_INDEX_SPACE);
 /// 分组标记起始值
 pub const GROUP_MARKER: u16 = 1000;
 
@@ -732,5 +742,24 @@ mod commit_pref_tests {
         assert_eq!(last_left, vec![k('j'), k('k'), k('f'), k('d')]);
         // 末键右手 → 左在前：[f,d,j,k]
         assert_eq!(last_right, vec![k('f'), k('d'), k('j'), k('k')]);
+    }
+}
+
+#[cfg(test)]
+mod key_index_tests {
+    use super::*;
+
+    /// 键位索引空间必须覆盖所有合法键：`KEY_SPACE`(26) 只是空格键的索引，
+    /// 拿它当数组长度会让 `_ ; , . /`（26..=30）越界。
+    #[test]
+    fn 标点键索引落在键位空间内() {
+        for c in ['a', 'm', 'z', '_', ';', ',', '.', '/'] {
+            let i = char_to_key_index(c).expect("应为合法键");
+            assert!(
+                i < KEY_INDEX_SPACE,
+                "键 '{c}' 的索引 {i} 超出 KEY_INDEX_SPACE={KEY_INDEX_SPACE}"
+            );
+        }
+        assert_eq!(char_to_key_index('/'), Some(KEY_INDEX_SPACE - 1));
     }
 }

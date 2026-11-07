@@ -477,21 +477,71 @@ pub fn 步骤13_简码码位(上: &上下文, 配置: Option<&Path>) -> Result<(
     Ok(())
 }
 
-/// `sed -ne '/^\s*\[weights.simple_code\]/,/^\s*\[/p' | grep -qi '^\s*enabled\s*=\s*true'`
+/// 判定配置里是否开启简码。
+///
+/// 优先用正式配置解析器（`Config::load_from_path` 同时支持 RON 与 TOML，且与 optimize
+/// 的开关判定完全同源）——历史实现只认 TOML 的 `[weights.simple_code]` 段头，RON 配置
+/// （默认格式）下会静默判定为「未开启」，步骤 13 整步跳过，`.A/.S/.Y` 不转 `.0/.1/.2`，
+/// 下游播种时字根名对不上，报「未覆盖任何字根组」。
+///
+/// 配置若无法整体解析（片段、含未支持字段），退回文本扫描：TOML 段头 + RON 的
+/// `simple_code:(...enabled:true...)` 括号配对都认，并给出告警说明走了兜底。
 fn 简码已开启(路径: &Path) -> Result<bool, String> {
-    let mut 在内 = false;
-    for 行 in text::读行(路径)? {
-        let 归一: String = 行
-            .chars()
-            .filter(|c| !c.is_whitespace())
-            .collect::<String>()
-            .to_ascii_lowercase();
-        if 归一.starts_with('[') {
-            在内 = 归一.starts_with("[weights.simple_code]");
-            continue;
+    let 路径文本 = 路径.to_string_lossy();
+    match crate::config::Config::load_from_path(&路径文本) {
+        Ok(cfg) => Ok(cfg.weights.simple_code.enabled),
+        Err(e) => {
+            eprintln!(
+                "⚠️ 无法按完整配置解析 {}（{}），改用文本扫描判断简码开关",
+                路径.display(),
+                e
+            );
+            文本扫描简码开关(路径)
         }
-        if 在内 && 归一.starts_with("enabled=true") {
+    }
+}
+
+/// 文本扫描兜底：同时识别 TOML 段头与 RON 的 `simple_code: (...)` 块。
+fn 文本扫描简码开关(路径: &Path) -> Result<bool, String> {
+    let mut 原文 = String::new();
+    for 行 in text::读行(路径)? {
+        原文.push_str(&行);
+        原文.push('\n');
+    }
+    // 去空白 + 小写后扫描：RON/TOML 的键值在形态上只剩 `enabled:true` / `enabled=true` 两种。
+    let 压: String = 原文
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>()
+        .to_ascii_lowercase();
+
+    // TOML：段头 [weights.simple_code] 到下一个 '[' 之间找 enabled=true
+    if let Some(起) = 压.find("[weights.simple_code]") {
+        let 段 = &压[起 + "[weights.simple_code]".len()..];
+        let 段尾 = 段.find('[').unwrap_or(段.len());
+        if 段[..段尾].contains("enabled=true") {
             return Ok(true);
+        }
+    }
+
+    // RON：simple_code:( ... )，内部可能嵌 levels:[(...)]，按括号配对截出整个块
+    if let Some(位) = 压.find("simple_code:") {
+        let 余 = &压[位 + "simple_code:".len()..];
+        if let Some(开) = 余.find(['(', '{']) {
+            let 开括号 = 余.as_bytes()[开] as char;
+            let 闭括号 = if 开括号 == '(' { ')' } else { '}' };
+            let mut 深 = 0i32;
+            for (偏移, c) in 余[开..].char_indices() {
+                if c == 开括号 {
+                    深 += 1;
+                } else if c == 闭括号 {
+                    深 -= 1;
+                    if 深 == 0 {
+                        let 块 = &余[开..开 + 偏移 + 1];
+                        return Ok(块.contains("enabled:true"));
+                    }
+                }
+            }
         }
     }
     Ok(false)
@@ -679,5 +729,52 @@ mod tests {
         assert_eq!(键集.chars().count(), 25);
         assert!(键集.contains('f'));
         assert!(!键集.contains('z'));
+    }
+
+    /// 简码开关判定必须同时认 TOML 与 RON——只认 TOML 段头时，RON（默认格式）配置
+    /// 会被判为「未开启」，步骤 13 整步静默跳过，`.A/.S/.Y` 不转 `.0/.1/.2`。
+    #[test]
+    fn 文本扫描简码开关识别_toml_与_ron() {
+        let 目录 = std::env::temp_dir().join(format!("cg_step13_{}", std::process::id()));
+        std::fs::create_dir_all(&目录).unwrap();
+
+        let toml开 = 目录.join("on.toml");
+        std::fs::write(
+            &toml开,
+            "[weights.simple_code]\nenabled = true\nlevel1_code_num = 1\n",
+        )
+        .unwrap();
+        assert!(文本扫描简码开关(&toml开).unwrap(), "TOML 开启应识别");
+        // 完整入口：能整体解析就按正式解析器，解析不了才落到文本扫描，两种路径都该为 true
+        assert!(简码已开启(&toml开).unwrap(), "TOML 开启经完整入口应识别");
+
+        let toml关 = 目录.join("off.toml");
+        std::fs::write(
+            &toml关,
+            "[weights.simple_code]\nenabled = false\n\n[weights]\n",
+        )
+        .unwrap();
+        assert!(!文本扫描简码开关(&toml关).unwrap(), "TOML 关闭不应误判");
+
+        // RON：块内还嵌 levels 数组，括号配对不能被数组打断
+        let ron开 = 目录.join("on.ron");
+        std::fs::write(
+            &ron开,
+            "(\n  weights: (\n    simple_code: (\n      enabled: true,\n      levels: [(level: 1, code_num: 1)],\n    ),\n  ),\n)\n",
+        )
+        .unwrap();
+        assert!(文本扫描简码开关(&ron开).unwrap(), "RON 开启应识别");
+        assert!(简码已开启(&ron开).unwrap(), "RON 开启经完整入口应识别");
+
+        let ron关 = 目录.join("off.ron");
+        std::fs::write(
+            &ron关,
+            "(\n  weights: (\n    simple_code: (\n      enabled: false,\n    ),\n  ),\n)\n",
+        )
+        .unwrap();
+        assert!(!文本扫描简码开关(&ron关).unwrap(), "RON 关闭不应误判");
+        assert!(!简码已开启(&ron关).unwrap(), "RON 关闭经完整入口不应误判");
+
+        let _ = std::fs::remove_dir_all(&目录);
     }
 }
