@@ -9,7 +9,7 @@
 //
 //   <dir>/roots.tsv            字根 → 编码（来自 output-keymap.txt）
 //   <dir>/chaifen.tsv          字 → 根串（拆分全表去掉列内空白）
-//   <dir>/mabiao.tsv           字 → 码（复用 `export` 的取码，简码 + 全码）
+//   <dir>/mabiao.tsv           字 → 码（复用 `export` 的取码，每字一行全码）
 //   <dir>/<方案>.js            `var roots = [...]` + `var chars = [...]` + charinfo()
 //   <dir>/<方案>-<日期>.html   字根表页面
 //
@@ -102,11 +102,10 @@ pub fn run(参: &参数) -> Result<(), String> {
     println!("  ② chaifen.tsv      {} 个字", 拆分数);
 
     // 3. mabiao.tsv -------------------------------------------------------
-    let 简码文件 = 找文件(&[目录.clone(), 源.clone()], "output-simple-codes.txt");
     let mabiao_tsv = 目录.join("mabiao.tsv");
-    let (码表, 全码数, 简码数) = 生成码表(&键位文件, &拆分全表, 简码文件.as_deref(), &参.方案)?;
+    let (码表, 全码数) = 生成码表(&键位文件, &拆分全表, &参.方案)?;
     fs::write(&mabiao_tsv, &码表).map_err(|e| format!("写 mabiao.tsv 失败：{e}"))?;
-    println!("  ③ mabiao.tsv       全码 {全码数} 条，简码 {简码数} 条");
+    println!("  ③ mabiao.tsv       全码 {全码数} 条");
 
     // 4. <方案>.js --------------------------------------------------------
     let js = 生成js(&roots_tsv, &chaifen_tsv, &mabiao_tsv)?;
@@ -288,43 +287,19 @@ pub(crate) fn 生成拆分表文本(拆分全表: &Path) -> Result<String, Strin
 // ③ mabiao.tsv
 // =========================================================================
 
-/// 复用 `export` 的取码规则，产 `<字>\t<码>`（简码行 + 全码行）
+/// 复用 `export` 的取码规则，产 `<字>\t<码>`（每字一行全码）
 fn 生成码表(
-    keymap: &Path,
-    拆分全表: &Path,
-    简码文件: Option<&Path>,
-    方案: &str,
-) -> Result<(String, usize, usize), String> {
+    keymap: &Path, 拆分全表: &Path, 方案: &str
+) -> Result<(String, usize), String> {
     let 方案 = crate::prepare::schema::取(方案)?;
     let 规则 = 方案.编码规则;
     let 最大码长 = 方案.最大码长;
     let 键位 = export_table::加载键位表(&keymap.to_string_lossy());
     let 拆分 = export_table::加载拆分表(&拆分全表.to_string_lossy());
-    let 简码 = 简码文件.map(加载简码).unwrap_or_default();
 
-    let (文本, 全码数, 简码数, _缺根, _统计) =
-        export_table::生成表按方案(&键位, &拆分, &简码, 规则, 最大码长);
-    Ok((文本, 全码数, 简码数))
-}
-
-/// `output-simple-codes.txt` → 字 → 简码（跳过 `#` 注释行）
-fn 加载简码(path: &Path) -> HashMap<String, String> {
-    let mut 表 = HashMap::new();
-    let Ok(文本) = fs::read_to_string(path) else {
-        return 表;
-    };
-    for 行 in 文本.lines() {
-        let 行 = 行.trim();
-        if 行.is_empty() || 行.starts_with('#') {
-            continue;
-        }
-        let 列: Vec<&str> = 行.split_whitespace().collect();
-        if 列.len() >= 2 {
-            // 一级简码带尾 `_`（优化器的顶屏键标记），测评器不认这个记号，去掉
-            表.insert(列[0].to_string(), 列[1].trim_end_matches('_').to_string());
-        }
-    }
-    表
+    let (文本, 全码数, _缺根, _统计) =
+        export_table::生成表按方案(&键位, &拆分, 规则, 最大码长);
+    Ok((文本, 全码数))
 }
 
 // =========================================================================
@@ -1299,17 +1274,6 @@ mod 测试 {
             &vec!["白勹丶".to_string(), "白白".to_string()]
         );
         assert_eq!(m.get("一").unwrap(), &vec!["一".to_string()]);
-    }
-
-    #[test]
-    fn 加载简码_跳过注释() {
-        let p = 写临时("simple.txt", "# 注释\n的\tfjek\n一\to_\n\n了\tll\n");
-        let m = 加载简码(&p);
-        assert_eq!(m.get("的").unwrap(), "fjek");
-        // 尾下划线是优化器内部顶屏标记，测评器不认，加载时已剥离
-        assert_eq!(m.get("一").unwrap(), "o");
-        assert_eq!(m.get("了").unwrap(), "ll");
-        assert_eq!(m.len(), 3);
     }
 
     #[test]

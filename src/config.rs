@@ -3,13 +3,9 @@
 // =========================================================================
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::fs;
 
-use crate::types::{
-    build_commit_pref_tables, char_to_key_index, SimpleAssignMode, SimpleCodeConfig,
-    SimpleCodeLevel, SimpleCodeStep, WeightConfig, KEY_SPACE,
-};
+use crate::types::WeightConfig;
 
 // =========================================================================
 // 📋 配置结构体定义
@@ -22,16 +18,10 @@ pub struct Config {
     pub keys: KeysConfig,
     pub weights: WeightsConfig,
     pub annealing: AnnealingConfig,
-    pub simple_levels: Vec<SimpleLevelConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scale: Option<ScaleConfigToml>, // 可选，缺失则完全依赖 calibrate
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub targets: Option<TargetsConfig>, // 可选，缺失则使用默认（disabled）
-    /// 固定简码映射（需求 21）：顶层内联表 `[fixed_simple_codes]`，形如 `"不" = "u"`、
-    /// `"了" = "a_"`。键为汉字、值为字面简码串（可选以 `_` 结尾表示空格上屏）。
-    /// 缺失时为 None。用 `BTreeMap` 保证遍历顺序确定。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fixed_simple_codes: Option<BTreeMap<String, String>>,
 }
 
 /// 文件路径配置
@@ -70,7 +60,6 @@ fn default_termination_keys() -> String {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WeightsConfig {
     pub full_code: FullCodeWeights,
-    pub simple_code: SimpleCodeWeights,
 }
 
 /// 全码权重
@@ -81,72 +70,6 @@ pub struct FullCodeWeights {
     pub equivalence: f64,
     pub equiv_cv: f64,
     pub distribution: f64,
-}
-
-/// 简码权重
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct SimpleCodeWeights {
-    pub enabled: bool,
-    pub full_code_weight: f64,
-    pub simple_code_weight: f64,
-    pub freq: f64,
-    pub equiv: f64,
-    pub dist: f64,
-    pub collision_count: f64,
-    pub collision_rate: f64,
-    // ---- 简码评估性能优化新增项（需求 17/18） ----
-    /// 简码计算激活进度阈值（默认 0.4）
-    #[serde(default = "default_simple_start_progress")]
-    pub simple_start_progress: f64,
-    /// 权重从 0 渐进到 W 的进度长度（默认 0.1）
-    #[serde(default = "default_simple_ramp_progress")]
-    pub simple_ramp_progress: f64,
-    /// 激活当刻升温倍率（默认 1.2，独立于 reheat_factor）
-    #[serde(default = "default_simple_activation_reheat")]
-    pub simple_activation_reheat: f64,
-    /// 候选字累计字频覆盖率阈值（默认 1.0）
-    #[serde(default = "default_simple_coverage_ratio")]
-    pub simple_coverage_ratio: f64,
-    /// 退火期「active 候选」累计字频覆盖率阈值（默认 0.90，须 ≤ simple_coverage_ratio）。
-    /// active 候选参与每步增量评估与周期对账；其余（passive）候选仅在最终上报与输出时纳入，
-    /// 从而在保留「全集出简输出」的同时大幅降低每步简码计算量。
-    #[serde(default = "default_simple_active_coverage")]
-    pub simple_active_coverage: f64,
-    /// 周期对账间隔比例，M = floor(total_steps × ratio)，M ≥ 1（默认 0.05）
-    #[serde(default = "default_reconcile_interval_ratio")]
-    pub reconcile_interval_ratio: f64,
-    /// 桶内出简排序模式："frequency" 或 "efficiency"（默认 "efficiency"）
-    #[serde(default = "default_simple_assign_mode")]
-    pub simple_assign_mode: String,
-    /// 简码占用保护（需求 33）：禁止简码等于「全字频前 N 名汉字」的全码。
-    /// 默认 0 表示 N = 全部汉字（简码不得等于任何汉字的全码）；N>0 仅保护前 N 名。
-    #[serde(default = "default_simple_protect_top_n")]
-    pub simple_protect_top_n: usize,
-}
-
-fn default_simple_start_progress() -> f64 {
-    0.4
-}
-fn default_simple_ramp_progress() -> f64 {
-    0.1
-}
-fn default_simple_activation_reheat() -> f64 {
-    1.2
-}
-fn default_simple_coverage_ratio() -> f64 {
-    1.0
-}
-fn default_simple_active_coverage() -> f64 {
-    0.90
-}
-fn default_reconcile_interval_ratio() -> f64 {
-    0.05
-}
-fn default_simple_assign_mode() -> String {
-    "efficiency".to_string()
-}
-fn default_simple_protect_top_n() -> usize {
-    0
 }
 
 /// 模拟退火参数配置
@@ -219,17 +142,6 @@ pub struct AnnealingConfig {
     /// 整键互换（full_key_swap）算子执行概率（0.0~1.0），0 关闭。缺省 0.01。
     #[serde(default = "default_full_key_swap_probability")]
     pub full_key_swap_probability: f64,
-
-    /// 简码零梯度区间跳过维护（默认开启）。
-    ///
-    /// 简码各分项（重码数/重码率/当量/覆盖/分布）在统一目标下全部达标后，简码得分恒为 0，
-    /// 对综合得分没有梯度——此时每步继续增量维护数百个简码桶是纯开销。开启后一旦检测到
-    /// 简码得分为 0 就冻结增量维护；周期对账 `reconcile` 会重算真实简码指标，若重新超标
-    /// 则立即解冻恢复维护。因此最坏情况下简码也会在每个对账周期（默认 5% 步数）纠正一次。
-    ///
-    /// 置 `false` 可回到「全程逐步维护」的旧行为（用于对照实验或排查简码相关回归）。
-    #[serde(default = "default_simple_freeze_enable")]
-    pub simple_freeze_enable: bool,
 }
 
 /// 默认 **关闭**（0.0）：这是新增算子，不应改变未显式开启的用户的搜索轨迹。
@@ -272,11 +184,6 @@ fn default_comfort_progress() -> f64 {
 fn default_full_key_swap_probability() -> f64 {
     0.01
 }
-/// 默认 **开启**：简码全达标后跳过增量维护，只在对账周期校准一次。
-/// 实测（星陈 368 根、5 万步）简码增量占 SA 段 64% 时间，而 75% 进度后简码已零梯度。
-fn default_simple_freeze_enable() -> bool {
-    true
-}
 
 /// 全码目标配置（对应 [targets.full_code] 段）
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -315,72 +222,11 @@ impl Default for FullCodeTargets {
     }
 }
 
-/// 简码目标配置（对应 [targets.simple_code] 段）
-/// freq_max 是频率覆盖率下限约束（coverage < freq_max 时拒绝），0.0 表示不启用
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-pub struct SimpleCodeTargets {
-    pub enabled: bool,
-    pub collision_count: f64,
-    pub collision_rate: f64,
-    /// 频率覆盖率目标（如 0.85 = 85%）
-    pub freq: f64,
-    pub equiv: f64,
-    pub dist: f64,
-    pub low_weight: f64,
-    // _max 硬约束（0.0 = 不启用）
-    pub collision_count_max: f64,
-    pub collision_rate_max: f64,
-    /// 覆盖率下限约束（coverage < freq_max 时拒绝），0.0 表示不启用
-    pub freq_max: f64,
-    pub equiv_max: f64,
-    pub dist_max: f64,
-}
-
-impl Default for SimpleCodeTargets {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            collision_count: 0.0,
-            collision_rate: 0.0,
-            freq: 0.0,
-            equiv: 0.0,
-            dist: 0.0,
-            low_weight: 0.01,
-            collision_count_max: 0.0,
-            collision_rate_max: 0.0,
-            freq_max: 0.0,
-            equiv_max: 0.0,
-            dist_max: 0.0,
-        }
-    }
-}
-
-/// 简码级别配置（TOML 格式）
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct SimpleLevelConfig {
-    pub level: usize,
-    pub code_num: usize,
-    pub rules: Vec<String>,
-    /// 上屏键序列（需求 20）：字符串，按优先级列出上屏键（字母为主键盘键、`_` 为空格）。
-    /// 缺省为空串（自动上屏）。`_` 只允许在首或尾。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub commit_keys: Option<String>,
-    /// 【已废弃】是否空格上屏（需求 20.10 兼容）：仅当未配置 `commit_keys` 时生效，
-    /// `Some(true)` 映射为 `commit_keys="_"`、`Some(false)` 映射为 `commit_keys=""`，并打废弃告警。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub space_commit: Option<bool>,
-    /// 上屏键异手过滤（需求 37）：为真时退火出简仅用与核心末键异手的字母上屏键与 `_`。缺省 false。
-    #[serde(default)]
-    pub commit_alt_hand_only: bool,
-}
-
 /// 目标配置容器（对应 [targets] 段）
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
 pub struct TargetsConfig {
     #[serde(default)]
     pub full_code: FullCodeTargets,
-    #[serde(default)]
-    pub simple_code: SimpleCodeTargets,
 }
 
 /// TOML 可选 scale 配置（所有字段 Option<f64>，对应 [scale] 段）
@@ -391,11 +237,6 @@ pub struct ScaleConfigToml {
     pub equivalence: Option<f64>,
     pub equiv_cv: Option<f64>,
     pub distribution: Option<f64>,
-    pub simple_freq: Option<f64>,
-    pub simple_equiv: Option<f64>,
-    pub simple_dist: Option<f64>,
-    pub simple_collision_count: Option<f64>,
-    pub simple_collision_rate: Option<f64>,
 }
 
 // =========================================================================
@@ -459,77 +300,6 @@ impl Config {
         }
     }
 
-    /// 获取简码配置（转换为内部格式）。
-    ///
-    /// 级别保留规则（需求 21 / 确认点 1）：`code_num > 0` 的级别一律保留；`code_num == 0` 的级别
-    /// 仅在「存在按规则归属到该级的固定简码」时才保留——使该级的固定简码仍生效（输出并排除
-    /// 退火分配），同时不给「无固定简码的 code_num=0 级别」（如默认配置）凭空增加桶分配开销。
-    ///
-    /// 上屏键（需求 20/36）：每级解析 `commit_keys`（含废弃 `space_commit` 兼容），校验 `_` 仅在首/尾，
-    /// 预计算两张左右手偏好表。
-    pub fn get_simple_code_config(&self) -> SimpleCodeConfig {
-        // 先构建所有候选级别（含解析后的 commit_keys 与预计算偏好表）。
-        let mut built: Vec<SimpleCodeLevel> = self
-            .simple_levels
-            .iter()
-            .filter_map(|l| {
-                let rule_candidates: Vec<Vec<SimpleCodeStep>> = l
-                    .rules
-                    .iter()
-                    .filter_map(|rule| parse_rule_string(rule))
-                    .collect();
-                if rule_candidates.is_empty() {
-                    return None;
-                }
-                let commit_keys = resolve_commit_keys(l);
-                let (commit_pref_last_left, commit_pref_last_right) =
-                    build_commit_pref_tables(&commit_keys);
-                Some(SimpleCodeLevel {
-                    level: l.level,
-                    code_num: l.code_num,
-                    rule_candidates,
-                    commit_keys,
-                    commit_pref_last_left,
-                    commit_pref_last_right,
-                    commit_alt_hand_only: l.commit_alt_hand_only,
-                })
-            })
-            .collect();
-
-        // code_num==0 级别保留判定（需求 21.13）：仅当确有固定简码按规则归属到该级时保留。
-        let fixed = self.get_fixed_simple_codes();
-        built.retain(|l| {
-            if l.code_num > 0 {
-                return true;
-            }
-            let core_len = l.rule_candidates.iter().map(|r| r.len()).max().unwrap_or(0);
-            fixed
-                .iter()
-                .any(|(_, code)| fixed_belongs_to_level(code, core_len, &l.commit_keys))
-        });
-
-        SimpleCodeConfig { levels: built }
-    }
-
-    /// 解析固定简码映射为 `Vec<(char, String)>`（需求 21.1）。
-    ///
-    /// 键取汉字串的首个 `char`（忽略多字符键的余下部分），值为字面简码串（保留结尾 `_`）。
-    /// 缺失或空映射时返回空 `Vec`。具体的级别归属与一致性/长度校验在 `OptContext::new_with_fixed`
-    /// 中完成（需依赖该字全码长度与各级 `space_commit` / 简码键位数）。
-    pub fn get_fixed_simple_codes(&self) -> Vec<(char, String)> {
-        let mut out: Vec<(char, String)> = Vec::new();
-        if let Some(map) = &self.fixed_simple_codes {
-            for (hanzi, code) in map {
-                if let Some(ch) = hanzi.chars().next() {
-                    out.push((ch, code.clone()));
-                } else {
-                    eprintln!("⚠️ 警告：固定简码映射含空汉字键，已忽略");
-                }
-            }
-        }
-        out
-    }
-
     /// 验证权重配置是否合理
     ///
     /// #11：权重和明显偏离 1.0 时不再仅告警，而是返回 `Err`，由调用方 `exit(1)`，
@@ -544,24 +314,6 @@ impl Config {
             + self.weights.full_code.distribution;
         if (total_full - 1.0).abs() > 0.001 {
             problems.push(format!("全码权重总和不为 1.0 (当前: {:.3})", total_full));
-        }
-
-        let total_simple = self.weights.simple_code.freq
-            + self.weights.simple_code.equiv
-            + self.weights.simple_code.dist
-            + self.weights.simple_code.collision_count
-            + self.weights.simple_code.collision_rate;
-        if self.weights.simple_code.enabled && (total_simple - 1.0).abs() > 0.001 {
-            problems.push(format!(
-                "简码子权重总和不为 1.0 (当前: {:.3})",
-                total_simple
-            ));
-        }
-
-        let total_main =
-            self.weights.simple_code.full_code_weight + self.weights.simple_code.simple_code_weight;
-        if self.weights.simple_code.enabled && (total_main - 1.0).abs() > 0.001 {
-            problems.push(format!("全码/简码总权重不为 1.0 (当前: {:.3})", total_main));
         }
 
         if problems.is_empty() {
@@ -642,241 +394,7 @@ impl Config {
             weight_equivalence: self.weights.full_code.equivalence,
             weight_equiv_cv: self.weights.full_code.equiv_cv,
             weight_distribution: self.weights.full_code.distribution,
-            enable_simple_code: self.weights.simple_code.enabled,
-            // 简码关闭时 weight_full_code 取 1.0：综合得分退化为纯原始全码分数（与简码引入前的
-            // 基线一致），避免用 full_code_weight(<1) 整体缩放分数而改变 SA 接受概率与全码搜索行为。
-            // 简码启用时仍取 full_code_weight，与 simple_code_weight 共同平衡两个分量。
-            weight_full_code: if self.weights.simple_code.enabled {
-                self.weights.simple_code.full_code_weight
-            } else {
-                1.0
-            },
-            weight_simple_code: self.weights.simple_code.simple_code_weight,
-            simple_weight_freq: self.weights.simple_code.freq,
-            simple_weight_equiv: self.weights.simple_code.equiv,
-            simple_weight_dist: self.weights.simple_code.dist,
-            simple_weight_collision_count: self.weights.simple_code.collision_count,
-            simple_weight_collision_rate: self.weights.simple_code.collision_rate,
-            simple_coverage_ratio: self.weights.simple_code.simple_coverage_ratio,
-            simple_active_coverage: self.weights.simple_code.simple_active_coverage,
-            simple_assign_mode: parse_simple_assign_mode(
-                &self.weights.simple_code.simple_assign_mode,
-            ),
-            simple_protect_top_n: self.weights.simple_code.simple_protect_top_n,
         }
-    }
-
-    /// 校验并钳制简码激活与渐进配置（需求 13）。
-    ///
-    /// 规则：
-    /// - `simple_start_progress`、`simple_ramp_progress` 负值钳为 0；
-    /// - `simple_start_progress >= 1` 钳到 `[0,1)` 内的最大有效值；
-    /// - `start + ramp > 1` 时钳定 `ramp = 1 - start`；
-    /// - `(start, ramp) == (0, 0)` 时返回硬激活标记 `true`。
-    ///
-    /// 任何越界钳制都会输出告警。返回 `hard_activate`。
-    pub fn validate_simple_activation(&mut self) -> bool {
-        let sc = &mut self.weights.simple_code;
-
-        if sc.simple_start_progress < 0.0 {
-            eprintln!(
-                "⚠️ 警告：simple_start_progress < 0 (当前: {:.3})，钳制为 0",
-                sc.simple_start_progress
-            );
-            sc.simple_start_progress = 0.0;
-        }
-        if sc.simple_ramp_progress < 0.0 {
-            eprintln!(
-                "⚠️ 警告：simple_ramp_progress < 0 (当前: {:.3})，钳制为 0",
-                sc.simple_ramp_progress
-            );
-            sc.simple_ramp_progress = 0.0;
-        }
-        if sc.simple_start_progress >= 1.0 {
-            // 钳到 [0,1) 内的最大有效值
-            let clamped = 1.0 - f64::EPSILON;
-            eprintln!(
-                "⚠️ 警告：simple_start_progress >= 1 (当前: {:.3})，钳制到 {:.6}",
-                sc.simple_start_progress, clamped
-            );
-            sc.simple_start_progress = clamped;
-        }
-        if sc.simple_start_progress + sc.simple_ramp_progress > 1.0 {
-            let clamped_ramp = 1.0 - sc.simple_start_progress;
-            eprintln!(
-                "⚠️ 警告：simple_start_progress + simple_ramp_progress > 1 (当前: {:.3})，钳定 ramp 为 {:.6}",
-                sc.simple_start_progress + sc.simple_ramp_progress,
-                clamped_ramp
-            );
-            sc.simple_ramp_progress = clamped_ramp;
-        }
-
-        // 激活升温倍率小于 1 等于「激活即降温」，属误配；钳制为 1.0（需求 27.3）。
-        if sc.simple_activation_reheat < 1.0 {
-            eprintln!(
-                "⚠️ 警告：simple_activation_reheat < 1.0 (当前: {:.3})，钳制为 1.0",
-                sc.simple_activation_reheat
-            );
-            sc.simple_activation_reheat = 1.0;
-        }
-
-        // 简码占用保护性能优化（active/passive 候选）：active 覆盖率须 ≤ 输出覆盖率，
-        // 否则钳制为 simple_coverage_ratio 并告警（active 候选应为输出候选的子集）。
-        // 先归一输出覆盖率：NaN / 负数 / >1 会让后续 clamp panic 或候选集失真。
-        if !sc.simple_coverage_ratio.is_finite() {
-            eprintln!(
-                "⚠️ 警告：simple_coverage_ratio 不是有限数 (当前: {})，按 1.0 处理",
-                sc.simple_coverage_ratio
-            );
-            sc.simple_coverage_ratio = 1.0;
-        } else if !(0.0..=1.0).contains(&sc.simple_coverage_ratio) {
-            let clamped = sc.simple_coverage_ratio.clamp(0.0, 1.0);
-            eprintln!(
-                "⚠️ 警告：simple_coverage_ratio 超出 [0,1] (当前: {:.3})，钳制为 {:.3}",
-                sc.simple_coverage_ratio, clamped
-            );
-            sc.simple_coverage_ratio = clamped;
-        }
-        if !sc.simple_active_coverage.is_finite() {
-            eprintln!(
-                "⚠️ 警告：simple_active_coverage 不是有限数 (当前: {})，按 simple_coverage_ratio 处理",
-                sc.simple_active_coverage
-            );
-            sc.simple_active_coverage = sc.simple_coverage_ratio;
-        }
-        if sc.simple_active_coverage < 0.0 {
-            eprintln!(
-                "⚠️ 警告：simple_active_coverage < 0 (当前: {:.3})，钳制为 0",
-                sc.simple_active_coverage
-            );
-            sc.simple_active_coverage = 0.0;
-        }
-        if sc.simple_active_coverage > sc.simple_coverage_ratio {
-            eprintln!(
-                "⚠️ 警告：simple_active_coverage ({:.3}) > simple_coverage_ratio ({:.3})，钳制为 {:.3}",
-                sc.simple_active_coverage, sc.simple_coverage_ratio, sc.simple_coverage_ratio
-            );
-            sc.simple_active_coverage = sc.simple_coverage_ratio;
-        }
-
-        // (start, ramp) == (0, 0) → 从开始即硬激活（兼容档，需求 13.5）
-        sc.simple_start_progress == 0.0 && sc.simple_ramp_progress == 0.0
-    }
-}
-
-/// 解析简码出简排序模式字符串；非法值回落 `Efficiency` 并告警（需求 13）
-fn parse_simple_assign_mode(s: &str) -> SimpleAssignMode {
-    match s.trim().to_ascii_lowercase().as_str() {
-        "frequency" => SimpleAssignMode::Frequency,
-        "efficiency" => SimpleAssignMode::Efficiency,
-        other => {
-            eprintln!(
-                "⚠️ 警告：simple_assign_mode 取值非法 \"{}\"，回落到默认 \"efficiency\"",
-                other
-            );
-            SimpleAssignMode::Efficiency
-        }
-    }
-}
-
-/// 解析规则字符串为 SimpleCodeStep 列表
-fn parse_rule_string(rule: &str) -> Option<Vec<SimpleCodeStep>> {
-    let chars: Vec<char> = rule.trim().chars().collect();
-    if !chars.len().is_multiple_of(2) || chars.is_empty() {
-        return None;
-    }
-
-    let mut steps = Vec::new();
-    for chunk in chars.chunks(2) {
-        steps.push(SimpleCodeStep {
-            root_selector: chunk[0],
-            code_selector: chunk[1],
-        });
-    }
-    Some(steps)
-}
-
-/// 解析某级的上屏键序列（需求 20/36），含废弃 `space_commit` 兼容（需求 20.10）。
-///
-/// 返回上屏键键位索引序列（字母→索引、`_`→`KEY_SPACE`）。校验：
-/// - 非法字符（无法映射键位）→ 报错（panic）。
-/// - `_` 只允许出现在首或尾，否则报错（panic，需求 20.3）。
-fn resolve_commit_keys(l: &SimpleLevelConfig) -> Vec<u8> {
-    let raw: String = match (&l.commit_keys, l.space_commit) {
-        (Some(ck), sc) => {
-            if sc.is_some() {
-                eprintln!(
-                    "⚠️ 级别 {} 同时配置了 commit_keys 与已废弃的 space_commit；以 commit_keys 为准，忽略 space_commit",
-                    l.level
-                );
-            }
-            ck.clone()
-        }
-        (None, Some(true)) => {
-            eprintln!(
-                "⚠️ 级别 {} 使用了已废弃配置 space_commit=true，请改用 commit_keys=\"_\"；本次按 \"_\" 处理",
-                l.level
-            );
-            "_".to_string()
-        }
-        (None, Some(false)) => {
-            eprintln!(
-                "⚠️ 级别 {} 使用了已废弃配置 space_commit=false，请改用 commit_keys=\"\"；本次按 \"\" 处理",
-                l.level
-            );
-            String::new()
-        }
-        (None, None) => String::new(),
-    };
-
-    let chars: Vec<char> = raw.chars().collect();
-    let mut keys: Vec<u8> = Vec::with_capacity(chars.len());
-    for (i, &c) in chars.iter().enumerate() {
-        match char_to_key_index(c) {
-            Some(k) => {
-                if k == KEY_SPACE && i != 0 && i != chars.len() - 1 {
-                    panic!(
-                        "级别 {} 的 commit_keys=\"{}\" 中下划线 `_` 只能出现在开头或末尾",
-                        l.level, raw
-                    );
-                }
-                keys.push(k as u8);
-            }
-            None => panic!(
-                "级别 {} 的 commit_keys=\"{}\" 含非法上屏键字符 '{}'",
-                l.level, raw, c
-            ),
-        }
-    }
-    // 去重保护：同一上屏键重复出现无意义，保留首次出现顺序。
-    let mut seen = [false; 31];
-    keys.retain(|&k| {
-        let idx = k as usize;
-        if idx < 31 && seen[idx] {
-            false
-        } else {
-            if idx < 31 {
-                seen[idx] = true;
-            }
-            true
-        }
-    });
-    keys
-}
-
-/// 判断一条固定简码（字面串 `code`）是否归属于「核心码长 `core_len`、上屏键集 `commit_keys`」的级别
-/// （需求 21.5）。两种解释任一成立即归属：
-/// - 纯核心：`commit_keys` 空 且 总长 == `core_len`。
-/// - 核心+上屏：`commit_keys` 非空 且 总长 == `core_len + 1` 且 末键 ∈ `commit_keys`。
-fn fixed_belongs_to_level(code: &str, core_len: usize, commit_keys: &[u8]) -> bool {
-    let chars: Vec<char> = code.chars().collect();
-    let t = chars.len();
-    if commit_keys.is_empty() {
-        t == core_len
-    } else {
-        t >= 1
-            && t - 1 == core_len
-            && char_to_key_index(chars[t - 1]).is_some_and(|k| commit_keys.contains(&(k as u8)))
     }
 }
 
@@ -908,24 +426,6 @@ impl Default for Config {
                     equiv_cv: 0.01,
                     distribution: 0.1,
                 },
-                simple_code: SimpleCodeWeights {
-                    enabled: true,
-                    full_code_weight: 0.7,
-                    simple_code_weight: 0.3,
-                    freq: 0.5,
-                    equiv: 0.15,
-                    dist: 0.05,
-                    collision_count: 0.05,
-                    collision_rate: 0.25,
-                    simple_start_progress: default_simple_start_progress(),
-                    simple_ramp_progress: default_simple_ramp_progress(),
-                    simple_activation_reheat: default_simple_activation_reheat(),
-                    simple_coverage_ratio: default_simple_coverage_ratio(),
-                    simple_active_coverage: default_simple_active_coverage(),
-                    reconcile_interval_ratio: default_reconcile_interval_ratio(),
-                    simple_assign_mode: default_simple_assign_mode(),
-                    simple_protect_top_n: default_simple_protect_top_n(),
-                },
             },
             annealing: AnnealingConfig {
                 threads: 16,
@@ -946,37 +446,9 @@ impl Default for Config {
                 conflict_key_by_load: default_conflict_key_by_load(),
                 checkpoint_interval_ratio: default_checkpoint_interval_ratio(),
                 full_key_swap_probability: default_full_key_swap_probability(),
-                simple_freeze_enable: default_simple_freeze_enable(),
             },
-            simple_levels: vec![
-                SimpleLevelConfig {
-                    level: 1,
-                    code_num: 0,
-                    rules: vec!["Aa".to_string()],
-                    commit_keys: None,
-                    space_commit: None,
-                    commit_alt_hand_only: false,
-                },
-                SimpleLevelConfig {
-                    level: 2,
-                    code_num: 1,
-                    rules: vec!["AaBa".to_string()],
-                    commit_keys: None,
-                    space_commit: None,
-                    commit_alt_hand_only: false,
-                },
-                SimpleLevelConfig {
-                    level: 3,
-                    code_num: 1,
-                    rules: vec!["AaBaCa".to_string()],
-                    commit_keys: None,
-                    space_commit: None,
-                    commit_alt_hand_only: false,
-                },
-            ],
             scale: None,
             targets: None,
-            fixed_simple_codes: None,
         }
     }
 }
@@ -986,94 +458,12 @@ mod tests {
     use super::*;
 
     // -----------------------------------------------------------------------
-    // 上屏键 commit_keys 解析 / 废弃兼容 / 归级 测试（需求 20/21/36）
-    // -----------------------------------------------------------------------
-
-    fn lvl(commit_keys: Option<&str>, space_commit: Option<bool>) -> SimpleLevelConfig {
-        SimpleLevelConfig {
-            level: 1,
-            code_num: 1,
-            rules: vec!["Aa".to_string()],
-            commit_keys: commit_keys.map(|s| s.to_string()),
-            space_commit,
-            commit_alt_hand_only: false,
-        }
-    }
-
-    #[test]
-    fn commit_keys_parse_basic() {
-        let k = |c: char| char_to_key_index(c).unwrap() as u8;
-        assert_eq!(
-            resolve_commit_keys(&lvl(Some("dk_"), None)),
-            vec![k('d'), k('k'), KEY_SPACE as u8]
-        );
-        assert_eq!(resolve_commit_keys(&lvl(Some(""), None)), Vec::<u8>::new());
-        assert_eq!(
-            resolve_commit_keys(&lvl(Some("_"), None)),
-            vec![KEY_SPACE as u8]
-        );
-    }
-
-    #[test]
-    fn commit_keys_dedup() {
-        let k = |c: char| char_to_key_index(c).unwrap() as u8;
-        // 重复键去重，保留首次顺序。
-        assert_eq!(
-            resolve_commit_keys(&lvl(Some("ddk"), None)),
-            vec![k('d'), k('k')]
-        );
-    }
-
-    #[test]
-    fn commit_keys_deprecated_space_commit_shim() {
-        // 仅 space_commit、无 commit_keys：true→"_"、false→""。
-        assert_eq!(
-            resolve_commit_keys(&lvl(None, Some(true))),
-            vec![KEY_SPACE as u8]
-        );
-        assert_eq!(
-            resolve_commit_keys(&lvl(None, Some(false))),
-            Vec::<u8>::new()
-        );
-        // 缺省两者：空。
-        assert_eq!(resolve_commit_keys(&lvl(None, None)), Vec::<u8>::new());
-        // 两者并存：以 commit_keys 为准（忽略 space_commit）。
-        assert_eq!(
-            resolve_commit_keys(&lvl(Some(""), Some(true))),
-            Vec::<u8>::new()
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "只能出现在开头或末尾")]
-    fn commit_keys_underscore_in_middle_panics() {
-        let _ = resolve_commit_keys(&lvl(Some("d_k"), None));
-    }
-
-    #[test]
-    fn fixed_belongs_to_level_interpretations() {
-        let k = |c: char| char_to_key_index(c).unwrap() as u8;
-        // 纯核心：commit 空、长度==核心长。
-        assert!(fixed_belongs_to_level("ab", 2, &[]));
-        assert!(!fixed_belongs_to_level("ab", 1, &[]));
-        // 核心+上屏：commit 非空、T-1==核心长、末键∈commit。
-        let ck = vec![k('d'), KEY_SPACE as u8];
-        assert!(fixed_belongs_to_level("abd", 2, &ck)); // 核心 ab(2) + d
-        assert!(fixed_belongs_to_level("ab_", 2, &ck)); // 核心 ab(2) + 空格
-        assert!(!fixed_belongs_to_level("abk", 2, &ck)); // 末键 k 不在 commit
-                                                         // 一码固定简码在带 commit 的一键级别（核心长 1）无法核心+上屏（需核心长 0），也非纯核心。
-        assert!(!fixed_belongs_to_level("a", 1, &ck));
-    }
-
-    // -----------------------------------------------------------------------
     // ScaleConfigToml 解析测试
     // -----------------------------------------------------------------------
 
     #[test]
     fn test_scale_config_toml_parse() {
         let toml_str = r#"
-simple_levels = []
-
 [files]
 fixed = "字根约束.txt"
 splits = "单字拆分.txt"
@@ -1090,16 +480,6 @@ collision_rate = 0.62
 equivalence = 0.2
 equiv_cv = 0.01
 distribution = 0.1
-
-[weights.simple_code]
-enabled = false
-full_code_weight = 0.7
-simple_code_weight = 0.3
-freq = 0.5
-equiv = 0.15
-dist = 0.05
-collision_count = 0.05
-collision_rate = 0.25
 
 [annealing]
 threads = 4
@@ -1119,11 +499,6 @@ collision_rate = 10.0
 equivalence = 1.5
 equiv_cv = 5.0
 distribution = 0.2
-simple_freq = 4.0
-simple_equiv = 1.2
-simple_dist = 0.15
-simple_collision_count = 0.02
-simple_collision_rate = 8.0
 "#;
         let cfg: Config = toml::from_str(toml_str).expect("解析失败");
         let scale = cfg.scale.expect("[scale] 段应存在");
@@ -1132,60 +507,31 @@ simple_collision_rate = 8.0
         assert_eq!(scale.equivalence, Some(1.5));
         assert_eq!(scale.equiv_cv, Some(5.0));
         assert_eq!(scale.distribution, Some(0.2));
-        assert_eq!(scale.simple_freq, Some(4.0));
-        assert_eq!(scale.simple_equiv, Some(1.2));
-        assert_eq!(scale.simple_dist, Some(0.15));
-        assert_eq!(scale.simple_collision_count, Some(0.02));
-        assert_eq!(scale.simple_collision_rate, Some(8.0));
     }
 
     #[test]
     fn test_scale_config_missing() {
         // 不含 [scale] 段的最小配置
-        let toml_str = r#"
-simple_levels = []
-
-[files]
-fixed = "f"
-splits = "s"
-pair_equiv = "p"
-key_dist = "k"
-
-[keys]
-allowed = "abc"
-display_order = "abc"
-
-[weights.full_code]
-collision_count = 0.5
-collision_rate = 0.5
-equivalence = 0.0
-equiv_cv = 0.0
-distribution = 0.0
-
-[weights.simple_code]
-enabled = false
-full_code_weight = 1.0
-simple_code_weight = 0.0
-freq = 1.0
-equiv = 0.0
-dist = 0.0
-collision_count = 0.0
-collision_rate = 0.0
-
-[annealing]
-threads = 1
-total_steps = 100
-temp_start = 1.0
-temp_end = 0.001
-comfort_progress = 0.5
-comfort_width = 0.1
-comfort_slowdown = 0.8
-swap_probability = 0.3
-min_improve_steps_ratio = 0.1
-reheat_factor = 1.0
-"#;
-        let cfg: Config = toml::from_str(toml_str).expect("解析失败");
+        let cfg: Config = toml::from_str(minimal_config_prefix()).expect("解析失败");
         assert!(cfg.scale.is_none(), "缺失 [scale] 段时应为 None");
+    }
+
+    // -----------------------------------------------------------------------
+    // 旧配置兼容：已移除的简码段仍能被忽略而不是解析失败
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn 旧配置里的简码段被忽略() {
+        let toml_str = format!(
+            "{}\nsimple_levels = [{{ level = 1, code_num = 1, rules = [\"Aa\"] }}]\n\n\
+             [weights.simple_code]\nenabled = true\nfull_code_weight = 0.7\n\
+             simple_code_weight = 0.3\nfreq = 0.5\nequiv = 0.15\ndist = 0.05\n\
+             collision_count = 0.05\ncollision_rate = 0.25\n\n\
+             [fixed_simple_codes]\n\"不\" = \"u\"\n",
+            minimal_config_prefix()
+        );
+        let cfg: Config = toml::from_str(&toml_str).expect("旧配置应能被忽略简码段后解析");
+        assert_eq!(cfg.annealing.total_steps, 100);
     }
 
     // -----------------------------------------------------------------------
@@ -1194,8 +540,6 @@ reheat_factor = 1.0
 
     fn minimal_config_prefix() -> &'static str {
         r#"
-simple_levels = []
-
 [files]
 fixed = "f"
 splits = "s"
@@ -1212,16 +556,6 @@ collision_rate = 0.5
 equivalence = 0.0
 equiv_cv = 0.0
 distribution = 0.0
-
-[weights.simple_code]
-enabled = false
-full_code_weight = 1.0
-simple_code_weight = 0.0
-freq = 1.0
-equiv = 0.0
-dist = 0.0
-collision_count = 0.0
-collision_rate = 0.0
 
 [annealing]
 threads = 1
@@ -1275,43 +609,6 @@ distribution_max = 10.0
     }
 
     #[test]
-    fn test_targets_simple_code_parse() {
-        let toml_str = format!(
-            r#"{}
-[targets.simple_code]
-enabled = true
-collision_count = 10.0
-collision_rate = 0.002
-freq = 0.85
-equiv = 1.3
-dist = 3.0
-low_weight = 0.05
-collision_count_max = 50.0
-collision_rate_max = 0.01
-freq_max = 0.7
-equiv_max = 2.0
-dist_max = 8.0
-"#,
-            minimal_config_prefix()
-        );
-        let cfg: Config = toml::from_str(&toml_str).expect("解析失败");
-        let targets = cfg.targets.expect("[targets] 段应存在");
-        let sc = &targets.simple_code;
-        assert!(sc.enabled);
-        assert_eq!(sc.collision_count, 10.0);
-        assert_eq!(sc.collision_rate, 0.002);
-        assert_eq!(sc.freq, 0.85);
-        assert_eq!(sc.equiv, 1.3);
-        assert_eq!(sc.dist, 3.0);
-        assert_eq!(sc.low_weight, 0.05);
-        assert_eq!(sc.collision_count_max, 50.0);
-        assert_eq!(sc.collision_rate_max, 0.01);
-        assert_eq!(sc.freq_max, 0.7);
-        assert_eq!(sc.equiv_max, 2.0);
-        assert_eq!(sc.dist_max, 8.0);
-    }
-
-    #[test]
     fn test_targets_defaults() {
         // 不含 [targets] 段时，get_targets_config() 应返回默认值
         let toml_str = minimal_config_prefix();
@@ -1319,16 +616,10 @@ dist_max = 8.0
         assert!(cfg.targets.is_none(), "缺失 [targets] 段时应为 None");
 
         let targets = cfg.get_targets_config();
-        // 全码默认值
         assert!(!targets.full_code.enabled);
         assert_eq!(targets.full_code.collision_count, 0.0);
         assert_eq!(targets.full_code.low_weight, 0.01);
         assert_eq!(targets.full_code.collision_count_max, 0.0);
-        // 简码默认值
-        assert!(!targets.simple_code.enabled);
-        assert_eq!(targets.simple_code.freq, 0.0);
-        assert_eq!(targets.simple_code.low_weight, 0.01);
-        assert_eq!(targets.simple_code.freq_max, 0.0);
     }
 
     // -----------------------------------------------------------------------
@@ -1337,7 +628,6 @@ dist_max = 8.0
 
     #[test]
     fn test_conflict_fields_default_when_absent() {
-        // 不含任何冲突导向字段的 [annealing] 应解析成功且五字段取默认值
         let cfg: Config = toml::from_str(minimal_config_prefix()).expect("解析失败");
         let a = &cfg.annealing;
         assert_eq!(a.conflict_probability, 0.0);
@@ -1349,7 +639,6 @@ dist_max = 8.0
 
     #[test]
     fn test_conflict_fields_partial_present() {
-        // 仅含部分冲突导向字段：已存在字段取显式值，缺失字段取默认值
         let toml_str = format!(
             "{}\nconflict_probability = 0.25\nconflict_weight_by_freq = true\n",
             minimal_config_prefix()
@@ -1400,187 +689,18 @@ dist_max = 8.0
         assert_eq!(a.conflict_key_by_load, default_conflict_key_by_load());
     }
 
-    // -----------------------------------------------------------------------
-    // 简码评估性能优化新增配置项：默认值与 simple_assign_mode 解析测试
-    // -----------------------------------------------------------------------
-
     #[test]
-    fn test_simple_code_new_fields_default_when_absent() {
-        // minimal_config_prefix 的 [weights.simple_code] 不含 6 个新增项，
-        // 应解析成功且全部取既定默认值（需求 4.1/7.2/8.2/9.1/12.1/17.1）
-        let cfg: Config = toml::from_str(minimal_config_prefix()).expect("解析失败");
-        let sc = &cfg.weights.simple_code;
-        assert_eq!(sc.simple_start_progress, 0.4);
-        assert_eq!(sc.simple_ramp_progress, 0.1);
-        assert_eq!(sc.simple_activation_reheat, 1.2);
-        assert_eq!(sc.simple_coverage_ratio, 1.0);
-        assert_eq!(sc.simple_active_coverage, 0.90);
-        assert_eq!(sc.reconcile_interval_ratio, 0.05);
-        assert_eq!(sc.simple_assign_mode, "efficiency");
-        assert_eq!(sc.simple_protect_top_n, 0);
-    }
-
-    #[test]
-    fn test_simple_code_new_fields_explicit_values() {
-        // 显式提供新增项时应原样解析（不被默认值覆盖）
-        let toml_with_new = minimal_config_prefix().replace(
-            "collision_count = 0.0\ncollision_rate = 0.0\n",
-            "collision_count = 0.0\ncollision_rate = 0.0\nsimple_start_progress = 0.4\nsimple_ramp_progress = 0.2\nsimple_activation_reheat = 1.5\nsimple_coverage_ratio = 0.95\nsimple_active_coverage = 0.8\nreconcile_interval_ratio = 0.1\nsimple_assign_mode = \"frequency\"\nsimple_protect_top_n = 500\n",
-        );
-        let cfg: Config = toml::from_str(&toml_with_new).expect("解析失败");
-        let sc = &cfg.weights.simple_code;
-        assert_eq!(sc.simple_start_progress, 0.4);
-        assert_eq!(sc.simple_ramp_progress, 0.2);
-        assert_eq!(sc.simple_activation_reheat, 1.5);
-        assert_eq!(sc.simple_coverage_ratio, 0.95);
-        assert_eq!(sc.simple_active_coverage, 0.8);
-        assert_eq!(sc.reconcile_interval_ratio, 0.1);
-        assert_eq!(sc.simple_protect_top_n, 500);
-        assert_eq!(sc.simple_assign_mode, "frequency");
-    }
-
-    #[test]
-    fn test_parse_simple_assign_mode_valid() {
-        // "frequency" -> Frequency，"efficiency" -> Efficiency（含大小写/空白容错）
-        assert_eq!(
-            parse_simple_assign_mode("frequency"),
-            SimpleAssignMode::Frequency
-        );
-        assert_eq!(
-            parse_simple_assign_mode("efficiency"),
-            SimpleAssignMode::Efficiency
-        );
-        assert_eq!(
-            parse_simple_assign_mode("  Frequency  "),
-            SimpleAssignMode::Frequency
-        );
-        assert_eq!(
-            parse_simple_assign_mode("EFFICIENCY"),
-            SimpleAssignMode::Efficiency
-        );
-    }
-
-    #[test]
-    fn test_parse_simple_assign_mode_illegal_falls_back_to_efficiency() {
-        // 非法字符串回落为 Efficiency（需求 17.2）
-        assert_eq!(
-            parse_simple_assign_mode("foo"),
-            SimpleAssignMode::Efficiency
-        );
-        assert_eq!(parse_simple_assign_mode(""), SimpleAssignMode::Efficiency);
-    }
-
-    #[test]
-    fn test_get_weight_config_simple_assign_mode_illegal_falls_back() {
-        // 通过 get_weight_config()：非法 simple_assign_mode 经 parse 后回落 Efficiency
-        let toml_with_illegal = minimal_config_prefix().replace(
-            "collision_count = 0.0\ncollision_rate = 0.0\n",
-            "collision_count = 0.0\ncollision_rate = 0.0\nsimple_assign_mode = \"bogus\"\n",
-        );
-        let cfg: Config = toml::from_str(&toml_with_illegal).expect("解析失败");
-        assert_eq!(cfg.weights.simple_code.simple_assign_mode, "bogus");
-
-        let wc = cfg.get_weight_config();
-        assert_eq!(wc.simple_assign_mode, SimpleAssignMode::Efficiency);
-        // 同时确认默认覆盖率被正确传递
-        assert_eq!(wc.simple_coverage_ratio, 1.0);
-    }
-
-    #[test]
-    fn test_code_num_zero_level_kept_only_with_matching_fixed() {
-        // 确认点 1：get_simple_code_config 中 code_num=0 的级别仅在「有按码长归属到该级的
-        // 固定简码」时保留，否则丢弃（默认配置 level 1 code_num=0 无固定简码 → 丢弃）。
-        // 默认值即 `fixed_simple_codes = None`；默认 simple_levels：level 1 code_num=0
-        // (rules ["Aa"], 1 键)、level 2/3 code_num>0。
-        let mut cfg = Config::default();
-        let levels_no_fixed = cfg.get_simple_code_config().levels;
-        assert!(
-            levels_no_fixed.iter().all(|l| l.code_num > 0),
-            "无固定简码时 code_num=0 级别应被丢弃"
-        );
-
-        // 加入归属 level 1（1 键）的固定简码 "a" → 该 code_num=0 级别应保留。
-        let mut map = std::collections::BTreeMap::new();
-        map.insert("不".to_string(), "a".to_string());
-        cfg.fixed_simple_codes = Some(map);
-        let levels_fixed = cfg.get_simple_code_config().levels;
-        assert!(
-            levels_fixed.iter().any(|l| l.code_num == 0),
-            "有归属 code_num=0 级别的固定简码时应保留该级别"
-        );
-        assert_eq!(
-            levels_fixed.len(),
-            levels_no_fixed.len() + 1,
-            "应恰好多保留一个 code_num=0 级别"
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // Property 11：激活与渐进配置钳制不变量
-    // -----------------------------------------------------------------------
-
-    use proptest::prelude::*;
-
-    proptest! {
-        // Feature: simple-code-perf-optimization, Property 11: 激活与渐进配置钳制不变量
-        // 对任意输入的 simple_start_progress 与 simple_ramp_progress（含负值、≥1、之和 >1 等
-        // 非法值），钳制后应满足：0 ≤ start < 1、start + ramp ≤ 1、负输入被钳为 0；
-        // 且当二者输入均为 0（含负值经钳制后为 0）时，hard_activate 为真。
-        // Validates: Requirements 13.1, 13.2, 13.3, 13.4, 13.5
-        #![proptest_config(ProptestConfig::with_cases(100))]
-        #[test]
-        fn prop11_activation_clamp_invariants(
-            start in -5.0f64..5.0,
-            ramp in -5.0f64..5.0,
-        ) {
-            let mut cfg = Config::default();
-            cfg.weights.simple_code.simple_start_progress = start;
-            cfg.weights.simple_code.simple_ramp_progress = ramp;
-
-            let hard = cfg.validate_simple_activation();
-            let sc = &cfg.weights.simple_code;
-
-            // 13.2 / 13.3：0 ≤ start < 1
-            prop_assert!(sc.simple_start_progress >= 0.0);
-            prop_assert!(sc.simple_start_progress < 1.0);
-
-            // 13.1：负输入被钳为 0（start/ramp 钳制后均非负）
-            prop_assert!(sc.simple_ramp_progress >= 0.0);
-            if start < 0.0 {
-                prop_assert_eq!(sc.simple_start_progress, 0.0);
-            }
-            if ramp < 0.0 && start + ramp <= 1.0 {
-                // ramp 负值先被钳为 0；该值不会再被 start+ramp>1 分支改动
-                prop_assert_eq!(sc.simple_ramp_progress, 0.0);
-            }
-
-            // 13.4：start + ramp ≤ 1（容许浮点误差）
-            prop_assert!(sc.simple_start_progress + sc.simple_ramp_progress <= 1.0 + 1e-9);
-
-            // 13.5：二者（经负值钳制后）均为 0 时硬激活为真，否则为假
-            let start_after_neg = start.max(0.0);
-            let ramp_after_neg = ramp.max(0.0);
-            let expected_hard = start_after_neg == 0.0 && ramp_after_neg == 0.0;
-            prop_assert_eq!(hard, expected_hard);
-        }
-    }
-
-    // 需求 27.3：simple_activation_reheat < 1.0 应被钳制为 1.0 并告警。
-    #[test]
-    fn test_reheat_below_one_clamped_to_one() {
-        let mut cfg = Config::default();
-        cfg.weights.simple_code.simple_activation_reheat = 0.5;
-        cfg.validate_simple_activation();
-        assert_eq!(
-            cfg.weights.simple_code.simple_activation_reheat, 1.0,
-            "reheat < 1.0 应被钳制为 1.0（需求 27.3）"
-        );
-
-        // >= 1.0 的值不被钳制（上界仅告警、不钳制，需求 27.4）。
-        let mut cfg2 = Config::default();
-        cfg2.weights.simple_code.simple_activation_reheat = 3.0;
-        cfg2.validate_simple_activation();
-        assert_eq!(cfg2.weights.simple_code.simple_activation_reheat, 3.0);
+    fn 权重只有全码一项且和为1() {
+        // 简码权重删除后，`[weights]` 只剩 `full_code`：默认值必须自洽。
+        let cfg = Config::default();
+        assert!(cfg.validate_weights().is_ok(), "默认权重应合法");
+        let w = cfg.get_weight_config();
+        let 和 = w.weight_collision_count
+            + w.weight_collision_rate
+            + w.weight_equivalence
+            + w.weight_equiv_cv
+            + w.weight_distribution;
+        assert!((和 - 1.0).abs() < 1e-9, "全码权重之和应为 1，实际 {}", 和);
     }
 
     #[test]
@@ -1633,7 +753,6 @@ dist_max = 8.0
         let _ = std::fs::remove_dir_all(&目录);
     }
 }
-
 #[cfg(test)]
 mod annealing_validate_tests {
     use super::*;

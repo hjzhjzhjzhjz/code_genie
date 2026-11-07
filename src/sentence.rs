@@ -23,7 +23,6 @@ use std::process::{Command, Stdio};
 
 pub struct 参数 {
     pub 全码词典: PathBuf,
-    pub 简码词典: Option<PathBuf>,
     pub 词组词典: Option<PathBuf>,
     pub 语料: PathBuf,
     pub 解码器: Option<PathBuf>,
@@ -261,8 +260,6 @@ pub fn run(参: &参数) {
     // ---- 词典 ----
     let mut 字码: HashMap<char, String> = HashMap::new();
     let mut 码表: HashMap<String, Vec<条目>> = HashMap::new();
-    let mut 字简: HashMap<char, String> = HashMap::new();
-    let mut 简表: HashMap<String, Vec<条目>> = HashMap::new();
 
     for (文本, 码, 权重) in 读词典(&参.全码词典) {
         let mut it = 文本.chars();
@@ -276,31 +273,12 @@ pub fn run(参: &参数) {
             码表.entry(码).or_default().push(条目 { 文本, 权重 });
         }
     }
-    if let Some(简径) = &参.简码词典 {
-        for (文本, 码, 权重) in 读词典(简径) {
-            let mut it = 文本.chars();
-            if let (Some(c), None) = (it.next(), it.next()) {
-                字简.insert(c, 码.clone());
-            }
-            简表.entry(码).or_default().push(条目 { 文本, 权重 });
-        }
-    }
     if 字码.is_empty() {
         eprintln!("❌ 全码词典为空，退出");
         return;
     }
-    for v in 码表.values_mut() {
-        v.sort_by_key(|e| std::cmp::Reverse(e.权重));
-    }
-    for v in 简表.values_mut() {
-        v.sort_by_key(|e| std::cmp::Reverse(e.权重));
-    }
-    // 合表 = 全码 + 词组 + 简码。Rime 里它们同在一份词典，
-    // 所以 3 码字有可能和某个 3 码简码撞在一起，必须一起比。
+    // 合表 = 全码 + 词组。Rime 里它们同在一份词典，同码必须一起比首候选。
     let mut 合表 = 码表.clone();
-    for (码, 条们) in &简表 {
-        合表.entry(码.clone()).or_default().extend(条们.clone());
-    }
     for v in 合表.values_mut() {
         v.sort_by_key(|e| std::cmp::Reverse(e.权重));
     }
@@ -365,15 +343,11 @@ pub fn run(参: &参数) {
             .unwrap_or_default()
     };
 
-    // ---- A 全码逐单元 / A' 简码优先 ----
+    // ---- A 逐单元 ----
     let mut 单元总数 = 0usize;
     let mut 全码对 = 0usize;
     let mut 全码句对 = 0usize;
-    let mut 简对 = 0usize;
-    let mut 简句对 = 0usize;
-    let mut 简单元数 = 0usize;
     let mut 全击键 = 0usize;
-    let mut 简击键 = 0usize;
     let mut 桶: Vec<(usize, usize, usize)> = vec![(0, 0, 0); 参.最长 + 1];
     let mut 错例: Vec<(String, String, String)> = Vec::new();
 
@@ -384,7 +358,6 @@ pub fn run(参: &参数) {
 
     for (序号, 句) in 句们.iter().enumerate() {
         let mut 本句全效 = true;
-        let mut 本句简效 = true;
 
         for c in 句.chars() {
             let 全 = &字码[&c];
@@ -397,40 +370,12 @@ pub fn run(参: &参数) {
             } else {
                 本句全效 = false;
                 if 错例.len() < 8 {
-                    错例.push((c.to_string(), 全.clone(), format!("{}（全码）", 全首选)));
-                }
-            }
-
-            // 有简码就走简码，这才是真实打法
-            match 字简.get(&c) {
-                Some(简) => {
-                    简单元数 += 1;
-                    简击键 += 简.chars().count();
-                    let 简首选 = 首(&合表, 简);
-                    if 简首选 == c.to_string() {
-                        简对 += 1;
-                    } else {
-                        本句简效 = false;
-                        if 错例.len() < 8 {
-                            错例.push((c.to_string(), 简.clone(), format!("{}（简码）", 简首选)));
-                        }
-                    }
-                }
-                None => {
-                    简击键 += 全.chars().count();
-                    if 全首选 == c.to_string() {
-                        简对 += 1;
-                    } else {
-                        本句简效 = false;
-                    }
+                    错例.push((c.to_string(), 全.clone(), 全首选));
                 }
             }
         }
         if 本句全效 {
             全码句对 += 1;
-        }
-        if 本句简效 {
-            简句对 += 1;
         }
 
         let n = 句.chars().count();
@@ -472,11 +417,10 @@ pub fn run(参: &参数) {
 
     let mut md = String::from("## 整句准确率\n\n");
     md.push_str(&format!(
-        "语料 {} 句 / {} 字　词典 {} 条（其中简码 {} 字）\n\n",
+        "语料 {} 句 / {} 字　词典 {} 条\n\n",
         句们.len(),
         单元总数,
-        码表.values().map(|v| v.len()).sum::<usize>(),
-        字简.len()
+        码表.values().map(|v| v.len()).sum::<usize>()
     ));
 
     md.push_str("### A 逐单元（每字打满码、空格取第一个候选）\n\n");
@@ -486,18 +430,6 @@ pub fn run(参: &参数) {
         全击键 as f64 / 单元总数 as f64,
         率(全码对, 单元总数),
         率(全码句对, 句们.len())
-    ));
-    md.push_str(&format!(
-        "| **简码优先**（有简码用简码） | **{:.3}/字** | **{:.2}%** | **{:.2}%** |\n",
-        简击键 as f64 / 单元总数 as f64,
-        率(简对, 单元总数),
-        率(简句对, 句们.len())
-    ));
-    md.push_str(&format!(
-        "\n简码覆盖 {} / {} 字（{:.1}%）。\n",
-        简单元数,
-        单元总数,
-        率(简单元数, 单元总数)
     ));
 
     match &外部解出 {
@@ -572,10 +504,7 @@ mod 词典读取测试 {
     #[test]
     fn 无头行时整文件当数据() {
         // 模拟 `完整码表.txt`：没有 `...`，带一行注释
-        let p = 写临时文件(
-            "b.txt",
-            "# 简码在前\n到\tbi\t11505436\n的\tfyek\t40529650\n",
-        );
+        let p = 写临时文件("b.txt", "# 码表\n到\tbi\t11505436\n的\tfyek\t40529650\n");
         let 表 = 读词典(&p);
         assert_eq!(表.len(), 2, "无 `...` 时应把整文件当数据");
         assert_eq!(表[0].0, "到");

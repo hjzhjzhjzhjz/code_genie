@@ -13,14 +13,18 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use crate::config::TargetsConfig;
-use crate::types::{Metrics, ScaleConfig, SimpleMetrics};
+use crate::types::{Metrics, ScaleConfig};
 
 /// 当前 checkpoint 文件格式版本（兼容性校验）。
-pub const CHECKPOINT_VERSION: u32 = 1;
+///
+/// 版本 2：删除简码功能。版本 1 的 `best_score` 是「全码 × full_code_weight +
+/// 简码 × simple_code_weight」的加权分，版本 2 起为纯全码分，两者量级不可比；
+/// 混用会让 resume 的最优解判定错乱，因此旧版本断点一律拒绝续算。
+pub const CHECKPOINT_VERSION: u32 = 2;
 
 /// 单个退火线程的可续算控制状态。
 ///
-/// 不含 `Evaluator`（全码桶、简码评估器等大结构）——resume 时由 `assignment` 重建。
+/// 不含 `Evaluator`（全码桶等大结构）——resume 时由 `assignment` 重建。
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ThreadCheckpoint {
     /// 线程 ID。
@@ -32,21 +36,15 @@ pub struct ThreadCheckpoint {
     /// 当前已完成步数（下次从此步继续）。
     pub current_step: usize,
 
-    // 按分量存储的最优解。
+    // 最优解。
     pub best_assignment: Vec<u8>,
-    pub best_full_score: f64,
-    pub best_simple_score: f64,
     pub best_score: f64,
     pub best_metrics: Metrics,
-    pub best_simple_metrics: SimpleMetrics,
 
     // 退火控制状态。
     pub temp_multiplier: f64,
     pub steps_since_improve: usize,
     pub last_best_score: f64,
-
-    /// 简码激活闩锁（一旦激活保持为真）。
-    pub simple_activated: bool,
 }
 
 /// 本次运行的全局元信息，运行期不变；resume 时只读、视为权威。
@@ -191,16 +189,6 @@ mod tests {
             dist_deviation: (seed % 41) as f64 / 10.0,
         }
     }
-    fn smetrics(seed: u64) -> SimpleMetrics {
-        SimpleMetrics {
-            weighted_freq_coverage: (seed % 100) as f64 / 100.0,
-            equiv_mean: (seed % 47) as f64 / 10.0,
-            dist_deviation: (seed % 29) as f64 / 10.0,
-            collision_count: (seed % 500) as usize,
-            collision_rate: (seed % 89) as f64 / 100.0,
-        }
-    }
-
     prop_compose! {
         fn arb_tc()(
             thread_id in 0usize..16,
@@ -212,7 +200,6 @@ mod tests {
             tm in 0.0f64..10.0,
             ssi in 0usize..1_000_000,
             lbs in -1e6f64..1e6,
-            activated in any::<bool>(),
         ) -> ThreadCheckpoint {
             let assignment: Vec<u8> = (0..n).map(|i| ((seed.wrapping_add(i as u64)) % 26) as u8).collect();
             let best_assignment: Vec<u8> = (0..n).map(|i| ((seed.wrapping_mul(3).wrapping_add(i as u64)) % 26) as u8).collect();
@@ -222,15 +209,11 @@ mod tests {
                 assignment,
                 current_step: step,
                 best_assignment,
-                best_full_score: bf,
-                best_simple_score: bs,
                 best_score: bf + bs,
                 best_metrics: metrics(seed),
-                best_simple_metrics: smetrics(seed.wrapping_mul(7)),
                 temp_multiplier: tm,
                 steps_since_improve: ssi,
                 last_best_score: lbs,
-                simple_activated: activated,
             }
         }
     }
@@ -241,21 +224,15 @@ mod tests {
             && a.assignment == b.assignment
             && a.current_step == b.current_step
             && a.best_assignment == b.best_assignment
-            && a.best_full_score == b.best_full_score
-            && a.best_simple_score == b.best_simple_score
             && a.best_score == b.best_score
             && a.best_metrics.collision_count == b.best_metrics.collision_count
             && a.best_metrics.collision_rate == b.best_metrics.collision_rate
             && a.best_metrics.equiv_mean == b.best_metrics.equiv_mean
             && a.best_metrics.equiv_cv == b.best_metrics.equiv_cv
             && a.best_metrics.dist_deviation == b.best_metrics.dist_deviation
-            && a.best_simple_metrics.weighted_freq_coverage
-                == b.best_simple_metrics.weighted_freq_coverage
-            && a.best_simple_metrics.collision_count == b.best_simple_metrics.collision_count
             && a.temp_multiplier == b.temp_multiplier
             && a.steps_since_improve == b.steps_since_improve
             && a.last_best_score == b.last_best_score
-            && a.simple_activated == b.simple_activated
     }
 
     proptest! {

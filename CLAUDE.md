@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-CodeGenie 是一个**字根编码优化器**，使用模拟退火算法优化汉字输入法的字根到键位映射方案。目标是最小化重码数、当量值和键位分布偏差，同时支持简码优化。
+CodeGenie 是一个**字根编码优化器**，使用模拟退火算法优化汉字输入法的字根到键位映射方案。目标是最小化重码数、当量值和键位分布偏差。
 
 ## 构建与运行命令
 
@@ -82,15 +82,14 @@ cargo test --release
 | `prepare/` | `prepare` 子命令：把上游 yaml/lua/csv 数据加工成优化器输入文件（13 步，逐字节等价重写原 `moling/prepare-inputs.sh`）；`schema.rs` 存三套方案的参数表。上游素材（`yustar_chaifen*.dict.yaml`、`yuhao_charsets.lua`、`yuhao-zigens.csv`、`chars.dict.yaml`、`beiyu-char-freq.txt`、`charAbsoluteFrequency*.json`）统一放在仓库根的 `yuhao-data/`，产物只写 `--dir` |
 | `data_dir.rs` | 素材目录定位：`<dir>/yuhao-data` → `<dir>/../yuhao-data` → `<dir>`（最后一项兼容素材平铺在 `--dir` 下的老布局）；`prepare`/`zigen` 找素材都走它 |
 | `annealing.rs` | 混合优化算法核心：4 种初始化策略、multi-start + hill climb 热身、冲突导向邻域搜索、SA 主循环 |
-| `context.rs` | `OptContext` 构建所有优化数据：字根组、汉字信息、当量表、简码配置、反向索引 |
-| `evaluator.rs` | `Evaluator` 计算重码数/率、当量、分布偏差等指标；`SimpleEvaluator` 处理简码评估；支持 `try_move()`/`try_swap()` 增量更新 |
+| `context.rs` | `OptContext` 构建所有优化数据：字根组、汉字信息、当量表、反向索引 |
+| `evaluator.rs` | `Evaluator` 计算重码数/率、当量、分布偏差等指标；支持 `try_move()`/`try_swap()` 增量更新 |
 | `loader.rs` | 加载固定字根、拆分表、当量表、键位分布、keymap 文件 |
-| `types.rs` | 核心类型：`CharInfo`、`RootGroup`、`Metrics`、`SimpleMetrics`、`LogicalRoot`、`CharSimpleInfo`、`SimpleCodeConfig` 等 |
-| `config.rs` | TOML 配置解析（`Config` 及子结构体），权重校验，简码规则转换，默认配置后备 |
+| `types.rs` | 核心类型：`CharInfo`、`RootGroup`、`Metrics`、`MetricScores`、`WeightConfig`、`ScaleConfig` 等 |
+| `config.rs` | TOML 配置解析（`Config` 及子结构体），权重校验，默认配置后备 |
 | `schedule.rs` | `TemperatureSchedule` 温度调度器，高斯舒适区自适应降温，预计算 LUT |
 | `calibrate.rs` | `calibrate_scales()` 根据初始指标自动校准各维度缩放因子 |
-| `simple.rs` | 解析独立简码规则文件（非 TOML 格式），用于 evaluate 子命令的 `--simple` 参数 |
-| `output.rs` | 输出所有结果文件：字根键位表、单字编码表、简码表、合并码表、完整码表、键位分布、当量分布、汇总 |
+| `output.rs` | 输出所有结果文件：字根键位表、合并码表、完整码表、键位分布、当量分布、汇总 |
 | `bucket_store.rs` | 全码桶存储，按「Dense 绝对占用预算」+ `n_chars` 判定密集/稀疏后端（`choose_backend_for`） |
 | `export_table.rs` | 测评码表导出；`取码序列` 实现星月 encoder 状态机（`export`/`pipeline` 共用） |
 | `rime_convert.rs` | 以星月方案包为底包，只重算 chaifen/full/words/quick/short/roots 六张表的码 |
@@ -109,25 +108,15 @@ cargo test --release
 
 ### 关键数据结构
 
-- **OptContext**: 优化上下文，包含 `groups`（字根组）、`chars`（汉字信息）、`group_to_chars`（反向索引）、`equiv_table`（当量矩阵）、`simple_config`、`char_simple_info`（逻辑根+级别指令）、`group_to_simple_affected`、`group_freq_sum`（预计算的组加权频率，用于 O(1) 键位使用量更新）等
+- **OptContext**: 优化上下文，包含 `groups`（字根组）、`chars`（汉字信息）、`group_to_chars`（反向索引）、`equiv_table`（当量矩阵）、`group_freq_sum`（预计算的组加权频率，用于 O(1) 键位使用量更新）等
 - **Evaluator**: 维护 `code_to_chars` 碰撞桶（Vec 直接索引，大小 = code_space）、`char_bucket_pos`（桶内位置索引）、`bucket_freq_sum`/`bucket_max_freq`（桶频率统计）、`key_weighted_usage` 键位使用统计，支持增量 move/swap 操作和 Boltzmann 接受判定
-- **SimpleEvaluator**: 按级别跟踪简码分配，计算简码重码数/率、频率覆盖、当量、分布
 - **RootGroup**: 字根组，包含 `roots`（字根名列表）和 `allowed_keys`（允许分配的键位）
 - **CharInfo**: 汉字拆分信息，`parts: Vec<u16>` 中值 < 1000 为直接键位索引，>= 1000 为组标记（GROUP_MARKER + group_index）
-- **LogicalRoot**: 逻辑根，桥接拆分表与简码系统，包含 base_name 和有序子根列表
 
 ### 字根分类
 
 1. **固定字根**: 单键映射，从 `字根约束.txt` 加载，不参与优化
 2. **有约束字根**: 多键选择（也在 `字根约束.txt` 中定义），作为 `RootGroup` 参与优化但键位有约束
-
-### 简码系统
-
-简码规则格式为 `AaBaCa`，每两个字符为一组：
-- 大写字母（根选择器）: A=第1根, B=第2根, ... Z=最后一根
-- 小写字母（码位选择器）: a=第1码, b=第2码, ... z=最后一码
-
-配置中 `code_num` 表示该级别可分配的简码数量（0 表示不限制，按频率贪心分配）。每个级别可配置多个候选规则（`rules` 数组），系统选择能成功解析的第一个。
 
 ### 模拟退火算法
 
@@ -205,22 +194,7 @@ cargo test --release
             equiv_cv: 0.01,          // 当量变异系数权重
             distribution: 0.2,       // 分布偏差权重
         ),
-        simple_code: (
-            enabled: true,
-            full_code_weight: 0.6,   // 全码目标总权重
-            simple_code_weight: 0.4, // 简码目标总权重
-            collision_count: 0.1,
-            collision_rate: 0.3,
-            freq: 0.2,
-            equiv: 0.2,
-            dist: 0.2,
-        ),
     ),
-    simple_levels: [
-        (level: 1, code_num: 1, rules: ["Aa"]),                  // 该级简码数 / 取码规则
-        (level: 2, code_num: 1, rules: ["AaBa"]),
-        (level: 3, code_num: 0, rules: ["AaAbZz", "AaBaZz"]),    // 0 = 不分配该级
-    ],
 )
 ```
 
@@ -232,7 +206,6 @@ cargo test --release
 - `bucket_freq_sum`/`bucket_max_freq` 实现碰撞频率的增量维护，避免每次遍历桶
 - `group_freq_sum` 预计算组加权频率，`key_weighted_usage` 更新从 O(chars) 降为 O(1)
 - `try_triple_swap`、`try_full_key_swap`、`coordinate_descent` 均为增量评估+回滚，不重建 Evaluator
-- 简码出简走增量（阶段 1 候选集 + 阶段 2 受影响桶），热路径零全量重建，靠 `reconcile` 周期对账兜底
 - SA 主循环输出实时速度统计（万步/分钟）
 - 温度调度使用预计算查找表 (LUT, 100001 个采样点 + 线性插值)
 - 全局分配器用 `mimalloc`（`Cargo.toml` 的 `mimalloc` feature，默认开）：每步大量短命分配会让 CRT 堆段只扩不缩，长跑内存高水位单调抬高；换线程本地堆后 120 万步 ×3 线程实测峰值工作集 −39%、墙钟 −17%。`--no-default-features` 回退系统分配器
@@ -242,16 +215,13 @@ cargo test --release
 ### 调参经验值（本机 6P+8E，V8 配置实测）
 
 - **`threads`**：设成 P 核数量（6）最划算。总步数固定 360 万步时，3 线程 106.8s / 6 线程 83.4s / 8 线程 90.0s / 12 线程 85.3s（各 3 轮中位数，机器噪声大时 ±20%），最优得分无系统差异（0.1240~0.1286）。超过 P 核数后线程被塞到 E 核，单链变短而总吞吐不升。
-- **`simple_active_coverage`**：这是内存旋钮，不是速度旋钮。1.0 → 0.9/0.7 时峰值工作集从 ~650MB 降到 ~180MB（6 线程 60 万步实测），耗时与质量都无系统差异；但它决定退火期只对高频前缀做简码增量维护，降低它会改变简码优化范围，非内存受限时保持 1.0。
 
 ## 输出文件
 
 优化完成后生成 `output-{YYYYMMDDHHMMSS}/` 目录：
 - `字根键位表.txt`: 字根 → 键位串 + 使用频次
-- `单字编码表.txt`: 简码在前、全码在后（`字/码/频次`），覆盖**优化字集**
-- `完整码表.txt`: 同上格式，覆盖**全量拆分表**（配置 `files.full_splits` 时生成）。**严格两段**：先全部简码行（`全量码表文本` 的第一段缓冲），再全部全码行——顺序由两段拼接保证，不靠书写顺序
-- `简码表.txt`: 简码分配（按级别、按频率排序）
-- `合并码表.txt`: 简码+全码合并输出
+- `完整码表.txt`: `字/码`，覆盖**全量拆分表**（配置 `files.full_splits` 时生成）
+- `合并码表.txt`: `字/码`，覆盖**优化字集**（与 `完整码表.txt` 同 encoder）
 - `用指分布.txt` / `当量分布.txt`: 用指分布 / 当量分布统计
 - `汇总.txt`: 各线程结果排名汇总
 - `尺度.json`: 固化缩放因子（供 `--scale` 复用）

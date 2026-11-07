@@ -21,3 +21,26 @@ tools/检查红线.py                          # 检测器自身含规则字面�
 测试减少:src/explore.rs
 断言减少:src/explore.rs
 测试随文件删除:src/explore.rs
+
+# 简码计算功能整体移除（2026-11-08）：`SimpleEvaluator`、五项简码指标、退火激活/渐进/冻结/对账、
+# 简码输出段与 CLI 的 --simple 全部删除，配置项 [simple_levels]/[fixed_simple_codes]/
+# [targets.simple_code]/[weights.simple_code] 一并去掉。相关断言与测试都只覆盖已删除的实现，
+# 没有对应代码可测，故按文件登记豁免。新增测试见 evaluator::full_evaluator_tests、
+# output::全量码表测试、config 的「旧配置里的简码段被忽略」等。
+断言减少:src/annealing.rs
+测试减少:src/annealing.rs
+断言减少:src/config.rs
+测试减少:src/config.rs
+断言减少:src/context.rs
+测试减少:src/context.rs
+断言减少:src/evaluator.rs
+测试减少:src/evaluator.rs
+断言减少:src/main.rs
+断言减少:src/output.rs
+测试减少:src/output.rs
+断言减少:src/prepare/inputs.rs
+测试减少:src/prepare/inputs.rs
+断言减少:src/roots_chart.rs
+测试减少:src/roots_chart.rs
+断言减少:src/types.rs
+测试减少:src/types.rs

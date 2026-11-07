@@ -415,7 +415,7 @@ mod keymap_assignment_tests {
     use super::*;
     use crate::config::TargetsConfig;
     use crate::context::OptContext;
-    use crate::types::{ScaleConfig, SimpleCodeConfig, WeightConfig, EQUIV_TABLE_SIZE};
+    use crate::types::{ScaleConfig, WeightConfig, EQUIV_TABLE_SIZE};
     use proptest::prelude::*;
     use rand::Rng;
 
@@ -436,7 +436,6 @@ mod keymap_assignment_tests {
             equiv_table,
             key_dist,
             ScaleConfig::default(),
-            SimpleCodeConfig { levels: vec![] },
             WeightConfig::default(),
             TargetsConfig::default(),
         )

@@ -136,9 +136,6 @@ pub struct 参数 {
     pub 到步骤: usize,
     /// 基线目录：给了就逐字节对照产物
     pub 基线目录: Option<String>,
-    /// 读 `[weights.simple_code].enabled` 的配置文件；缺省在 `--dir` 下按
-    /// `config-<schema>.ron` → `config.ron` 的顺序找
-    pub 配置: Option<String>,
 }
 
 /// 一次产出的文件清单，用于 `--baseline-dir` 对照
@@ -187,7 +184,7 @@ pub fn run(参: &参数) -> Result<(), String> {
             10 => {} // 原「飞键约束」步骤已移除：飞键根机制整体删除
             11 => {} // 原「动态字根」步骤已移除：字根分组全部在 字根约束.txt 内定义
             12 => inputs::步骤12_编码展开(&上)?,
-            13 => inputs::步骤13_简码码位(&上, 解析配置(参, &上).as_deref())?,
+            13 => {} // 原「简码码位改写」步骤已移除：不再计算简码
             other => return Err(format!("步骤号 {other} 超出 0~13")),
         }
     }
@@ -215,26 +212,6 @@ pub(crate) fn 共用步骤(上: &上下文, 步骤: usize) -> Result<(), String>
         5 => roots::步骤5_字根读音(上),
         other => Err(format!("共用步骤只覆盖 0~5，收到 {other}")),
     }
-}
-
-/// 定位配置文件（`config-<schema>.ron` → `.toml` → `config.ron` → `config.toml`）
-fn 解析配置(参: &参数, 上: &上下文) -> Option<PathBuf> {
-    if let Some(p) = &参.配置 {
-        return Some(PathBuf::from(p));
-    }
-    let 候选 = [
-        format!("config-{}.ron", 上.方案.名),
-        format!("config-{}.toml", 上.方案.名),
-        "config.ron".to_string(),
-        "config.toml".to_string(),
-    ];
-    for 名 in &候选 {
-        let p = 上.目录.join(名);
-        if p.exists() {
-            return Some(p);
-        }
-    }
-    None
 }
 
 /// 逐字节对照产物与基线目录，打印首个差异段落

@@ -50,7 +50,6 @@ mod roots_cluster;
 mod run;
 mod schedule;
 mod sentence;
-mod simple;
 mod types;
 mod validate;
 mod zigen;
@@ -62,9 +61,7 @@ use crate::config::{Config, TargetsConfig};
 use crate::context::OptContext;
 use crate::evaluator::Evaluator;
 use crate::output::{save_results, save_summary, save_thread_results};
-use crate::types::{
-    key_to_char, KeyDistConfig, ScaleConfig, SimpleCodeConfig, SimpleMetrics, EQUIV_TABLE_SIZE,
-};
+use crate::types::{key_to_char, KeyDistConfig, ScaleConfig, EQUIV_TABLE_SIZE};
 
 // =========================================================================
 // CLI 定义
@@ -191,10 +188,6 @@ enum Commands {
         #[arg(long)]
         equiv: Option<String>,
 
-        /// 简码规则文件（可选）
-        #[arg(long)]
-        simple: Option<String>,
-
         /// 评估输出文件
         #[arg(short = 'o', long, default_value = "output-evaluate.txt")]
         output: String,
@@ -217,10 +210,6 @@ enum Commands {
         /// 拆分表（拆分表.txt 或 拆分全表.txt：字<TAB>根 根 …<TAB>频次）
         #[arg(short = 'c', long)]
         chaifen: String,
-
-        /// 简码表（简码表.txt，可选）
-        #[arg(short = 's', long)]
-        simple: Option<String>,
 
         /// 方案名：moling（魔靈）/ yuling（靈明）/ yustar（星陳），决定取码规则
         #[arg(long, default_value = "moling")]
@@ -368,9 +357,6 @@ enum Commands {
         /// 全码词典（Rime dict.yaml 或 TSV：字 / 码 / 权重）
         #[arg(long)]
         full_dict: String,
-        /// 简码词典（可选，有就多算一个「简码优先」口径；格式同上）
-        #[arg(long)]
-        short_dict: Option<String>,
         /// 词组词典（可选；格式同上）
         #[arg(long)]
         words_dict: Option<String>,
@@ -417,10 +403,6 @@ enum Commands {
         #[arg(long)]
         chaifen: String,
 
-        /// 简码表（可选）
-        #[arg(long)]
-        simple: Option<String>,
-
         /// 同键组表 字根约束.txt（可选），用来标出归并关系
         #[arg(long)]
         fixed: Option<String>,
@@ -448,10 +430,6 @@ enum Commands {
         /// 纯拆分表
         #[arg(long)]
         chaifen: String,
-
-        /// 简码表（可选）
-        #[arg(long)]
-        simple: Option<String>,
 
         /// 归并规则，可重复。写法：`还=人` 或 `你 1=人 2`，多条用分号分隔
         #[arg(long = "rules")]
@@ -514,11 +492,6 @@ enum Commands {
         /// 基线目录：给了就把产物与之逐字节对照，有差异即报错
         #[arg(long = "baseline-dir")]
         baseline_dir: Option<String>,
-
-        /// 读取 `[weights.simple_code].enabled` 的配置文件；缺省在 --dir 下
-        /// 按 `config-<schema>.ron` → `config.ron` 的顺序自动查找
-        #[arg(long)]
-        config: Option<String>,
     },
 
     /// 聚类重码分析：某一行聚类压成一个大码，要付出多少重码
@@ -613,7 +586,6 @@ fn main() {
         from_step,
         to_step,
         baseline_dir,
-        config,
     }) = &cli.command
     {
         let 参 = prepare::参数 {
@@ -623,7 +595,6 @@ fn main() {
             从步骤: *from_step,
             到步骤: *to_step,
             基线目录: baseline_dir.clone(),
-            配置: config.clone(),
         };
         if let Err(e) = prepare::run(&参) {
             eprintln!("❌ {}", e);
@@ -779,7 +750,6 @@ fn main() {
             keymap,
             keydist,
             equiv,
-            simple,
             output,
         }) => {
             let cfg = 载入配置();
@@ -792,7 +762,6 @@ fn main() {
                 &keymap,
                 keydist_path,
                 equiv_path,
-                simple.as_deref(),
                 &output,
             );
         }
@@ -800,7 +769,6 @@ fn main() {
         Some(Commands::ExportTable {
             keymap,
             chaifen,
-            simple,
             schema,
             max_code_len,
             output,
@@ -808,7 +776,6 @@ fn main() {
             let 参 = export_table::参数 {
                 键位: &keymap,
                 拆分: &chaifen,
-                简码: simple.as_deref(),
                 输出: &output,
                 方案: &schema,
                 最大码长: max_code_len,
@@ -879,7 +846,6 @@ fn main() {
 
         Some(Commands::Sentence {
             full_dict,
-            short_dict,
             words_dict,
             corpus,
             decoder,
@@ -893,7 +859,6 @@ fn main() {
             verbose,
         }) => sentence::run(&sentence::参数 {
             全码词典: full_dict.into(),
-            简码词典: short_dict.map(Into::into),
             词组词典: words_dict.map(Into::into),
             语料: corpus.into(),
             解码器: decoder.map(Into::into),
@@ -910,7 +875,6 @@ fn main() {
         Some(Commands::Pipeline {
             keymap,
             chaifen,
-            simple,
             fixed,
             chars,
             top,
@@ -919,7 +883,6 @@ fn main() {
             &keymap,
             &chaifen,
             fixed.as_deref(),
-            simple.as_deref(),
             &chars,
             top,
             output.as_deref(),
@@ -928,18 +891,10 @@ fn main() {
         Some(Commands::Merge {
             keymap,
             chaifen,
-            simple,
             rules,
             out,
             summary,
-        }) => pipeline::归并(
-            &keymap,
-            &chaifen,
-            simple.as_deref(),
-            &rules,
-            &out,
-            summary.as_deref(),
-        ),
+        }) => pipeline::归并(&keymap, &chaifen, &rules, &out, summary.as_deref()),
 
         Some(Commands::Diagnose {
             dir,
@@ -1090,7 +1045,6 @@ fn run_evaluate(
     keymap_path: &str,
     keydist_path: &str,
     equiv_path: &str,
-    simple_path: Option<&str>,
     output_path: &str,
 ) {
     println!("=== CodeGenie 评估模式 ===");
@@ -1098,9 +1052,6 @@ fn run_evaluate(
     println!("  键位映射: {}", keymap_path);
     println!("  键位分布: {}", keydist_path);
     println!("  当量数据: {}", equiv_path);
-    if let Some(sp) = simple_path {
-        println!("  简码规则: {}", sp);
-    }
     println!("  输出文件: {}", output_path);
 
     // 加载数据
@@ -1112,15 +1063,6 @@ fn run_evaluate(
     println!("  已加载 {} 个字根映射", root_to_key.len());
     println!("  已加载 {} 个汉字拆分", splits.len());
 
-    // 加载简码配置
-    let simple_config = if let Some(sp) = simple_path {
-        let scfg = simple::parse_simple_code_config(sp);
-        println!("  已加载简码配置: {} 级", scfg.levels.len());
-        scfg
-    } else {
-        cfg.get_simple_code_config()
-    };
-
     // 将所有字根作为 fixed_roots，groups 为空
     let fixed_roots: HashMap<String, u8> = root_to_key;
     let groups: Vec<types::RootGroup> = vec![];
@@ -1129,17 +1071,15 @@ fn run_evaluate(
     // 构建 OptContext
     let scale_config = types::ScaleConfig::default();
     let weights = cfg.get_weight_config();
-    let mut ctx = OptContext::new_with_fixed_and_termination(
+    let mut ctx = OptContext::new_with_termination(
         &splits,
         &fixed_roots,
         &groups,
         equiv_table,
         key_dist_config,
         scale_config,
-        simple_config,
         weights,
         TargetsConfig::default(),
-        &cfg.get_fixed_simple_codes(),
         &cfg.keys.termination_keys,
     );
     ctx.display_order = cfg.keys.display_order.clone();
@@ -1151,7 +1091,6 @@ fn run_evaluate(
     // 运行评估
     let evaluator = Evaluator::new(&ctx, &assignment);
     let metrics = evaluator.get_metrics(&ctx);
-    let simple_metrics = evaluator.get_simple_metrics(&ctx);
 
     // 打印评估结果
     println!("\n📊 评估结果:");
@@ -1165,29 +1104,6 @@ fn run_evaluate(
     println!("  「全码」当量变异系数(CV): {:.4}", metrics.equiv_cv);
     println!("  「全码」用指分布偏差(L2): {:.4}", metrics.dist_deviation);
 
-    if !ctx.simple_config.levels.is_empty() {
-        println!("  ─────────────────────────────────────");
-        println!(
-            "  「简码」重码数:          {}",
-            simple_metrics.collision_count
-        );
-        println!(
-            "  「简码」重码率:          {:.6}%",
-            simple_metrics.collision_rate * 100.0
-        );
-        println!(
-            "  「简码」覆盖率:          {:.4}%",
-            simple_metrics.weighted_freq_coverage * 100.0
-        );
-        println!(
-            "  「简码」加权当量:        {:.4}",
-            simple_metrics.equiv_mean
-        );
-        println!(
-            "  「简码」分布偏差:        {:.4}",
-            simple_metrics.dist_deviation
-        );
-    }
     println!("  ═══════════════════════════════════════");
 
     // 生成详细评估报告
@@ -1197,7 +1113,6 @@ fn run_evaluate(
         &assignment,
         &evaluator,
         &metrics,
-        &simple_metrics,
         &key_dist_config,
     );
 
@@ -1212,7 +1127,6 @@ fn build_evaluate_report(
     assignment: &[u8],
     evaluator: &Evaluator,
     metrics: &types::Metrics,
-    simple_metrics: &SimpleMetrics,
     key_dist_config: &[KeyDistConfig; EQUIV_TABLE_SIZE],
 ) -> String {
     let mut out = String::new();
@@ -1242,34 +1156,6 @@ fn build_evaluate_report(
         metrics.dist_deviation
     ));
     out.push_str("#\n");
-
-    // ===== 简码指标 =====
-    if !ctx.simple_config.levels.is_empty() {
-        out.push_str("# ═══════════════════════════════════════\n");
-        out.push_str("# 简码指标\n");
-        out.push_str("# ═══════════════════════════════════════\n");
-        out.push_str(&format!(
-            "# 简码重码数: {}\n",
-            simple_metrics.collision_count
-        ));
-        out.push_str(&format!(
-            "# 简码重码率: {:.6}%\n",
-            simple_metrics.collision_rate * 100.0
-        ));
-        out.push_str(&format!(
-            "# 简码覆盖率: {:.4}%\n",
-            simple_metrics.weighted_freq_coverage * 100.0
-        ));
-        out.push_str(&format!(
-            "# 简码加权当量: {:.4}\n",
-            simple_metrics.equiv_mean
-        ));
-        out.push_str(&format!(
-            "# 简码分布偏差: {:.4}\n",
-            simple_metrics.dist_deviation
-        ));
-        out.push_str("#\n");
-    }
 
     // ===== 用指分布 =====
     out.push_str("\n# ═══════════════════════════════════════\n");
@@ -1443,40 +1329,26 @@ fn build_evaluate_report(
 
 /// 根据配置决定最终使用的 ScaleConfig 及其来源说明
 /// - cfg.scale 为 None：完全依赖 calibrate，返回 calibrated 值
-/// - cfg.scale 所有必要字段均为 Some：跳过 calibrate，直接使用手动配置
-///   （简码未启用时，简码相关字段不计入"必要"）
+/// - cfg.scale 全码五项均为 Some：跳过 calibrate，直接使用手动配置
 /// - cfg.scale 部分字段为 Some：先用 calibrated 值，再用 Some 字段覆盖
 ///
 /// 注意：[scale] 中配置的值与 targets 中的指标同量纲（即"典型值"），
 /// 读入时取倒数转换为 ScaleConfig 内部使用的缩放因子（scale = 1/典型值）
 fn resolve_scale_config(cfg: &Config, calibrated: ScaleConfig) -> (ScaleConfig, &'static str) {
-    let simple_enabled = cfg.weights.simple_code.enabled;
-
     match &cfg.scale {
         None => (calibrated, "自动校准"),
         Some(toml) => {
-            // 全码 5 个字段必须全部设置
-            let full_code_set = toml.collision_count.is_some()
+            let all_set = toml.collision_count.is_some()
                 && toml.collision_rate.is_some()
                 && toml.equivalence.is_some()
                 && toml.equiv_cv.is_some()
                 && toml.distribution.is_some();
 
-            // 简码字段：仅在 simple_code.enabled = true 时才要求设置
-            let simple_code_set = !simple_enabled
-                || (toml.simple_freq.is_some()
-                    && toml.simple_equiv.is_some()
-                    && toml.simple_dist.is_some()
-                    && toml.simple_collision_count.is_some()
-                    && toml.simple_collision_rate.is_some());
-
-            let all_set = full_code_set && simple_code_set;
-
             // 辅助闭包：将"典型值"转换为缩放因子（取倒数），0 值保护
             let to_scale = |v: f64| if v > 0.0 { 1.0 / v } else { 1.0 };
 
             if all_set {
-                // all_set 已保证 5 个字段均 Some；用 if let 解构，避免 unwrap panic。
+                // all_set 已保证五项均 Some；用 if let 解构，避免 unwrap panic。
                 if let (Some(cc), Some(cr), Some(eq), Some(cv), Some(di)) = (
                     toml.collision_count,
                     toml.collision_rate,
@@ -1490,26 +1362,6 @@ fn resolve_scale_config(cfg: &Config, calibrated: ScaleConfig) -> (ScaleConfig, 
                         equivalence: to_scale(eq),
                         equiv_cv: to_scale(cv),
                         distribution: to_scale(di),
-                        simple_freq: toml
-                            .simple_freq
-                            .map(to_scale)
-                            .unwrap_or(calibrated.simple_freq),
-                        simple_equiv: toml
-                            .simple_equiv
-                            .map(to_scale)
-                            .unwrap_or(calibrated.simple_equiv),
-                        simple_dist: toml
-                            .simple_dist
-                            .map(to_scale)
-                            .unwrap_or(calibrated.simple_dist),
-                        simple_collision_count: toml
-                            .simple_collision_count
-                            .map(to_scale)
-                            .unwrap_or(calibrated.simple_collision_count),
-                        simple_collision_rate: toml
-                            .simple_collision_rate
-                            .map(to_scale)
-                            .unwrap_or(calibrated.simple_collision_rate),
                     };
                     (sc, "手动配置")
                 } else {
@@ -1533,21 +1385,6 @@ fn resolve_scale_config(cfg: &Config, calibrated: ScaleConfig) -> (ScaleConfig, 
                 }
                 if let Some(v) = toml.distribution {
                     sc.distribution = to_scale(v);
-                }
-                if let Some(v) = toml.simple_freq {
-                    sc.simple_freq = to_scale(v);
-                }
-                if let Some(v) = toml.simple_equiv {
-                    sc.simple_equiv = to_scale(v);
-                }
-                if let Some(v) = toml.simple_dist {
-                    sc.simple_dist = to_scale(v);
-                }
-                if let Some(v) = toml.simple_collision_count {
-                    sc.simple_collision_count = to_scale(v);
-                }
-                if let Some(v) = toml.simple_collision_rate {
-                    sc.simple_collision_rate = to_scale(v);
                 }
                 (sc, "部分手动覆盖")
             }
@@ -1694,26 +1531,6 @@ fn run_optimize(
         cfg.weights.full_code.equiv_cv,
         cfg.weights.full_code.distribution,
     );
-    println!(
-        "简码优化: {} (全码占比={:.0}%, 简码占比={:.0}%)",
-        if cfg.weights.simple_code.enabled {
-            "开启"
-        } else {
-            "关闭"
-        },
-        cfg.weights.simple_code.full_code_weight * 100.0,
-        cfg.weights.simple_code.simple_code_weight * 100.0
-    );
-    if cfg.weights.simple_code.enabled {
-        println!(
-            "简码子权重: 频率覆盖={:.2}, 当量={:.2}, 分布={:.2}, 重码数={:.2}, 重码率={:.2}",
-            cfg.weights.simple_code.freq,
-            cfg.weights.simple_code.equiv,
-            cfg.weights.simple_code.dist,
-            cfg.weights.simple_code.collision_count,
-            cfg.weights.simple_code.collision_rate,
-        );
-    }
     println!("用指分布输出顺序: {}", cfg.keys.display_order);
 
     // 创建/复用输出目录
@@ -1735,31 +1552,6 @@ fn run_optimize(
     // ==================== 加载数据 ====================
     let (fixed_roots, constrained) = must(loader::load_fixed(&cfg.files.fixed));
     let splits = must(loader::load_splits(&cfg.files.splits));
-
-    // 加载简码配置
-    let simple_config = if cfg.weights.simple_code.enabled {
-        let scfg = cfg.get_simple_code_config();
-        println!("\n📋 简码配置:");
-        for level in &scfg.levels {
-            let rules_str: String = level
-                .rule_candidates
-                .iter()
-                .map(|rule| {
-                    rule.iter()
-                        .map(|s| format!("{}{}", s.root_selector, s.code_selector))
-                        .collect::<String>()
-                })
-                .collect::<Vec<_>>()
-                .join(" | ");
-            println!(
-                "  - {}级简码: 每简码至多{}字, 规则: {}",
-                level.level, level.code_num, rules_str
-            );
-        }
-        scfg
-    } else {
-        SimpleCodeConfig { levels: vec![] }
-    };
 
     // 打印数据统计
     let max_parts_in_data = splits.iter().map(|(_, r, _)| r.len()).max().unwrap_or(0);
@@ -1783,25 +1575,14 @@ fn run_optimize(
     }
 
     // ==================== 初始校准 ====================
-    // 判断是否需要 calibrate
-    // 全码 5 个字段必须全部设置；简码字段仅在 simple_code.enabled = true 时才要求
-    let full_code_scale_set = cfg.scale.as_ref().is_some_and(|s| {
+    // 判断是否需要 calibrate：全码 5 个字段必须全部设置
+    let all_manual = cfg.scale.as_ref().is_some_and(|s| {
         s.collision_count.is_some()
             && s.collision_rate.is_some()
             && s.equivalence.is_some()
             && s.equiv_cv.is_some()
             && s.distribution.is_some()
     });
-    let simple_code_scale_set = !cfg.weights.simple_code.enabled
-        || cfg.scale.as_ref().is_some_and(|s| {
-            s.simple_freq.is_some()
-                && s.simple_equiv.is_some()
-                && s.simple_dist.is_some()
-                && s.simple_collision_count.is_some()
-                && s.simple_collision_rate.is_some()
-        });
-    let all_manual = full_code_scale_set && simple_code_scale_set;
-
     let weights = cfg.get_weight_config();
     // 校准分支会构建 temp_ctx（含完整全码/简码预计算）。为避免退火前重复构建，
     // 校准后复用 temp_ctx 作为正式 ctx，仅就地更新评分用的 scale/targets（二者不参与
@@ -1832,24 +1613,21 @@ fn run_optimize(
         let equiv_table = or_warn_default(loader::load_pair_equivalence(&cfg.files.pair_equiv));
         let key_dist_config = or_warn_default(loader::load_key_distribution(&cfg.files.key_dist));
         let temp_scale = types::ScaleConfig::default();
-        let temp_ctx = OptContext::new_with_fixed_and_termination(
+        let temp_ctx = OptContext::new_with_termination(
             &splits,
             &fixed_roots,
             &constrained,
             equiv_table,
             key_dist_config,
             temp_scale,
-            simple_config.clone(),
             weights,
             TargetsConfig::default(),
-            &cfg.get_fixed_simple_codes(),
             &cfg.keys.termination_keys,
         );
 
         let initial_assignment = annealing::smart_init(&temp_ctx, cfg);
         let initial_eval = Evaluator::new(&temp_ctx, &initial_assignment);
         let initial_metrics = initial_eval.get_metrics(&temp_ctx);
-        let initial_simple_metrics = initial_eval.get_simple_metrics(&temp_ctx);
 
         println!("  初始状态观测:");
         println!(
@@ -1860,114 +1638,7 @@ fn run_optimize(
             "    当量: {:.4},  CV: {:.4},  分布偏差: {:.4}",
             initial_metrics.equiv_mean, initial_metrics.equiv_cv, initial_metrics.dist_deviation
         );
-        if cfg.weights.simple_code.enabled {
-            println!(
-                "    简码覆盖: {:.4}%,  简码当量: {:.4},  简码分布: {:.4}",
-                initial_simple_metrics.weighted_freq_coverage * 100.0,
-                initial_simple_metrics.equiv_mean,
-                initial_simple_metrics.dist_deviation
-            );
-            println!(
-                "    简码重码数: {},  简码重码率: {:.6}%",
-                initial_simple_metrics.collision_count,
-                initial_simple_metrics.collision_rate * 100.0
-            );
-        }
-
-        // 逻辑根验证（仅在启用简码时）
-        if cfg.weights.simple_code.enabled {
-            println!("\n  📝 逻辑根解析验证 (前3字):");
-            for ci in 0..3.min(temp_ctx.raw_splits.len()) {
-                let (ch, roots, _) = &temp_ctx.raw_splits[ci];
-                let si = &temp_ctx.char_simple_infos[ci];
-                println!("    '{}' 拆分: {:?}", ch, roots);
-                for (ri, lr) in si.logical_roots.iter().enumerate() {
-                    let full_keys: Vec<char> = lr
-                        .full_code_parts
-                        .iter()
-                        .map(|&p| key_to_char(temp_ctx.resolve_key(p, &initial_assignment)))
-                        .collect();
-                    println!(
-                        "      逻辑根[{}] '{}': 拆分中占位={:?}, 完整编码={:?}",
-                        ri, lr.base_name, lr.split_part_indices, full_keys
-                    );
-                }
-                for (li, instr) in si.level_instructions.iter().enumerate() {
-                    if let Some(ref steps) = instr {
-                        let keys: Vec<char> = steps
-                            .iter()
-                            .map(|&(root_idx, code_idx)| {
-                                let lr = &si.logical_roots[root_idx];
-                                let part = lr.full_code_parts[code_idx];
-                                key_to_char(temp_ctx.resolve_key(part, &initial_assignment))
-                            })
-                            .collect();
-                        let level_cfg = &temp_ctx.simple_config.levels[li];
-                        let mut matched_rule_idx = 0;
-                        for (ri, rule) in level_cfg.rule_candidates.iter().enumerate() {
-                            if types::try_resolve_rule(
-                                rule,
-                                &si.logical_roots,
-                                si.logical_roots.len(),
-                            )
-                            .is_some()
-                            {
-                                matched_rule_idx = ri;
-                                break;
-                            }
-                        }
-                        let rule_str: String = level_cfg.rule_candidates[matched_rule_idx]
-                            .iter()
-                            .map(|s| format!("{}{}", s.root_selector, s.code_selector))
-                            .collect();
-                        let all_rules_str: String = level_cfg
-                            .rule_candidates
-                            .iter()
-                            .enumerate()
-                            .map(|(i, rule)| {
-                                let s: String = rule
-                                    .iter()
-                                    .map(|s| format!("{}{}", s.root_selector, s.code_selector))
-                                    .collect();
-                                if i == matched_rule_idx {
-                                    format!("[{}]", s)
-                                } else {
-                                    s
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        println!(
-                            "      {}级简码(规则: {} 命中: {}): {:?}",
-                            level_cfg.level, all_rules_str, rule_str, keys
-                        );
-                    } else {
-                        let level_cfg = &temp_ctx.simple_config.levels[li];
-                        let all_rules_str: String = level_cfg
-                            .rule_candidates
-                            .iter()
-                            .map(|rule| {
-                                rule.iter()
-                                    .map(|s| format!("{}{}", s.root_selector, s.code_selector))
-                                    .collect::<String>()
-                            })
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        println!(
-                            "      {}级简码(规则: {}): 无合规候选",
-                            level_cfg.level, all_rules_str
-                        );
-                    }
-                }
-            }
-        }
-
-        let calibrated = calibrate_scales(
-            &initial_metrics,
-            &initial_simple_metrics,
-            &weights,
-            &cfg.get_targets_config(),
-        );
+        let calibrated = calibrate_scales(&initial_metrics, &weights, &cfg.get_targets_config());
         let (sc, src) = resolve_scale_config(cfg, calibrated);
         // 复用校准期构建的 temp_ctx 作为正式 ctx（省去退火前第二次完整构建）。
         (sc, src, Some(temp_ctx))
@@ -1980,26 +1651,12 @@ fn run_optimize(
     println!("    Equivalence:    {:.6}", scale_config.equivalence);
     println!("    EquivCV:        {:.6}", scale_config.equiv_cv);
     println!("    Distribution:   {:.6}", scale_config.distribution);
-    if cfg.weights.simple_code.enabled {
-        println!("    SimpleFreq:     {:.6}", scale_config.simple_freq);
-        println!("    SimpleEquiv:    {:.6}", scale_config.simple_equiv);
-        println!("    SimpleDist:     {:.6}", scale_config.simple_dist);
-        println!(
-            "    SimpleCollCnt:  {:.6}",
-            scale_config.simple_collision_count
-        );
-        println!(
-            "    SimpleCollRate: {:.6}",
-            scale_config.simple_collision_rate
-        );
-    }
-
     // ==================== 正式优化 ====================
     let targets_config = cfg.get_targets_config();
     let ctx = match calib_ctx {
-        // 复用校准期构建的上下文（含全码/简码预计算），仅就地更新评分用的 scale/targets。
+        // 复用校准期构建的上下文，仅就地更新评分用的 scale/targets。
         // 二者不参与 OptContext 构建期预计算、仅在评分路径读取，故就地替换等价于用最终
-        // scale/targets 重新构建——消除退火前的重复构建（含简码预计算）。
+        // scale/targets 重新构建——消除退火前的重复构建。
         Some(mut c) => {
             c.scale_config = scale_config;
             c.targets_config = targets_config;
@@ -2011,17 +1668,15 @@ fn run_optimize(
                 or_warn_default(loader::load_pair_equivalence(&cfg.files.pair_equiv));
             let key_dist_config_2 =
                 or_warn_default(loader::load_key_distribution(&cfg.files.key_dist));
-            OptContext::new_with_fixed_and_termination(
+            OptContext::new_with_termination(
                 &splits,
                 &fixed_roots,
                 &constrained,
                 equiv_table_2,
                 key_dist_config_2,
                 scale_config,
-                simple_config,
                 weights,
                 targets_config,
-                &cfg.get_fixed_simple_codes(),
                 &cfg.keys.termination_keys,
             )
         }
@@ -2180,42 +1835,31 @@ fn finalize_and_save(
     interrupted: bool,
 ) {
     let root_usage = output::count_root_usage(ctx);
-    let all_results: Vec<(usize, Vec<u8>, f64, types::Metrics, SimpleMetrics)> = sa_results
+    let all_results: Vec<(usize, Vec<u8>, f64, types::Metrics)> = sa_results
         .into_iter()
         .enumerate()
-        .map(|(i, r)| (i, r.assignment, r.score, r.metrics, r.simple_metrics))
+        .map(|(i, r)| (i, r.assignment, r.score, r.metrics))
         .collect();
 
     // 找出最优结果
-    let (best_thread, best_assignment, best_score, best_metrics, best_simple_metrics) = all_results
+    let (best_thread, best_assignment, best_score, best_metrics) = all_results
         .iter()
         .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap())
-        .map(|(tid, a, s, m, sm)| (*tid, a.clone(), *s, *m, *sm))
+        .map(|(tid, a, s, m)| (*tid, a.clone(), *s, *m))
         .unwrap();
 
     let elapsed = start_time.elapsed();
 
     // 打印最优结果
     let m = best_metrics;
-    let sm = best_simple_metrics;
     let best_eval = Evaluator::new(ctx, &best_assignment);
     let best_scores = best_eval.get_metric_scores(ctx);
-    let simple_sub = best_eval.get_simple_metric_scores(ctx);
     println!("\n=================================");
     if interrupted {
         println!("⏸️  优化已暂停（Ctrl-C），以下为当前最优；可继续续算");
     }
     println!("🏆 最优结果 (线程 {}):", best_thread);
-    if cfg.weights.simple_code.enabled {
-        let full_comp = ctx.weights.weight_full_code * best_scores.total_full;
-        let simple_comp = ctx.weights.weight_simple_code * best_scores.total_simple;
-        println!(
-            "   综合得分: {:.4} (全码:{:.4} 简码:{:.4})",
-            best_score, full_comp, simple_comp
-        );
-    } else {
-        println!("   综合得分: {:.4}", best_score);
-    }
+    println!("   综合得分: {:.4}", best_score);
     println!(
         "   「全码」重码数: {}  (分: {:.4})",
         m.collision_count, best_scores.collision_count
@@ -2237,47 +1881,18 @@ fn finalize_and_save(
         "   「全码」用指分布偏差(L2): {:.4}  (分: {:.4})",
         m.dist_deviation, best_scores.distribution
     );
-    if cfg.weights.simple_code.enabled {
-        println!("---------------------------------");
-        println!(
-            "   「简码」总分: {:.4}  (范围: output 输出全集)",
-            simple_sub.total
-        );
-        println!(
-            "   「简码」重码数: {}  (分: {:.4})",
-            sm.collision_count, simple_sub.collision_count
-        );
-        println!(
-            "   「简码」重码率: {:.6}%  (分: {:.4})",
-            sm.collision_rate * 100.0,
-            simple_sub.collision_rate
-        );
-        println!(
-            "   「简码」覆盖率: {:.4}%  (分: {:.4})",
-            sm.weighted_freq_coverage * 100.0,
-            simple_sub.freq
-        );
-        println!(
-            "   「简码」加权当量: {:.4}  (分: {:.4})",
-            sm.equiv_mean, simple_sub.equiv
-        );
-        println!(
-            "   「简码」分布偏差: {:.4}  (分: {:.4})",
-            sm.dist_deviation, simple_sub.dist
-        );
-    }
+    println!("   分项合计: {:.4}", best_scores.total_full);
     println!("⏱️ 总耗时: {:?}", elapsed);
     println!("=================================");
 
     // ==================== 保存结果 ====================
     println!("\n📁 保存所有线程结果...");
-    for (tid, assignment, score, metrics, smetrics) in &all_results {
+    for (tid, assignment, score, metrics) in &all_results {
         save_thread_results(
             ctx,
             assignment,
             *score,
             metrics,
-            smetrics,
             *tid,
             output_dir,
             &root_usage,
@@ -2289,7 +1904,6 @@ fn finalize_and_save(
         &best_assignment,
         best_score,
         &best_metrics,
-        &best_simple_metrics,
         output_dir,
         &root_usage,
     );
@@ -2316,15 +1930,11 @@ fn finalize_and_save(
         Some((全量, 来源)) => {
             if 全量.len() > ctx.raw_splits.len() {
                 let 统计 = output::save_full_code_table(ctx, &best_assignment, &全量, output_dir);
-                // 合并码表 = 简码段 + 全量全码段（与完整码表同 encoder、同覆盖范围）
+                // 合并码表 = 全量全码段（与完整码表同 encoder、同覆盖范围）
                 output::save_combined_from_full(ctx, &best_assignment, &全量, output_dir);
                 println!(
-                    "\n📄 完整码表: {} 条（简码 {} 在前 / 全码 {}，缺字根 {}），来源 {}",
-                    统计.简码条数 + 统计.全码条数,
-                    统计.简码条数,
-                    统计.全码条数,
-                    统计.缺根条数,
-                    来源
+                    "\n📄 完整码表: {} 条（缺字根 {}），来源 {}",
+                    统计.全码条数, 统计.缺根条数, 来源
                 );
                 if 统计.缺根条数 > 0 {
                     let 样例: Vec<String> = 统计
@@ -2353,11 +1963,6 @@ fn finalize_and_save(
                             "      （如一份用真实部件名、另一份用映射后的根名）。两者必须取自同一套字根，否则全量字无法编码。"
                         );
                     }
-                }
-                if 统计.简码条数 == 0 {
-                    println!(
-                        "   💡 简码段为空：简码优化未启用（[weights.simple_code] enabled = false），码表只有全码行"
-                    );
                 }
                 true
             } else {
@@ -2489,11 +2094,6 @@ fn run_resume(dir: &str) {
     if !validate::check_validation(&splits, &fixed_roots, &constrained) {
         std::process::exit(1);
     }
-    let simple_config = if cfg.weights.simple_code.enabled {
-        cfg.get_simple_code_config()
-    } else {
-        SimpleCodeConfig { levels: vec![] }
-    };
     let weights = cfg.get_weight_config();
     // #2：优先用首轮写入的 targets；旧检查点（无该字段 → 默认）退回备份配置，避免回归。
     let resume_targets = if meta.targets_config == TargetsConfig::default() {
@@ -2501,18 +2101,16 @@ fn run_resume(dir: &str) {
     } else {
         meta.targets_config.clone()
     };
-    let mut ctx = OptContext::new_with_fixed_and_termination(
+    let mut ctx = OptContext::new_with_termination(
         &splits,
         &fixed_roots,
         &constrained,
         equiv_table,
         key_dist_config,
         meta.scale_config,
-        simple_config,
         weights,
         // #2：复用首轮写入的 targets，避免续算时因配置文件漂移导致评分口径“冻结”/不一致。
         resume_targets,
-        &cfg.get_fixed_simple_codes(),
         &cfg.keys.termination_keys,
     );
     ctx.display_order = cfg.keys.display_order.clone();
@@ -2864,9 +2462,8 @@ mod scale_proptest {
         // Validates: Requirements 1.3, 1.4
         #[test]
         fn prop1_尺度覆盖语义(
-            手动 in proptest::collection::vec(proptest::option::of(0.0f64..1e3), 10),
-            校准 in proptest::collection::vec(1e-6f64..1e3, 10),
-            simple_enabled in any::<bool>(),
+            手动 in proptest::collection::vec(proptest::option::of(0.0f64..1e3), 5),
+            校准 in proptest::collection::vec(1e-6f64..1e3, 5),
         ) {
             let toml = ScaleConfigToml {
                 collision_count: 手动[0],
@@ -2874,11 +2471,6 @@ mod scale_proptest {
                 equivalence: 手动[2],
                 equiv_cv: 手动[3],
                 distribution: 手动[4],
-                simple_freq: 手动[5],
-                simple_equiv: 手动[6],
-                simple_dist: 手动[7],
-                simple_collision_count: 手动[8],
-                simple_collision_rate: 手动[9],
             };
             let calibrated = ScaleConfig {
                 collision_count: 校准[0],
@@ -2886,19 +2478,15 @@ mod scale_proptest {
                 equivalence: 校准[2],
                 equiv_cv: 校准[3],
                 distribution: 校准[4],
-                simple_freq: 校准[5],
-                simple_equiv: 校准[6],
-                simple_dist: 校准[7],
-                simple_collision_count: 校准[8],
-                simple_collision_rate: 校准[9],
             };
 
-            let mut cfg = Config::default();
-            cfg.weights.simple_code.enabled = simple_enabled;
-            cfg.scale = Some(toml);
+            let cfg = Config {
+                scale: Some(toml),
+                ..Config::default()
+            };
 
             let (got, 来源) = resolve_scale_config(&cfg, calibrated);
-            // 三条路径：cfg.scale 为 None → 自动校准；全码+简码字段齐 → 手动配置；
+            // 三条路径：cfg.scale 为 None → 自动校准；五项齐 → 手动配置；
             // 部分字段为 None → 部分手动覆盖（以校准值为底、逐字段覆盖）。
             prop_assert!(
                 来源 == "手动配置" || 来源 == "自动校准" || 来源 == "部分手动覆盖",
@@ -2918,23 +2506,12 @@ mod scale_proptest {
                 "equiv_cv got={} want={}", got.equiv_cv, 期望(手动[3], 校准[3]));
             prop_assert!(近似(got.distribution, 期望(手动[4], 校准[4])),
                 "distribution got={} want={}", got.distribution, 期望(手动[4], 校准[4]));
-            prop_assert!(近似(got.simple_freq, 期望(手动[5], 校准[5])),
-                "simple_freq got={} want={}", got.simple_freq, 期望(手动[5], 校准[5]));
-            prop_assert!(近似(got.simple_equiv, 期望(手动[6], 校准[6])),
-                "simple_equiv got={} want={}", got.simple_equiv, 期望(手动[6], 校准[6]));
-            prop_assert!(近似(got.simple_dist, 期望(手动[7], 校准[7])),
-                "simple_dist got={} want={}", got.simple_dist, 期望(手动[7], 校准[7]));
-            prop_assert!(近似(got.simple_collision_count, 期望(手动[8], 校准[8])),
-                "simple_collision_count got={} want={}", got.simple_collision_count, 期望(手动[8], 校准[8]));
-            prop_assert!(近似(got.simple_collision_rate, 期望(手动[9], 校准[9])),
-                "simple_collision_rate got={} want={}", got.simple_collision_rate, 期望(手动[9], 校准[9]));
         }
 
         // Property 1 的边界：完全不给 [scale] 段时必须原样返回校准值
         #[test]
         fn prop1b_无手动配置时原样返回校准值(
-            校准 in proptest::collection::vec(1e-6f64..1e3, 10),
-            simple_enabled in any::<bool>(),
+            校准 in proptest::collection::vec(1e-6f64..1e3, 5),
         ) {
             let calibrated = ScaleConfig {
                 collision_count: 校准[0],
@@ -2942,21 +2519,16 @@ mod scale_proptest {
                 equivalence: 校准[2],
                 equiv_cv: 校准[3],
                 distribution: 校准[4],
-                simple_freq: 校准[5],
-                simple_equiv: 校准[6],
-                simple_dist: 校准[7],
-                simple_collision_count: 校准[8],
-                simple_collision_rate: 校准[9],
             };
-            let mut cfg = Config::default();
-            cfg.weights.simple_code.enabled = simple_enabled;
-            cfg.scale = None;
+            let cfg = Config {
+                scale: None,
+                ..Config::default()
+            };
 
             let (got, 来源) = resolve_scale_config(&cfg, calibrated);
             prop_assert_eq!(来源, "自动校准");
             prop_assert!(近似(got.collision_count, 校准[0]));
             prop_assert!(近似(got.distribution, 校准[4]));
-            prop_assert!(近似(got.simple_collision_rate, 校准[9]));
         }
     }
 }

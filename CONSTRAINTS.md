@@ -35,7 +35,7 @@
 | 底线 | 零违规 | `python tools/检查红线.py` | 提交前、CI |
 | 格式 | 零差异 | `cargo fmt --all --check` | 每次改动、CI |
 | Lint | 零告警 | `cargo clippy --all-targets -- -D warnings` | 每次改动、CI |
-| 测试 | 全过，且测试数不少于 265 | `cargo nextest run --release` | 提交前、CI |
+| 测试 | 全过，且测试数不少于 190 | `cargo nextest run --release` | 提交前、CI |
 | 依赖漏洞 | 0 漏洞 | `cargo audit` | CI |
 | 依赖类型 | 不新增同功能重复依赖 | `cargo tree -d` 人工判定 | 加依赖时 |
 
@@ -50,7 +50,7 @@
 
 | 指标 | 今天 | 方向 |
 | --- | --- | --- |
-| 测试总数 | 265 | 不得减少 |
+| 测试总数 | 190 | 不得减少 |
 | `clusters` 单次全量统计 | 52.7 ms ± 0.6 ms | 不得变慢超过 20% |
 | `clusters --per-row`（92 簇逐个重算） | 2.86 s ± 0.03 s | 不得变慢超过 20% |
 | `cargo nextest run --release` 全量 | 5.7 s | 不得变慢超过 20% |
@@ -71,6 +71,7 @@ hyperfine --warmup 1 --runs 5 \
 | ID | 规则 | 路径 | 原因 | 负责人 | 到期 |
 | --- | --- | --- | --- | --- | --- |
 | — | — | — | 暂无 | — | — |
+| E1 | 阈值放宽（测试总数 265 → 190） | CONSTRAINTS.md | 简码计算功能整体移除，`SimpleEvaluator` 与五项简码指标的约 75 个测试随之删除，无可测实现；同时新增 `evaluator::full_evaluator_tests`、`output::全量码表测试` 等全码路径测试 | hjzhjzhjzhjz | 2026-12-31（届时若补充了等效测试则恢复该数字） |
 
 日常的路径级豁免写在 `.constraintsignore`（`规则:路径glob  # 原因`），那份文件同样进 diff。
 

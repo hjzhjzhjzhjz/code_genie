@@ -626,6 +626,30 @@ mod tests {
         );
     }
 
+    // 线程局部阈值覆盖：`BucketStore::new`（生产入口）也能被强制走稀疏后端，
+    // 好在不动入参的前提下测到稀疏路径。测完必须复位，否则会污染同线程后续测试。
+    #[test]
+    fn new_honors_thread_local_threshold_override() {
+        let cap = 16usize;
+        // 正常容量走 Dense（cap 远小于阈值）
+        assert_eq!(
+            BucketStore::<TestBucket>::new(cap, 1).backend_kind(),
+            BackendKind::Dense
+        );
+        set_test_threshold_override(Some(0));
+        assert_eq!(
+            BucketStore::<TestBucket>::new(cap, 1).backend_kind(),
+            BackendKind::Sparse,
+            "override=0 时应强制稀疏后端"
+        );
+        set_test_threshold_override(None);
+        assert_eq!(
+            BucketStore::<TestBucket>::new(cap, 1).backend_kind(),
+            BackendKind::Dense,
+            "复位后应回到正常的密集后端"
+        );
+    }
+
     // remove 后 Dense 槽位保留成员容量（不释放），消除空↔非空转换的分配抖动。
     #[test]
     fn dense_remove_retains_member_capacity() {

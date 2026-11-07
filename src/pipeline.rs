@@ -10,9 +10,7 @@
 
 use std::collections::HashMap;
 
-use crate::export_table::{
-    加载拆分表, 加载简码表, 加载键位表, 取码序列, 生成表, 码位
-};
+use crate::export_table::{加载拆分表, 加载键位表, 取码序列, 生成表, 码位};
 use crate::handfeel;
 
 const 最大码长: usize = 4;
@@ -63,14 +61,12 @@ pub fn 流水线(
     keymap: &str,
     chaifen: &str,
     fixed: Option<&str>,
-    simple: Option<&str>,
     字们: &str,
     top: usize,
     输出: Option<&str>,
 ) {
     let 键位 = 加载键位表(keymap);
     let 拆分 = 加载拆分表(chaifen);
-    let 简码 = simple.map(加载简码表).unwrap_or_default();
     let 同键组 = fixed.map(读同键组).unwrap_or_default();
 
     let mut 索引: HashMap<&str, (&Vec<String>, u64)> = HashMap::new();
@@ -89,10 +85,9 @@ pub fn 流水线(
 
     let mut md = String::from("## 拆分流水线\n\n");
     md.push_str(&format!(
-        "字根 {} 个　拆分条目 {} 条　简码 {} 条　同键组 {} 个字根　最大码长 {}\n",
+        "字根 {} 个　拆分条目 {} 条　同键组 {} 个字根　最大码长 {}\n",
         键位.len(),
         拆分.len(),
-        简码.len(),
         同键组.len(),
         最大码长
     ));
@@ -166,13 +161,6 @@ pub fn 流水线(
         }
 
         md.push_str(&format!("\n**全码**　`{}`\n\n", 码));
-        match 简码.get(字) {
-            Some(简) if 码.starts_with(简.as_str()) => {
-                md.push_str(&format!("**简码**　`{}`（是全码前缀 ✓）\n", 简))
-            }
-            Some(简) => md.push_str(&format!("**简码**　`{}`（不是全码前缀，会被丢弃 ✗）\n", 简)),
-            None => md.push_str("**简码**　无\n"),
-        }
     }
 
     println!("{md}");
@@ -284,16 +272,10 @@ fn 应用规则(键位: &mut HashMap<String, Vec<char>>, 规则文: &str) -> Vec
 }
 
 pub fn 归并(
-    keymap: &str,
-    chaifen: &str,
-    simple: Option<&str>,
-    规则组: &[String],
-    目录: &str,
-    汇总: Option<&str>,
+    keymap: &str, chaifen: &str, 规则组: &[String], 目录: &str, 汇总: Option<&str>
 ) {
     let 基线 = 加载键位表(keymap);
     let 拆分 = 加载拆分表(chaifen);
-    let 简码 = simple.map(加载简码表).unwrap_or_default();
 
     let mut 变体们: Vec<键位变体> = Vec::new();
     变体们.push(("基线".to_string(), 基线.clone(), Vec::new()));
@@ -307,8 +289,8 @@ pub fn 归并(
     摘要.push_str(
         "只改键位，不重新拆分。阶重口径同宇浩侧：零阶精确 Σ(n−1)，一阶以上 Σ n²/2 ÷ 键数^阶。\n\n",
     );
-    摘要.push_str("| 变体 | 规则 | 全码选重 | 让全后 | 简码选重 | 0阶 | 1阶 | 2阶 | 3阶 |\n");
-    摘要.push_str("|---|---|---:|---:|---:|---:|---:|---:|---:|\n");
+    摘要.push_str("| 变体 | 规则 | 全码选重 | 0阶 | 1阶 | 2阶 | 3阶 |\n");
+    摘要.push_str("|---|---|---:|---:|---:|---:|---:|\n");
 
     println!("=== 字根归并对比 ===");
     for (名, 键位, 报错) in &变体们 {
@@ -319,7 +301,7 @@ pub fn 归并(
                 .replace('\n', " ")
         };
 
-        let (文本, 全条, 简条, 缺根) = 生成表(键位, &拆分, &简码);
+        let (文本, 全条, 缺根, _) = 生成表(键位, &拆分);
         let 子目录 = std::path::Path::new(目录).join(名);
         std::fs::create_dir_all(&子目录).ok();
         let 路径 = 子目录.join("全码表.txt");
@@ -331,20 +313,12 @@ pub fn 归并(
         match handfeel::算选重(&路径, &handfeel::默认区块) {
             Ok(s) => {
                 摘要.push_str(&format!(
-                    "| {} | {} | {} | {} | {} | {:.0} | {:.2} | {:.2} | {:.2} |\n",
-                    名,
-                    规则说明,
-                    s.全码,
-                    s.全码让全,
-                    s.简码,
-                    s.阶重[0],
-                    s.阶重[1],
-                    s.阶重[2],
-                    s.阶重[3]
+                    "| {} | {} | {} | {:.0} | {:.2} | {:.2} | {:.2} |\n",
+                    名, 规则说明, s.全码, s.阶重[0], s.阶重[1], s.阶重[2], s.阶重[3]
                 ));
                 println!(
-                    "  {:<8} 全码选重 {:>7}  让全后 {:>7}  简码选重 {:>7}  用键 {}  条 {} / {} / 缺根 {}",
-                    名, s.全码, s.全码让全, s.简码, s.用键数, 全条, 简条, 缺根
+                    "  {:<8} 全码选重 {:>7}  用键 {}  条 {} / 缺根 {}",
+                    名, s.全码, s.用键数, 全条, 缺根
                 );
             }
             Err(e) => eprintln!("  {} 统计失败: {}", 名, e),

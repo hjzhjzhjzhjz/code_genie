@@ -9,7 +9,6 @@
 - **逃逸机制**：冲突导向邻域、低温智能扰动、平台期重热、整键互换（`full_key_swap`）
 - **并行**：多线程独立退火取最优；需要微调既有结果时用 `--seed-dir` / `--seed-keymap` 指定起点
 - **增量评估**：`Evaluator` 支持 `try_move()` / `try_swap()` 增量更新，热路径零全量重建
-- **简码系统**：规则式简码（`AaBaCa`）+ 上屏键 / 异手过滤 / 固定简码
 - **全量码表**：`[files] full_splits` 指定全量拆分表后，收尾自动输出覆盖 12 万字的 `完整码表.txt`
 - **产物落地**：Rime 方案包（以星月为底包只换码）、宇浩测评对比、整句准确率、码表诊断
 
@@ -31,7 +30,7 @@ cargo build --release
 | `resume` | 从 checkpoint 断点续算 | `code_genie resume -d out` |
 | `encode` | 按 keymap 给拆分表编码 | `code_genie encode -k 字根键位表.txt -d 单字拆分.txt` |
 | `evaluate` | 评估现有方案指标 | `code_genie evaluate -k 字根键位表.txt` |
-| `export` | 导出测评码表（`字\t码`，简码在前） | `code_genie export -k 字根键位表.txt -c 拆分全表.txt -o 全码表.txt` |
+| `export` | 导出测评码表（`字\t码`，每字一行） | `code_genie export -k 字根键位表.txt -c 拆分全表.txt -o 全码表.txt` |
 | `chart` | 生成字根键位图（HTML） | `code_genie chart --keymap 字根键位表.txt` |
 | `assess` | 宇浩测评对比 + 方案档案；`--qualify` 只列达标方案 | `code_genie assess --dir runs --yuhao-dir yuhao-assess --qualify` |
 | `rime-convert` | 以星月方案包为底包只换码 | `code_genie rime-convert --base <星月底包> --output <算码目录> --chaifen 拆分全表.txt` |
@@ -96,16 +95,6 @@ cargo build --release
             equiv_cv: 0.01,
             distribution: 0.1,
         ),
-        simple_code: (
-            enabled: false,
-            full_code_weight: 0.6,
-            simple_code_weight: 0.4,
-            freq: 0.2,
-            equiv: 0.2,
-            dist: 0.2,
-            collision_count: 0.1,
-            collision_rate: 0.3,
-        ),
     ),
     targets: (
         full_code: (
@@ -119,7 +108,7 @@ cargo build --release
 ```
 
 > `scale` 字段（可选）手动固化缩放因子；不写则由初态指标自动校准（推荐）。
-> 写 `scale` 时全码 5 个字段必须齐全，简码 5 个字段在 `simple_code.enabled: true` 时也必须齐全。
+> 写 `scale` 时 5 个字段必须齐全。
 
 ## 输出文件
 
@@ -128,10 +117,8 @@ cargo build --release
 | 文件 | 内容 |
 |------|------|
 | `字根键位表.txt` | 字根 → 键位串 + 使用频次 |
-| `单字编码表.txt` | 简码在前、全码在后（`字/码/频次`），覆盖**优化字集** |
-| `完整码表.txt` | 同上格式，覆盖**全量拆分表**（配置 `full_splits` 时生成）。**严格两段**：先全部简码行，再全部全码行 |
-| `简码表.txt` | 简码分配（按级别、按频率排序） |
-| `合并码表.txt` | 简码与全码合并输出 |
+| `完整码表.txt` | `字/码`，覆盖**全量拆分表**（配置 `full_splits` 时生成） |
+| `合并码表.txt` | `字/码`，覆盖**优化字集**（与 `完整码表.txt` 同 encoder） |
 | `用指分布.txt` / `当量分布.txt` | 用指分布 / 当量分布统计 |
 | `汇总.txt` | 各线程结果排名 |
 | `尺度.json` | 固化缩放因子（供 `--scale` 复用） |
@@ -145,13 +132,12 @@ cargo build --release
 src/
 ├── main.rs          # CLI 入口、子命令分发、多轮播种、尺度解析
 ├── annealing.rs     # 模拟退火主循环、邻域算子、初始化策略
-├── evaluator.rs     # 全码/简码评估器（增量更新、目标偏差、硬约束）
+├── evaluator.rs     # 评估器（增量更新、目标偏差、硬约束）
 ├── bucket_store.rs  # 全码桶存储（按绝对内存预算+字数自适应密集/稀疏）
 ├── context.rs       # OptContext：字根组、汉字信息、当量表、反向索引
 ├── config.rs        # TOML 配置解析与默认值
 ├── calibrate.rs     # 缩放因子校准
 ├── schedule.rs      # 温度调度（高斯舒适区 + LUT）
-├── simple.rs        # 独立简码规则文件解析
 ├── loader.rs        # 各类输入文件加载
 ├── output.rs        # 结果输出（含全量码表）
 ├── export_table.rs  # 测评码表导出（星月 encoder 取码）
@@ -223,18 +209,12 @@ python tools/检查红线.py --base HEAD   # 只看未提交改动
 
 其中 A=键位串首字母（大码）、S=第 2 个字母（不足两位时回落大码）。词码：2 字 `AaAbBaBb`、3 字 `AaBaCaCb`、4+ 字 `AaBaCaZa`。
 
-### 简码规则
-
-规则串如 `AaBaCa`：
-- 大写字母 `A-Z`：根选择器（`A`=第 0 个根）
-- 小写字母 `a-z`：编码选择器（`a`=第 0 个码）
-
 ### 性能
 
 - `rayon` 多线程并行退火；`threads` 设成**性能核数量**最划算——总步数固定时
   3 线程 106.8s / 6 线程 83.4s / 8 线程 90.0s / 12 线程 85.3s（各 3 轮中位数，
   最优得分无差异）。超过 P 核数后线程被塞到能效核，单链变短、总吞吐不升。
-- 增量更新 `try_move()` / `try_swap()`，周期对账（reconcile）代替每步全量重建
+- 增量更新 `try_move()` / `try_swap()`，热路径零全量重建
 - 温度调度预计算 LUT
 - 全局分配器用 `mimalloc`（可选 feature，默认开）：线程本地堆 + 按 arena 回收，
   压住「每步短命分配 → 堆段只扩不缩」造成的内存高水位。120 万步 ×3 线程实测

@@ -3,7 +3,7 @@
 // =========================================================================
 
 use crate::config::TargetsConfig;
-use crate::types::{Metrics, ScaleConfig, SimpleMetrics, WeightConfig};
+use crate::types::{Metrics, ScaleConfig, WeightConfig};
 
 /// 根据初始状态自动校准缩放因子
 ///
@@ -24,7 +24,6 @@ use crate::types::{Metrics, ScaleConfig, SimpleMetrics, WeightConfig};
 #[allow(dead_code)]
 pub fn calibrate_scales(
     initial_metrics: &Metrics,
-    initial_simple: &SimpleMetrics,
     weights: &WeightConfig,
     targets: &TargetsConfig,
 ) -> ScaleConfig {
@@ -56,59 +55,26 @@ pub fn calibrate_scales(
     let ft = &targets.full_code;
 
     // 如果只有一个活跃指标，使用默认缩放
-    let base = if active_count <= 1 {
-        ScaleConfig::default()
-    } else {
-        // 根据参考值计算缩放因子（scale = 1 / 参考值）
-        ScaleConfig {
-            collision_count: 1.0
-                / pick(
-                    ft.collision_count,
-                    ft.enabled,
-                    initial_metrics.collision_count as f64,
-                ),
-            collision_rate: 1.0
-                / pick(
-                    ft.collision_rate,
-                    ft.enabled,
-                    initial_metrics.collision_rate,
-                ),
-            equivalence: 1.0 / pick(ft.equivalence, ft.enabled, initial_metrics.equiv_mean),
-            equiv_cv: 1.0 / pick(ft.equiv_cv, ft.enabled, initial_metrics.equiv_cv),
-            distribution: 1.0 / pick(ft.distribution, ft.enabled, initial_metrics.dist_deviation),
-            ..ScaleConfig::default()
-        }
-    };
-
-    // 如果未启用简码，返回基础配置
-    if !weights.enable_simple_code {
-        return base;
+    if active_count <= 1 {
+        return ScaleConfig::default();
     }
 
-    let st = &targets.simple_code;
-
-    // 简码频率覆盖损失 = 1 - 覆盖率。其目标参考应为 `1 - 目标覆盖率`（同为“损失”量纲），
-    // 不能用覆盖率目标本身，否则量纲不一致。
-    let freq_coverage_loss = 1.0 - initial_simple.weighted_freq_coverage;
-
-    // 合并简码缩放因子
+    // 根据参考值计算缩放因子（scale = 1 / 参考值）
     ScaleConfig {
-        simple_freq: 1.0
+        collision_count: 1.0
             / pick(
-                1.0 - st.freq,
-                st.enabled && st.freq > eps,
-                freq_coverage_loss,
+                ft.collision_count,
+                ft.enabled,
+                initial_metrics.collision_count as f64,
             ),
-        simple_equiv: 1.0 / pick(st.equiv, st.enabled, initial_simple.equiv_mean),
-        simple_dist: 1.0 / pick(st.dist, st.enabled, initial_simple.dist_deviation),
-        simple_collision_count: 1.0
+        collision_rate: 1.0
             / pick(
-                st.collision_count,
-                st.enabled,
-                initial_simple.collision_count as f64,
+                ft.collision_rate,
+                ft.enabled,
+                initial_metrics.collision_rate,
             ),
-        simple_collision_rate: 1.0
-            / pick(st.collision_rate, st.enabled, initial_simple.collision_rate),
-        ..base
+        equivalence: 1.0 / pick(ft.equivalence, ft.enabled, initial_metrics.equiv_mean),
+        equiv_cv: 1.0 / pick(ft.equiv_cv, ft.enabled, initial_metrics.equiv_cv),
+        distribution: 1.0 / pick(ft.distribution, ft.enabled, initial_metrics.dist_deviation),
     }
 }
