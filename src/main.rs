@@ -1572,7 +1572,7 @@ fn run_optimize(
     println!("输出目录: {}", output_dir);
 
     // 备份依赖输入文件到 {output_dir}/inputs/（需求 4），供 resume 用一致输入重建上下文。
-    backup_inputs(cfg, cli_config_path, &output_dir);
+    let _ = backup_inputs(cfg, cli_config_path, &output_dir);
 
     // ==================== 加载数据 ====================
     let (fixed_roots, constrained) = must(loader::load_fixed(&cfg.files.fixed));
@@ -2028,42 +2028,85 @@ fn finalize_and_save(
 }
 
 /// 备份依赖输入文件到 `{output_dir}/inputs/`（需求 4）。失败仅告警，不中止。
-fn backup_inputs(cfg: &Config, cli_config_path: &str, output_dir: &str) {
+///
+/// 返回成功备份的文件数。空路径（`pair_equiv` / `key_dist` 省略时使用内嵌默认表）
+/// 不参与备份：早期直接拼 `format!("{inputs_dir}/{base}")` 会拼出 `inputs/` 这个目录，
+/// 于是刷出「重命名旧文件 inputs/ 失败 (os error 32)」+「备份输入文件  失败 (os error 3)」
+/// 两行误导性告警，且末尾仍无条件打印「已备份」。这里改为逐项统计、如实汇总。
+fn backup_inputs(cfg: &Config, cli_config_path: &str, output_dir: &str) -> usize {
     let inputs_dir = format!("{}/inputs", output_dir);
     if let Err(e) = std::fs::create_dir_all(&inputs_dir) {
-        eprintln!("⚠️ 创建 inputs 目录失败: {}", e);
-        return;
-    }
-    // config 文件备份成 `config.<源扩展名>`（`.ron`/`.toml`），resume 按这两个名字找。
-    // 保留扩展名是为了备份件能自己说明格式；内容仍以解析结果为准（加载器两种都认）。
-    let 源扩展 = std::path::Path::new(cli_config_path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-        .filter(|e| e == "ron" || e == "toml")
-        .unwrap_or_else(|| "ron".to_string());
-    let dst = format!("{}/config.{}", inputs_dir, 源扩展);
-    if let Err(e) = fsutil::copy_with_backup(cli_config_path, &dst) {
-        eprintln!("⚠️ 备份输入文件 {} 失败: {}", cli_config_path, e);
+        eprintln!("⚠️ 创建 inputs 目录失败: {}（resume 将无法重建输入）", e);
+        return 0;
     }
 
-    let data_srcs = [
-        cfg.files.fixed.as_str(),
-        cfg.files.splits.as_str(),
-        cfg.files.pair_equiv.as_str(),
-        cfg.files.key_dist.as_str(),
-    ];
-    for src in data_srcs {
+    // (标签, 源路径, 目标路径)；标签只用于日志，便于一眼看出漏了哪个输入。
+    let mut 待备份: Vec<(&str, String, String)> = Vec::new();
+    let mut 跳过: Vec<&str> = Vec::new();
+
+    // config 文件备份成 `config.<源扩展名>`（`.ron`/`.toml`），resume 按这两个名字找。
+    // 保留扩展名是为了备份件能自己说明格式；内容仍以解析结果为准（加载器两种都认）。
+    if cli_config_path.trim().is_empty() {
+        跳过.push("配置文件");
+    } else {
+        let 源扩展 = std::path::Path::new(cli_config_path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .filter(|e| e == "ron" || e == "toml")
+            .unwrap_or_else(|| "ron".to_string());
+        待备份.push((
+            "配置文件",
+            cli_config_path.to_string(),
+            format!("{}/config.{}", inputs_dir, 源扩展),
+        ));
+    }
+
+    for (标签, src) in [
+        ("字根约束", cfg.files.fixed.as_str()),
+        ("单字拆分", cfg.files.splits.as_str()),
+        ("当量表", cfg.files.pair_equiv.as_str()),
+        ("用指分布", cfg.files.key_dist.as_str()),
+    ] {
+        if src.trim().is_empty() {
+            跳过.push(标签);
+            continue;
+        }
         let base = std::path::Path::new(src)
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| src.to_string());
-        let dst = format!("{}/{}", inputs_dir, base);
-        if let Err(e) = fsutil::copy_with_backup(src, &dst) {
-            eprintln!("⚠️ 备份输入文件 {} 失败: {}", src, e);
+            .unwrap_or_default();
+        if base.trim().is_empty() {
+            eprintln!("⚠️ 跳过 {标签} 备份：路径 {} 取不到文件名", src);
+            continue;
+        }
+        待备份.push((标签, src.to_string(), format!("{}/{}", inputs_dir, base)));
+    }
+
+    if !跳过.is_empty() {
+        println!(
+            "ℹ️ 无需备份（配置为空，运行时使用内嵌默认表）：{}",
+            跳过.join("、")
+        );
+    }
+
+    let 总数 = 待备份.len();
+    let mut 失败: Vec<String> = Vec::new();
+    for (标签, src, dst) in &待备份 {
+        if let Err(e) = fsutil::copy_with_backup(src, dst) {
+            失败.push(format!("{标签} {src} → {dst}: {e}"));
         }
     }
-    println!("已备份输入文件至 {}/", inputs_dir);
+    let 成功 = 总数 - 失败.len();
+    if 失败.is_empty() {
+        println!("✅ 已备份 {成功} 个输入文件至 {}/", inputs_dir);
+    } else {
+        eprintln!("⚠️ 输入备份不完整：成功 {成功}/{总数} 个，resume 可能无法用一致输入重建：");
+        for 项 in &失败 {
+            eprintln!("   · {项}");
+        }
+    }
+    成功
 }
 
 /// resume 子命令（需求 7）：从既有 output 目录的 checkpoint 续算，复用该目录。
@@ -2349,6 +2392,67 @@ mod backup_tests {
             "TOML 配置不应被改名为 config.ron"
         );
 
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 省略 `pair_equiv`（用内嵌当量表）时，不得把 `inputs/` 目录本身当备份目标。
+    /// 对应日志里那两行「重命名旧文件 inputs/ 失败」+「备份输入文件  失败」。
+    #[test]
+    fn backup_inputs_skips_empty_optional_paths() {
+        let base = std::env::temp_dir().join(format!("cg_backup_empty_{}", std::process::id()));
+        let src = base.join("src");
+        let out = base.join("output-test");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        for name in ["cfg.toml", "fixed.txt", "splits.txt", "keydist.txt"] {
+            std::fs::write(src.join(name), name).unwrap();
+        }
+
+        let mut cfg = Config::default();
+        cfg.files.fixed = src.join("fixed.txt").to_string_lossy().to_string();
+        cfg.files.splits = src.join("splits.txt").to_string_lossy().to_string();
+        cfg.files.pair_equiv = String::new();
+        cfg.files.key_dist = src.join("keydist.txt").to_string_lossy().to_string();
+        cfg.files.full_splits = String::new();
+        let config_path = src.join("cfg.toml").to_string_lossy().to_string();
+
+        let 成功 = backup_inputs(&cfg, &config_path, &out.to_string_lossy());
+
+        assert_eq!(成功, 4, "config + fixed + splits + key_dist 均应成功");
+        let inputs = out.join("inputs");
+        assert!(inputs.is_dir(), "inputs/ 目录不应被改名或删除");
+        let 文件: Vec<String> = std::fs::read_dir(&inputs)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(文件.len(), 4, "只应有 4 个备份文件: {文件:?}");
+        for 名 in ["config.toml", "fixed.txt", "splits.txt", "keydist.txt"] {
+            assert!(inputs.join(名).is_file(), "缺少 {名}: {文件:?}");
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 复制失败必须计入失败，不能再被「已备份」一句话盖过去。
+    #[test]
+    fn backup_inputs_counts_missing_source_as_failure() {
+        let base = std::env::temp_dir().join(format!("cg_backup_fail_{}", std::process::id()));
+        let src = base.join("src");
+        let out = base.join("output-test");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::write(src.join("cfg.toml"), "x = 1\n").unwrap();
+        std::fs::write(src.join("splits.txt"), "splits").unwrap();
+
+        let mut cfg = Config::default();
+        cfg.files.fixed = src.join("不存在.txt").to_string_lossy().to_string();
+        cfg.files.splits = src.join("splits.txt").to_string_lossy().to_string();
+        cfg.files.pair_equiv = String::new();
+        cfg.files.key_dist = String::new();
+        let config_path = src.join("cfg.toml").to_string_lossy().to_string();
+
+        let 成功 = backup_inputs(&cfg, &config_path, &out.to_string_lossy());
+
+        assert_eq!(成功, 2, "config + splits 成功，缺失的 fixed 应计入失败");
         let _ = std::fs::remove_dir_all(&base);
     }
 }
