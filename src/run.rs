@@ -66,6 +66,8 @@ pub struct 参数 {
     pub 播种目录: Option<String>,
     /// 转给 `optimize --seed-keymap`
     pub 播种键位: Option<String>,
+    /// 转给全局 `--rng-seed`（固定退火随机源，可复现）
+    pub 随机种子: Option<u64>,
     /// 转给 `optimize --scale`
     pub 尺度: Option<String>,
 }
@@ -453,6 +455,11 @@ fn 准备任务(自身: &Path, 方案名: &str, 素材: &Path, 显式素材: boo
 /// `-c <配置> (optimize|resume) -d <输出> [种子参数]`
 fn 优化任务(自身: &Path, 配置: &str, 输出: &str, 参: &参数) -> 任务 {
     let mut 参数 = vec!["-c".to_string(), 配置.to_string()];
+    // --rng-seed 是 Cli 上的全局参数，必须放在子命令之前；resume 也吃这个参数。
+    if let Some(s) = 参.随机种子 {
+        参数.push("--rng-seed".to_string());
+        参数.push(s.to_string());
+    }
     参数.push(if 参.续算 { "resume" } else { "optimize" }.to_string());
     参数.push("-d".to_string());
     参数.push(输出.to_string());
@@ -661,6 +668,7 @@ mod tests {
             不防休眠: true,
             播种目录: None,
             播种键位: None,
+            随机种子: None,
             尺度: None,
         }
     }
@@ -780,7 +788,7 @@ mod tests {
         );
     }
 
-    /// resume 不吃种子/尺度，拼进去只会让参数看着像生效了
+    /// resume 不吃播种目录/尺度（但接受全局 --rng-seed），拼进去只会让参数看着像生效了
     #[test]
     fn 续算命令不带种子与尺度() {
         let 自身 = Path::new("/tmp/code_genie");
@@ -790,6 +798,22 @@ mod tests {
         参.尺度 = Some("尺度.json".to_string());
         let 文 = 优化任务(自身, "config.ron", "out-1", &参).渲染();
         assert_eq!(文, "code_genie -c config.ron resume -d out-1");
+    }
+
+    /// --rng-seed 是 Cli 上的全局参数：必须排在子命令之前，resume 也接受它。
+    #[test]
+    fn 固定种子排在子命令之前且续算也透传() {
+        let 自身 = Path::new("/tmp/code_genie");
+        let mut 参 = 参数样例();
+        参.随机种子 = Some(42);
+        let 文 = 优化任务(自身, "config.ron", "out-1", &参).渲染();
+        assert_eq!(
+            文,
+            "code_genie -c config.ron --rng-seed 42 optimize -d out-1"
+        );
+        参.续算 = true;
+        let 文 = 优化任务(自身, "config.ron", "out-1", &参).渲染();
+        assert_eq!(文, "code_genie -c config.ron --rng-seed 42 resume -d out-1");
     }
 
     #[test]

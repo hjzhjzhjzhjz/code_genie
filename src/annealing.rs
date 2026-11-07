@@ -1156,6 +1156,22 @@ fn coordinate_descent(ctx: &OptContext, init: Vec<u8>) -> (Vec<u8>, f64) {
 // 🎯 多起点初始化入口
 // =========================================================================
 
+// =========================================================================
+// 🎲 可复现随机源（`--rng-seed`）
+// =========================================================================
+/// 用途标签：让同一线程里的不同随机流互不相关。
+pub const 用途_初始解: u64 = 0xA11C_0000_0000_0001;
+pub const 用途_主循环: u64 = 0xA11C_0000_0000_0002;
+pub const 用途_播种补全: u64 = 0xA11C_0000_0000_0003;
+
+/// 从 CLI 的 `--rng-seed` 派生「线程 × 用途」独立的确定性种子。
+///
+/// 线程号必须参与派生：否则 N 个线程会从同一条随机流起步，
+/// 多线程优化退化成 N 份完全相同的搜索轨迹。
+pub fn 派生种子(主种子: u64, 线程号: usize, 用途: u64) -> u64 {
+    主种子 ^ (线程号 as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 用途
+}
+
 /// 校准基准（尺度 / 温度）专用的固定种子：换它等于换一整套校准口径，务必别乱动。
 #[allow(dead_code)]
 const 校准种子: u64 = 0x636F_6465_6765_6E69;
@@ -1171,7 +1187,6 @@ pub fn multi_start_init(ctx: &OptContext, cfg: &Config, thread_id: usize) -> Vec
 /// （同输入同配置必得同一初解），又不会像 `deterministic_init` 那样给出劣质基准
 /// ——后者是 `allowed[gi % len]` 轮转分配，实测重码数是贪心解的 3 倍以上，
 /// 拿它当基准会把 `scale = 1/基准` 带偏。
-#[allow(dead_code)]
 pub fn multi_start_init_seeded(
     ctx: &OptContext,
     cfg: &Config,
@@ -1322,6 +1337,9 @@ pub(crate) fn 舒适区温度(cfg: &Config) -> f64 {
 /// - `seed`：若为 `Some(s)`（仅 fresh 路径生效），用 `s` 作为退火初始分配替代 `multi_start_init`
 ///   （从既有结果播种微调）；走 fresh 路径（起始步 0），
 ///   与 resume 续算互斥（`resume.is_some()` 时忽略 `seed`）。
+/// - `rng_seed`：`Some(s)` 时用 `s` 派生确定性的 `StdRng`，使**同配置 + 同种子 +
+///   同线程数**的 fresh 运行逐位可复现；`None` 时沿用系统熵（历史行为）。
+///   注意 checkpoint 不序列化 RNG 状态，故「一次跑完」与「中断后续算」仍不等价。
 #[allow(clippy::too_many_arguments)]
 pub fn simulated_annealing_resumable(
     ctx: &OptContext,
@@ -1332,8 +1350,12 @@ pub fn simulated_annealing_resumable(
     ckpt_dir: Option<&Path>,
     checkpoint_interval: usize,
     seed: Option<&[u8]>,
+    rng_seed: Option<u64>,
 ) -> SaResult {
-    let mut rng = rand::rng();
+    let mut rng: StdRng = match rng_seed {
+        Some(s) => StdRng::seed_from_u64(派生种子(s, thread_id, 用途_主循环)),
+        None => StdRng::from_rng(&mut rand::rng()),
+    };
 
     let mut assignment;
     let start_step: usize;
@@ -1352,7 +1374,15 @@ pub fn simulated_annealing_resumable(
         // fresh：seed 存在则用种子作为初始解（从既有结果播种），否则 multi_start_init。
         assignment = match seed {
             Some(s) => s.to_vec(),
-            None => multi_start_init(ctx, cfg, thread_id),
+            None => match rng_seed {
+                Some(s) => multi_start_init_seeded(
+                    ctx,
+                    cfg,
+                    thread_id,
+                    派生种子(s, thread_id, 用途_初始解),
+                ),
+                None => multi_start_init(ctx, cfg, thread_id),
+            },
         };
         start_step = 0;
         evaluator = Evaluator::new(ctx, &assignment);
@@ -2282,7 +2312,7 @@ mod resume_tests {
     use std::collections::HashMap;
 
     /// 最小 OptContext：n 个单字根组、单部件汉字，仅 2 个允许键制造重码。
-    fn make_ctx(n: usize) -> OptContext {
+    pub(crate) fn make_ctx(n: usize) -> OptContext {
         let allowed: Vec<u8> = vec![0, 1];
         let mut groups = Vec::with_capacity(n);
         let mut splits = Vec::with_capacity(n);
@@ -2312,7 +2342,7 @@ mod resume_tests {
         )
     }
 
-    fn tiny_cfg(total_steps: usize) -> Config {
+    pub(crate) fn tiny_cfg(total_steps: usize) -> Config {
         let mut cfg = Config::default();
         cfg.annealing.total_steps = total_steps;
         cfg.annealing.checkpoint_interval_ratio = 0.1; // interval = total/10
@@ -2350,6 +2380,7 @@ mod resume_tests {
             Some(&ckpt_dir),
             interval,
             None,
+            None,
         );
         assert!(!r0.interrupted);
         let tpath = checkpoint::thread_path(&ckpt_dir, 0);
@@ -2368,6 +2399,7 @@ mod resume_tests {
             Some(&tc),
             Some(&ckpt_dir),
             interval,
+            None,
             None,
         );
         assert!(!r1.interrupted);
@@ -2400,6 +2432,7 @@ mod resume_tests {
             Some(&ckpt_dir),
             usize::MAX,
             None,
+            None,
         );
         let mut tc = checkpoint::load_thread_checkpoint(&checkpoint::thread_path(&ckpt_dir, 0))
             .unwrap_or(ThreadCheckpoint {
@@ -2425,6 +2458,7 @@ mod resume_tests {
             Some(&tc),
             Some(&ckpt_dir),
             usize::MAX,
+            None,
             None,
         );
         assert!(!r1.interrupted);
@@ -2465,6 +2499,7 @@ mod resume_tests {
             None,
             usize::MAX,
             Some(&seed),
+            None,
         );
         assert!(!r.interrupted);
         assert_eq!(r.assignment.len(), ctx.num_groups, "返回分配长度应等于组数");
@@ -2474,5 +2509,55 @@ mod resume_tests {
             r.score,
             seed_init_score
         );
+    }
+}
+
+// =========================================================================
+// 🧪 固定种子可复现性（`--rng-seed`）
+// =========================================================================
+#[cfg(test)]
+mod 种子复现测试 {
+    use super::resume_tests::{make_ctx, tiny_cfg};
+    use super::*;
+
+    #[test]
+    fn 派生种子按线程号与用途隔离() {
+        assert_eq!(派生种子(42, 0, 用途_主循环), 派生种子(42, 0, 用途_主循环));
+        // 不按线程号派生的话，多线程会从同一条随机流起步，退化成 N 份相同轨迹。
+        assert_ne!(派生种子(42, 0, 用途_主循环), 派生种子(42, 1, 用途_主循环));
+        assert_ne!(派生种子(42, 0, 用途_主循环), 派生种子(42, 0, 用途_初始解));
+    }
+
+    #[test]
+    fn 不同主种子产生不同随机流() {
+        let mut a = StdRng::seed_from_u64(派生种子(42, 0, 用途_主循环));
+        let mut b = StdRng::seed_from_u64(派生种子(43, 0, 用途_主循环));
+        assert_ne!(a.random::<u64>(), b.random::<u64>());
+    }
+
+    /// 初始解（multi_start_init）与主循环两条随机流都固定后，
+    /// 得分与最终分配应逐位相同——这正是参数扫描需要的信噪比前提。
+    #[test]
+    fn 同种子完全复现() {
+        let ctx = make_ctx(8);
+        let cfg = tiny_cfg(1200);
+        let stop = Arc::new(AtomicBool::new(false));
+        let 跑 = |s: u64| {
+            simulated_annealing_resumable(
+                &ctx,
+                &cfg,
+                0,
+                &stop,
+                None,
+                None,
+                usize::MAX,
+                None,
+                Some(s),
+            )
+        };
+        let a = 跑(20261107);
+        let b = 跑(20261107);
+        assert_eq!(a.score.to_bits(), b.score.to_bits(), "同种子得分应逐位相同");
+        assert_eq!(a.assignment, b.assignment, "同种子最终分配应相同");
     }
 }

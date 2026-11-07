@@ -21,6 +21,9 @@ cargo run --release
 # 使用指定配置文件
 cargo run --release -- -c config.ron optimize -d out
 
+# 固定随机种子（同配置 + 同种子 + 同线程数逐位复现；全局参数须放在子命令前）
+cargo run --release -- -c config.ron --rng-seed 42 optimize -d out
+
 # 断点续算 / 编码 / 评估
 cargo run --release -- resume -d out
 cargo run --release -- encode -k 字根键位表.txt -d 单字拆分.txt -o 单字编码表.txt

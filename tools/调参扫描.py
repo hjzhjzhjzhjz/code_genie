@@ -21,9 +21,13 @@
     python tools/调参扫描.py nevergrad --配置 dlrk/xxx.toml --试验数 12
     python tools/调参扫描.py salib --配置 dlrk/xxx.toml --样本数 2 --重复 2
 
-强烈建议加 ``--初始解 <某次 output/thread-00/字根键位表.txt>``：
-退火主循环的 RNG 取自系统熵，不固定初始解的话，同一组参数两次运行也会有差异，
-调参容易变成拟合噪声；SALib 对噪声尤其敏感，建议 ``--重复 2`` 取中位数。
+默认开启 ``--固定种子``：每个 trial 的第 N 次重复都拿到同一个 ``--rng-seed``
+（主种子 + 重复序号），让不同参数在**同一条随机流**下比较（common random
+numbers），把退火自身的随机性从参数效应里消掉；``--重复 2`` 则给出两条独立流。
+需要旧行为时用 ``--不固定种子``。建议同时给 ``--初始解`` 固定起点。
+
+若子进程报 ``unexpected argument '--rng-seed'``，说明 release 二进制还是旧的，
+先跑一次 ``cargo build --release``。
 
 依赖全部本地、零 API key / 零外部服务::
 
@@ -196,6 +200,8 @@ class 运行环境:
         self.线程 = 参.线程
         self.重复 = 参.重复
         self.超时 = 参.超时
+        self.固定种子 = 参.固定种子
+        self.主种子 = 参.随机种子
         self.序号 = 0
         self.csv文件 = open(
             self.结果目录 / "trials.csv", "a", newline="", encoding="utf-8-sig"
@@ -212,7 +218,7 @@ class 运行环境:
         self.csv文件.close()
 
     def 评估(self, 参数: dict, 标签: str) -> float:
-        """同一组参数重复跑若干次取中位数，压一压退火 RNG 带来的噪声。"""
+        """同一组参数重复跑若干次取中位数；每次重复换一条固定随机流。"""
         return statistics.median(
             self.跑一次(参数, 标签, 次) for 次 in range(self.重复)
         )
@@ -228,14 +234,12 @@ class 运行环境:
             配置路径 = 临时目录 / "config.toml"
             配置路径.write_text(配置文本, encoding="utf-8")
             输出目录 = 临时目录 / "out"
-            命令 = [
-                str(self.二进制),
-                "-c",
-                str(配置路径),
-                "optimize",
-                "-d",
-                str(输出目录),
-            ]
+            命令 = [str(self.二进制), "-c", str(配置路径)]
+            if self.固定种子:
+                # 全局参数必须排在子命令之前。第 N 次重复用 主种子+N，
+                # 于是不同参数共享同一条随机流（配对比较），重复之间彼此独立。
+                命令 += ["--rng-seed", str(self.主种子 + 次)]
+            命令 += ["optimize", "-d", str(输出目录)]
             if self.初始解:
                 命令 += ["--seed-keymap", str(self.初始解)]
             开始 = time.monotonic()
@@ -362,7 +366,14 @@ def 跑_salib(环境: 运行环境, 参):
         for (名, 下, 上, 对数, _), u in zip(参数空间, 单位点):
             参数[名] = 下 * (上 / 下) ** u if 对数 else 下 + u * (上 - 下)
         Y.append(可优化得分(环境.评估(参数, f"salib-{i}")))
-    Si = 分析.analyze(问题, np.asarray(Y, dtype=float), calc_second_order=False)
+    Y数组 = np.asarray(Y, dtype=float)
+    print(
+        f"得分范围 [{Y数组.min():.4f}, {Y数组.max():.4f}]，标准差 {Y数组.std():.4f}"
+    )
+    if (Y数组 >= 1e5).any():
+        print("\n❌ 本批次含失败样本（罚分 1e6），Sobol 结果不可用；先查 日志/ 里的失败原因。")
+        return
+    Si = 分析.analyze(问题, Y数组, calc_second_order=False)
     排序 = sorted(
         zip(参数名们, Si["S1"], Si["ST"], Si["S1_conf"], Si["ST_conf"]),
         key=lambda 项: -abs(项[2]),
@@ -376,7 +387,10 @@ def 跑_salib(环境: 运行环境, 参):
         print("   Sobol 指数理论上 S1 ∈ [0,1]、ST ≥ 0；出现负值或大于 1 都是估计噪声。")
         print(f"   建议 --样本数 ≥ 16（当前 {参.样本数}）、--重复 ≥ 2（当前 {环境.重复}）；")
         print("   总评估次数 = 样本数 × (参数数 + 2) × 重复数。")
-    print("\n退火 RNG 取自系统熵，噪声会混进交互项；即使给了 --初始解 也只固定了起点。")
+        if 环境.固定种子:
+            print("   已固定随机种子，区间仍这么宽说明是 Sobol 估计器本身没收敛（N 太小），")
+            print("   不代表参数不重要 —— 看上面的得分范围就知道参数确实能改变结果。")
+    print(f"\n随机流：{'固定种子（配对比较）' if 环境.固定种子 else '系统熵（噪声较大）'}")
     print("正式跑之前先用「试跑」估单次耗时，再按上面的公式算总成本。")
 
 
@@ -391,12 +405,27 @@ def 建解析器():
         子.add_argument("--配置", required=True, help="基础 TOML 配置（脚本只覆写 [annealing] 参数）")
         子.add_argument("--步数", type=int, default=2000, help="每次 trial 的 total_steps（默认 2000）")
         子.add_argument("--线程", type=int, default=1, help="每次 trial 的线程数（默认 1，控制变量）")
-        子.add_argument("--重复", type=int, default=1, help="每组参数重复次数，取中位数（默认 1）")
+        子.add_argument("--重复", type=int, default=1, help="每组参数的独立随机流条数，取中位数（默认 1）")
         子.add_argument("--超时", type=int, default=600, help="单次运行超时秒数（默认 600）")
         子.add_argument("--初始解", help="固定起点的字根键位表.txt，强烈建议提供")
         子.add_argument("--输出", default=str(项目根 / "调参结果"), help="结果目录")
         子.add_argument("--二进制", help="code_genie.exe 路径；缺省自动在 target 下找 release 版")
         子.add_argument("--随机种子", type=int, default=20261107)
+        种子开关 = 子.add_mutually_exclusive_group()
+        种子开关.add_argument(
+            "--固定种子",
+            dest="固定种子",
+            action="store_true",
+            default=True,
+            help="给每个 trial 传 --rng-seed 做配对比较（默认开）",
+        )
+        种子开关.add_argument(
+            "--不固定种子",
+            dest="固定种子",
+            action="store_false",
+            default=True,
+            help="关闭固定种子，退回系统熵（旧行为）",
+        )
 
     for 名字 in ("试跑", "optuna", "nevergrad", "salib"):
         子 = 子们.add_parser(名字)
@@ -418,6 +447,7 @@ def main():
     print(f"二进制: {环境.二进制}")
     print(f"配置:   {环境.基础配置}")
     print(f"步数={环境.步数}  线程={环境.线程}  重复={环境.重复}  初始解={环境.初始解 or '随机'}")
+    print(f"随机流: {'固定种子 ' + str(环境.主种子) + '（+重复序号）' if 环境.固定种子 else '系统熵'}")
     print(f"结果:   {环境.结果目录}")
     try:
         if 参.模式 == "试跑":

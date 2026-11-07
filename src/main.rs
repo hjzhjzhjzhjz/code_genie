@@ -23,6 +23,7 @@ use std::time::Instant;
 
 use chrono::Local;
 use clap::{Parser, Subcommand};
+use rand::SeedableRng;
 use rayon::prelude::*;
 
 mod annealing;
@@ -73,6 +74,11 @@ struct Cli {
     /// 配置文件路径
     #[arg(short = 'c', long, default_value = "config.ron")]
     config: String,
+    /// 固定退火随机种子（u64）：同配置 + 同种子 + 同线程数的 fresh 运行逐位可复现。
+    /// 不给则沿用系统熵。注意 --seed-dir / --seed-keymap 是「播种」（初始解），与此不同。
+    /// checkpoint 不存 RNG 状态，故中断续算与一次跑完仍不等价。
+    #[arg(long = "rng-seed", value_name = "U64")]
+    rng_seed: Option<u64>,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -633,6 +639,7 @@ fn main() {
             播种目录: seed_dir.clone(),
             播种键位: seed_keymap.clone(),
             尺度: scale.clone(),
+            随机种子: cli.rng_seed,
         };
         if let Err(e) = run::run(&参) {
             eprintln!("❌ {}", e);
@@ -765,7 +772,7 @@ fn main() {
                 &output,
             );
         }
-        Some(Commands::Resume { dir }) => run_resume(&dir),
+        Some(Commands::Resume { dir }) => run_resume(&dir, cli.rng_seed),
         Some(Commands::ExportTable {
             keymap,
             chaifen,
@@ -943,6 +950,7 @@ fn main() {
                 seed_keymap,
                 scale,
                 &停止标志(),
+                cli.rng_seed,
             )
         }
         // prepare 在加载配置之前就已返回，这里只是让 match 完备
@@ -952,7 +960,16 @@ fn main() {
         Some(Commands::Run { .. }) => unreachable!("run 已在加载配置前处理"),
         None => {
             let cfg = 载入配置();
-            run_optimize(&cfg, &cli.config, None, None, None, None, &停止标志())
+            run_optimize(
+                &cfg,
+                &cli.config,
+                None,
+                None,
+                None,
+                None,
+                &停止标志(),
+                cli.rng_seed,
+            )
         }
     }
 }
@@ -1481,6 +1498,9 @@ fn 停止标志() -> Arc<AtomicBool> {
     flag
 }
 
+// 与 `simulated_annealing_resumable` 同口径：这里都是 CLI 直传的独立选项，
+// 为一个新参数凭空引入一层 options struct 反而增加间接层。
+#[allow(clippy::too_many_arguments)]
 fn run_optimize(
     cfg: &Config,
     cli_config_path: &str,
@@ -1489,9 +1509,14 @@ fn run_optimize(
     seed_keymap: Option<String>,
     scale_arg: Option<String>,
     stop_flag: &Arc<AtomicBool>,
+    rng_seed: Option<u64>,
 ) {
     let start_time = Instant::now();
     println!("=== CodeGenie 码灵算法优化器 v10 ===");
+    match rng_seed {
+        Some(s) => println!("🎲 固定随机种子: {s}（同配置 + 同线程数可逐位复现）"),
+        None => println!("🎲 随机源: 系统熵（可用 --rng-seed 固定）"),
+    }
 
     // 验证配置（#11：权重和不为 1 直接报错退出，不再仅告警）
     if let Err(e) = cfg.validate_weights() {
@@ -1737,7 +1762,15 @@ fn run_optimize(
     let seeds: Vec<Vec<u8>> = if seed_paths.is_empty() {
         Vec::new()
     } else {
-        let mut rng = rand::rng();
+        // 播种文件未覆盖的组会随机补齐，这也是一次运行间的噪声源，必须同种子固定。
+        let mut rng: rand::rngs::StdRng = match rng_seed {
+            Some(s) => rand::rngs::StdRng::seed_from_u64(annealing::派生种子(
+                s,
+                0,
+                annealing::用途_播种补全,
+            )),
+            None => rand::rngs::StdRng::from_rng(&mut rand::rng()),
+        };
         let mut v = Vec::with_capacity(seed_paths.len());
         for p in &seed_paths {
             let map = must(loader::load_keymap(p, &cfg.files.splits));
@@ -1792,6 +1825,7 @@ fn run_optimize(
                 Some(&ckpt_dir),
                 interval,
                 seed_ref,
+                rng_seed,
             )
         })
         .collect();
@@ -2034,9 +2068,15 @@ fn backup_inputs(cfg: &Config, cli_config_path: &str, output_dir: &str) {
 
 /// resume 子命令（需求 7）：从既有 output 目录的 checkpoint 续算，复用该目录。
 /// 对 inputs/ 与 meta.json 只读；从 inputs/ 重建上下文、复用 meta.scale_config（不重校准）。
-fn run_resume(dir: &str) {
+fn run_resume(dir: &str, rng_seed: Option<u64>) {
     let start_time = Instant::now();
     println!("=== CodeGenie 断点续算 ===");
+    // checkpoint 不序列化 RNG 状态：同种子 + 同断点的续算彼此可复现，
+    // 但不等价于「从零一次跑完」（RNG 流位置无法恢复）。
+    match rng_seed {
+        Some(s) => println!("🎲 固定随机种子: {s}（自断点重新初始化随机流）"),
+        None => println!("🎲 随机源: 系统熵"),
+    }
     println!("  输出目录: {}", dir);
 
     let ckpt_dir = checkpoint::checkpoint_dir(dir);
@@ -2167,6 +2207,7 @@ fn run_resume(dir: &str) {
                 Some(&ckpt_dir),
                 interval,
                 None,
+                rng_seed,
             )
         })
         .collect();
