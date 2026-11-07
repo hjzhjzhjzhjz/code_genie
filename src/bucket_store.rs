@@ -149,7 +149,7 @@ pub fn choose_backend_detailed(
     }
 }
 
-// 测试用：线程局部阈值覆盖，使 `BucketStore::new`（含 Evaluator/SimpleEvaluator 内部构造）
+// 测试用：线程局部阈值覆盖，使 `BucketStore::new`（含 `Evaluator` 内部构造）
 // 可被强制走稀疏后端，从而在小 code_space 的属性测试中覆盖稀疏路径（生产不编译）。
 #[cfg(test)]
 thread_local! {

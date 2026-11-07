@@ -419,7 +419,7 @@ mod keymap_assignment_tests {
     use proptest::prelude::*;
     use rand::Rng;
 
-    /// 由一组 `RootGroup` 构造最小 OptContext（不启用简码）。
+    /// 由一组 `RootGroup` 构造最小 OptContext。
     fn make_ctx_from_groups(groups: Vec<RootGroup>) -> OptContext {
         let mut splits: Vec<(char, Vec<String>, u64)> = Vec::with_capacity(groups.len());
         for (gi, g) in groups.iter().enumerate() {

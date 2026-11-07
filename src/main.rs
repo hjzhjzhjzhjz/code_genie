@@ -200,7 +200,7 @@ enum Commands {
         dir: String,
     },
 
-    /// 导出测评用码表（字<TAB>码，简码在前、全码在后），并统计全码长 / 动重
+    /// 导出测评用码表（字<TAB>码，每字一行全码），并统计全码长 / 动重
     #[command(name = "export")]
     ExportTable {
         /// 键位映射文件（字根键位表.txt / output-keymap.txt）
@@ -1584,7 +1584,7 @@ fn run_optimize(
             && s.distribution.is_some()
     });
     let weights = cfg.get_weight_config();
-    // 校准分支会构建 temp_ctx（含完整全码/简码预计算）。为避免退火前重复构建，
+    // 校准分支会构建 temp_ctx（含完整全码预计算）。为避免退火前重复构建，
     // 校准后复用 temp_ctx 作为正式 ctx，仅就地更新评分用的 scale/targets（二者不参与
     // 构建期预计算，仅评分路径读取）。all_manual（手动 scale 跳过校准）无 temp_ctx，
     // 正式 ctx 仍需单独构建一次。
@@ -1983,7 +1983,6 @@ fn finalize_and_save(
     println!("\n所有结果已保存至 {}/", output_dir);
     println!("  - 汇总.txt              汇总排名");
     println!("  - output-*.txt             全局最优结果");
-    println!("  - 简码表.txt  简码分配");
     if 出了完整码表 {
         println!("  - 完整码表.txt           覆盖全部字的码表");
     }
