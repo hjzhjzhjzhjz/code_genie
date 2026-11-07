@@ -21,6 +21,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use crate::prepare::text::是汉字;
+
 pub struct 参数 {
     pub 全码词典: PathBuf,
     pub 词组词典: Option<PathBuf>,
@@ -43,12 +45,8 @@ struct 条目 {
     权重: u64,
 }
 
-fn 是汉字(c: char) -> bool {
-    let u = c as u32;
-    (0x4E00..=0x9FFF).contains(&u)
-        || (0x3400..=0x4DBF).contains(&u)
-        || (0x20000..=0x2A6DF).contains(&u)
-}
+// 汉字判定统一走 `prepare::text::是汉字`（覆盖康熙部首、兼容汉字与扩展 B–H）。
+// 这里曾有一份只到 U+2A6DF 的私有实现，会把第三平面的字当成句界切开。
 
 /// 读词典：`文本 <TAB> 码 [<TAB> 权重]`。
 ///
@@ -525,5 +523,15 @@ mod 词典读取测试 {
         let 表 = 读词典(&p);
         assert_eq!(表.len(), 1, "`---` / `name:` 这类行必须被滤掉");
         assert_eq!(表[0].0, "的");
+    }
+
+    #[test]
+    fn 扩展平面汉字不再被当成句界() {
+        // 旧私有判定只覆盖到 U+2A6DF：U+2A6E0 及第三平面的字会被当成标点，
+        // 把一句从中间切断。改用统一判定后它们应留在同一句里。
+        let 文本 = format!("的{}一{}白", '\u{2A6E0}', '\u{30000}');
+        let 字码: HashMap<char, String> = 文本.chars().map(|c| (c, "aaaa".to_string())).collect();
+        let 期望 = vec![文本.clone()];
+        assert_eq!(切句(&文本, &字码, 10), 期望);
     }
 }

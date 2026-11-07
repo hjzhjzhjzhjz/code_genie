@@ -40,6 +40,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::export_table;
+use crate::prepare::text::加载映射;
 
 /// typer 的字根表页面模板（原 `generate-roots-chart.pl` 的 heredoc，逐字照搬）
 const 页面模板: &str = include_str!("../assets/roots_chart_page.html");
@@ -1025,22 +1026,6 @@ fn 读根清单(目录们: &[PathBuf], 名: &str) -> HashSet<String> {
         }
     }
     集
-}
-
-/// `roots-mapping.tsv`（花括号名 → 显示字）→ 映射表
-fn 加载映射(path: &Path) -> HashMap<String, String> {
-    let mut 表 = HashMap::new();
-    let Ok(文本) = fs::read_to_string(path) else {
-        return 表;
-    };
-    for 行 in 文本.lines() {
-        let 列: Vec<&str> = 行.split_whitespace().collect();
-        if 列.len() >= 2 && !列[0].starts_with('#') {
-            // 与 perl 一致：同一名字只留最后一个
-            表.insert(列[0].to_string(), 列[1].to_string());
-        }
-    }
-    表
 }
 
 fn chart_json(chart: &BTreeMap<String, BTreeMap<String, BTreeMap<String, 根信息>>>) -> String {

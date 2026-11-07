@@ -38,6 +38,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use crate::prepare::text::{写文本, 读行};
+
 /// 字根 → 键位串（如 `白` → `Fk`），取自算码输出的字根键位表
 pub(crate) type 字根表 = HashMap<String, String>;
 /// 字 → 拆分根序列，取自 `拆分全表.txt`
@@ -194,17 +196,7 @@ fn 文件名(路径: &Path) -> String {
         .unwrap_or_else(|| 路径.display().to_string())
 }
 
-fn 读文本(路径: &Path) -> Result<String, String> {
-    std::fs::read_to_string(路径).map_err(|e| format!("读不了 {}: {}", 路径.display(), e))
-}
-
-fn 写文本(路径: &Path, 内容: &str) -> Result<(), String> {
-    std::fs::write(路径, 内容).map_err(|e| format!("写不了 {}: {}", 路径.display(), e))
-}
-
-fn 读行(路径: &Path) -> Result<Vec<String>, String> {
-    Ok(读文本(路径)?.lines().map(|s| s.to_string()).collect())
-}
+// 读行 / 写文本 统一走 `prepare::text`，此前这里有一份逐行相同的私有实现。
 
 /// 往完整码表里收一条（按 文本+码 去重）。返回是否新增。
 fn 收一条(文: &mut String, 已见: &mut HashSet<String>, 文本: &str, 码: &str) -> bool {

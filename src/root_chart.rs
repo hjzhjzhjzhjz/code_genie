@@ -13,6 +13,9 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
+
+use crate::prepare::text::加载映射;
 
 const 模板: &str = include_str!("../assets/root_chart.html");
 
@@ -86,20 +89,6 @@ fn 生成字根表(keymap_path: &str) -> Vec<(String, String)> {
     结果
 }
 
-/// 读取 `字根映射表.tsv`：花括号名 → 显示字
-fn 加载映射(path: &str) -> HashMap<String, String> {
-    let mut 表 = HashMap::new();
-    if let Ok(文本) = fs::read_to_string(path) {
-        for 行 in 文本.lines() {
-            let 列: Vec<&str> = 行.split('\t').collect();
-            if 列.len() >= 2 && !列[0].trim().is_empty() {
-                表.insert(列[0].trim().to_string(), 列[1].to_string());
-            }
-        }
-    }
-    表
-}
-
 fn 转义(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
@@ -115,7 +104,10 @@ pub fn run(keymap_path: &str, mapping_path: Option<&str>, output_path: &str) {
         eprintln!("✗ 没有解析到任何字根");
         return;
     }
-    let 映射 = mapping_path.map(加载映射).unwrap_or_default();
+    let 映射 = mapping_path
+        .map(Path::new)
+        .map(加载映射)
+        .unwrap_or_default();
     println!("  字根 {} 个，映射表 {} 条", 字根.len(), 映射.len());
 
     let mut 行: Vec<(String, String, String, String)> = Vec::new();
