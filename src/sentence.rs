@@ -458,9 +458,14 @@ pub fn run(参: &参数) {
     }
 
     if let Some(目录) = &参.导出 {
-        std::fs::create_dir_all(目录).ok();
-        let _ = std::fs::write(目录.join("原文.txt"), 句们.join("\n") + "\n");
-        println!("排查用原文已写入 {}", 目录.display());
+        // 写失败必须如实报出来：过去 `let _ = write(...)` 之后无条件打印「已写入」，
+        // 目录只读或磁盘满时用户会以为排查文件在，实际什么都没有。
+        let 结果 = std::fs::create_dir_all(目录)
+            .and_then(|()| std::fs::write(目录.join("原文.txt"), 句们.join("\n") + "\n"));
+        match 结果 {
+            Ok(()) => println!("排查用原文已写入 {}", 目录.display()),
+            Err(e) => eprintln!("⚠️ 排查用原文写入 {} 失败：{}", 目录.display(), e),
+        }
     }
 
     let 率 = |分: usize, 总: usize| 分 as f64 / 总.max(1) as f64 * 100.0;

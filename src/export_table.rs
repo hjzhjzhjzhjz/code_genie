@@ -73,7 +73,10 @@ pub struct 统计 {
 
 /// 读取 keymap：`字根 <TAB> 键位串 <TAB> 频次`，只取前两列
 pub(crate) fn 加载键位表(path: &str) -> HashMap<String, Vec<char>> {
-    let 文本 = fs::read_to_string(path).expect("无法读取 keymap");
+    // 报错必须带路径与 OS 原因：这三个读取函数是 CLI 的直接入口，
+    // 只喊一句「无法读取 keymap」时用户根本不知道该改哪个文件。
+    let 文本 = fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("无法读取键位表 {path}：{e}（非 UTF-8 文件请先转码）"));
     let mut 表 = HashMap::new();
     for 行 in 文本.lines() {
         let 行 = 行.trim();
@@ -90,7 +93,8 @@ pub(crate) fn 加载键位表(path: &str) -> HashMap<String, Vec<char>> {
 
 /// 读取纯拆分表：`字 <TAB> 根 根 … <TAB> 频次`
 pub(crate) fn 加载拆分表(path: &str) -> Vec<(String, Vec<String>, u64)> {
-    let 文本 = fs::read_to_string(path).expect("无法读取拆分表");
+    let 文本 = fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("无法读取拆分表 {path}：{e}（非 UTF-8 文件请先转码）"));
     加载拆分表内容(&文本)
 }
 
@@ -120,7 +124,8 @@ pub(crate) fn 加载拆分表内容(文本: &str) -> Vec<(String, Vec<String>, u
 
 /// 读取简码表：`字 <TAB> 码 <TAB> 频次`，码尾的 `_` 去掉
 pub(crate) fn 加载简码表(path: &str) -> HashMap<String, String> {
-    let 文本 = fs::read_to_string(path).expect("无法读取简码表");
+    let 文本 = fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("无法读取简码表 {path}：{e}（非 UTF-8 文件请先转码）"));
     let mut 表 = HashMap::new();
     for 行 in 文本.lines() {
         let 行 = 行.trim();
@@ -388,8 +393,15 @@ pub(crate) fn 生成表按方案(
         if let Some(简) = 简码.get(字.as_str()) {
             // 简码 = 码 + 上屏键（如 `到` 的 `bi` = 码 `b` + 上屏键 `i`），
             // 所以先按整串比，再退一格比「去掉上屏键」的码；都对不上才视为脏数据跳过。
-            let 前缀匹配 = 全码.starts_with(简.as_str())
-                || (简.len() > 1 && 全码.starts_with(&简[..简.len() - 1]));
+            // 退一格必须按**字符**退：`&简[..简.len()-1]` 是按字节切，简码里一旦出现
+            // 非 ASCII 字符（全角字母、制表符混入等）就会 panic 在非法 UTF-8 边界上。
+            let 去尾 = if 简.chars().count() > 1 {
+                简.char_indices().next_back().map(|(i, _)| &简[..i])
+            } else {
+                None
+            };
+            let 前缀匹配 =
+                全码.starts_with(简.as_str()) || 去尾.is_some_and(|p| 全码.starts_with(p));
             if 前缀匹配 {
                 输出.push_str(&format!("{}\t{}\n", 字, 简));
                 简码条数 += 1;
@@ -530,5 +542,19 @@ mod tests {
         let 键位 = 键位表(&[("一", ['A', 'a'])]);
         let 序列 = vec![("一", 码位::Y)];
         assert_eq!(码(&序列, &键位), "a");
+    }
+
+    /// 简码里混进非 ASCII 字符时，「去掉上屏键」必须按字符退，不能按字节切。
+    /// 回归：`&简[..简.len()-1]` 在 "aé" 上会切在 UTF-8 字符中间直接 panic。
+    #[test]
+    fn 简码含非英文字符按字符退一格() {
+        let 键位 = 键位表(&[("一", ['A', 'a'])]);
+        let 拆分 = vec![("甲".to_string(), vec!["一".to_string()], 100u64)];
+        let mut 简码 = HashMap::new();
+        简码.insert("甲".to_string(), "aé".to_string());
+        let (文本, 全码条数, 简码条数, _, _) =
+            生成表按方案(&键位, &拆分, &简码, 编码规则::魔灵, 4);
+        assert_eq!((全码条数, 简码条数), (1, 1), "退一格得到 `a`，仍是全码前缀");
+        assert!(文本.contains("甲	aé"), "{文本}");
     }
 }

@@ -256,8 +256,8 @@ enum Commands {
         #[arg(long)]
         font: Option<String>,
 
-        /// 每页字数
-        #[arg(long = "page-size", default_value_t = 500)]
+        /// 每页字数（必须 ≥ 1；0 会让分页整除直接 panic）
+        #[arg(long = "page-size", default_value_t = 500, value_parser = 正整数)]
         page_size: usize,
 
         /// 每个字根最多几个例字
@@ -1613,6 +1613,17 @@ fn resolve_seed_paths(
     }
 }
 
+/// clap 值解析器：只接受 ≥ 1 的整数。
+///
+/// 用于 `--page-size` 这类会做整除的参数：0 在运行时是除零 panic（release 下直接 abort）。
+fn 正整数(s: &str) -> Result<usize, String> {
+    match s.trim().parse::<usize>() {
+        Ok(0) => Err("必须 ≥ 1".to_string()),
+        Ok(n) => Ok(n),
+        Err(e) => Err(format!("不是合法整数：{e}")),
+    }
+}
+
 /// Ctrl-C 停止标志。
 ///
 /// 处理器在进程内只能安装一次（`ctrlc::set_handler` 重复调用会返回 Err 且新标志永不
@@ -1638,6 +1649,11 @@ fn run_optimize(
 
     // 验证配置（#11：权重和不为 1 直接报错退出，不再仅告警）
     if let Err(e) = cfg.validate_weights() {
+        eprintln!("❌ {}", e);
+        std::process::exit(1);
+    }
+    // 温度/舒适区参数校验：temp_start = 0 会让调度曲线出 NaN，退火静默退化成严格爬山。
+    if let Err(e) = cfg.validate_annealing() {
         eprintln!("❌ {}", e);
         std::process::exit(1);
     }

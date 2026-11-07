@@ -922,7 +922,11 @@ fn try_triple_swap(
     let new_score = evaluator.get_score(ctx);
     let delta = new_score - old_score;
 
-    if delta <= 0.0 || rng.random::<f64>() < (-delta / temp).exp() {
+    // 硬约束：[targets] 里的 *_max 在自定义邻域（三交换/整键互换）上同样要生效。
+    // 随机数照常抽取（先算「概率是否命中」再判约束），否则会改变随机流、
+    // 让既有种子的结果无法复现。
+    let 概率命中 = delta <= 0.0 || rng.random::<f64>() < (-delta / temp).exp();
+    if 概率命中 && evaluator.constraints_ok(ctx, needs_simple) {
         if needs_simple {
             evaluator.commit_simple();
         }
@@ -1040,7 +1044,11 @@ pub(crate) fn try_full_key_swap(
     let new_score = evaluator.get_score(ctx);
     let delta = new_score - old_score;
 
-    if delta <= 0.0 || rng.random::<f64>() < (-delta / temp).exp() {
+    // 硬约束：[targets] 里的 *_max 在自定义邻域（三交换/整键互换）上同样要生效。
+    // 随机数照常抽取（先算「概率是否命中」再判约束），否则会改变随机流、
+    // 让既有种子的结果无法复现。
+    let 概率命中 = delta <= 0.0 || rng.random::<f64>() < (-delta / temp).exp();
+    if 概率命中 && evaluator.constraints_ok(ctx, needs_simple) {
         if needs_simple {
             evaluator.commit_simple();
         }
@@ -1265,7 +1273,9 @@ fn coordinate_descent(ctx: &OptContext, init: Vec<u8>, disable_simple: bool) -> 
                 evaluator.score_dirty = true;
                 let score = evaluator.get_score(ctx);
 
-                if score < best_score - 1e-12 {
+                // 硬约束：越界的候选即使分数更低也不接受（软惩罚拉不住时解会跑到约束外），
+                // 与 try_move / 三交换 / 整键互换的判定保持一致。
+                if score < best_score - 1e-12 && evaluator.constraints_ok(ctx, needs_simple) {
                     best_score = score;
                     best_key = k;
                 }
@@ -1498,8 +1508,39 @@ pub(crate) fn 舒适区温度(cfg: &Config) -> f64 {
     if ts.is_nan() || ts <= 0.0 || te.is_nan() || te <= 0.0 {
         return ts;
     }
-    let p = cfg.annealing.comfort_progress.clamp(0.0, 1.0);
+    let p = if cfg.annealing.comfort_progress.is_nan() {
+        // NaN 会让整条曲线退化成线性（gaussian 传染 NaN），按默认中点处理更可控。
+        0.5
+    } else {
+        cfg.annealing.comfort_progress.clamp(0.0, 1.0)
+    };
     ts * (te / ts).powf(p)
+}
+
+/// 按给定分配重算「最优解」的全部分量（激活简码 / 解冻简码时重定价用）。
+///
+/// 返回 `(全码分量, 简码分量, 全码指标, 简码指标)`。
+///
+/// 为什么需要：激活简码之前 `simple_active = false`，简码分量恒为 0；零梯度冻结期间
+/// 简码状态不随移动更新，记录下来的简码分量是冻结瞬间的 0。这两个时刻若不重算，
+/// `best_*` 记录会系统性低估最优解的真实代价，成为「不可战胜的幽灵最优」，
+/// 后续搜索再也不会更新最优解。
+fn 重定价最优(
+    ctx: &OptContext,
+    assignment: &[u8],
+    简码权重: f64,
+) -> (f64, f64, Metrics, SimpleMetrics) {
+    let mut ev = Evaluator::new(ctx, assignment);
+    ev.simple_active = true;
+    ev.current_simple_weight = 简码权重;
+    ev.score_dirty = true;
+    ev.full_score_dirty = true;
+    (
+        ev.full_score_component(ctx),
+        ev.simple_score_component(ctx),
+        ev.get_metrics(ctx),
+        ev.get_simple_metrics(ctx),
+    )
 }
 
 /// 可断点续算的模拟退火主循环。
@@ -1905,15 +1946,11 @@ pub fn simulated_annealing_resumable(
             // 重算真实简码分量并刷新最优解记录（一次性，O(简码全量构建)）。
             // 注意：best_assignment 可能与当前 assignment 不同，需单独构建评估器。
             {
-                let mut best_eval = Evaluator::new(ctx, &best_assignment);
-                best_eval.simple_active = true;
-                best_eval.current_simple_weight = w_target;
-                best_eval.score_dirty = true;
-                best_eval.full_score_dirty = true;
-                best_full_score = best_eval.full_score_component(ctx);
-                best_simple_score = best_eval.simple_score_component(ctx);
-                best_metrics = best_eval.get_metrics(ctx);
-                best_simple_metrics = best_eval.get_simple_metrics(ctx);
+                let (全, 简, 全指标, 简指标) = 重定价最优(ctx, &best_assignment, w_target);
+                best_full_score = 全;
+                best_simple_score = 简;
+                best_metrics = 全指标;
+                best_simple_metrics = 简指标;
                 // 以激活当刻的有效权重合成 best_score，保持与后续逐步比较口径一致。
                 let w_eff_now = w_simple_eff(p, p_start, p_ramp, w_target);
                 best_score = Evaluator::best_total(
@@ -2262,10 +2299,21 @@ pub fn simulated_annealing_resumable(
                 let audited = evaluator.simple_score_component(ctx);
                 if audited > SIMPLE_FREEZE_EPS {
                     evaluator.resume_simple();
+                    // 解冻同样要重定价最优解：冻结期记下的 best_simple_score 是冻结瞬间
+                    // 的 0（当时确实达标），但冻结期的全码移动已经让**最优解本身**的简码
+                    // 代价变了。不重算的话 best_* 仍按「简码免费」计，最优解再也打不破，
+                    // 解冻后的简码优化全部白跑。
+                    let (全, 简, 全指标, 简指标) = 重定价最优(ctx, &best_assignment, w_eff);
+                    best_full_score = 全;
+                    best_simple_score = 简;
+                    best_metrics = 全指标;
+                    best_simple_metrics = 简指标;
+                    best_score = Evaluator::best_total(weight_full, 全, w_eff, 简);
+                    last_best_score = best_score;
                     if thread_id == 0 {
                         println!(
-                            "   [T0] 步数 {}/{} | 进度 {:.3}: 对账发现简码重新超标（得分 {:.6}）→ 解冻增量维护",
-                            step, steps, p, audited
+                            "   [T0] 步数 {}/{} | 进度 {:.3}: 对账发现简码重新超标（得分 {:.6}）→ 解冻增量维护（最优解已重定价 {:.6}）",
+                            step, steps, p, audited, best_score
                         );
                     }
                 }

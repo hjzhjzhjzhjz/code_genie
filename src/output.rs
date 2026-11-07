@@ -172,7 +172,7 @@ pub fn save_combined_code_output(ctx: &OptContext, assignment: &[u8], dir: &str)
         }
     }
 
-    crate::fsutil::write_with_backup(format!("{}/合并码表.txt", dir), out).unwrap();
+    crate::fsutil::write_output(format!("{}/合并码表.txt", dir), out);
 }
 
 /// 合并码表（覆盖全部字）：简码段 + 全量拆分表按星月 encoder 出的全码段。
@@ -193,7 +193,7 @@ pub fn save_combined_from_full(
             }
         }
     }
-    crate::fsutil::write_with_backup(format!("{}/合并码表.txt", dir), out).unwrap();
+    crate::fsutil::write_output(format!("{}/合并码表.txt", dir), out);
 }
 
 /// 根 → 键位串（首字母大写、小码小写），与「字根键位表.txt」同口径
@@ -335,7 +335,7 @@ pub fn save_simple_code_output(ctx: &OptContext, assignment: &[u8], dir: &str) {
         }
     }
 
-    crate::fsutil::write_with_backup(format!("{}/简码表.txt", dir), out).unwrap();
+    crate::fsutil::write_output(format!("{}/简码表.txt", dir), out);
 }
 
 /// 保存线程结果
@@ -400,7 +400,7 @@ pub fn save_thread_results(
         assignment,
         root_usage,
     );
-    crate::fsutil::write_with_backup(format!("{}/字根键位表.txt", thread_dir), &root_out).unwrap();
+    crate::fsutil::write_output(format!("{}/字根键位表.txt", thread_dir), &root_out);
 
     save_key_distribution_to_dir(ctx, assignment, &thread_dir);
     save_equiv_distribution_to_dir(ctx, assignment, &thread_dir);
@@ -456,7 +456,7 @@ pub fn save_key_distribution_to_dir(ctx: &OptContext, assignment: &[u8], dir: &s
         }
     }
 
-    crate::fsutil::write_with_backup(format!("{}/用指分布.txt", dir), out).unwrap();
+    crate::fsutil::write_output(format!("{}/用指分布.txt", dir), out);
 }
 
 /// 保存当量分布到目录
@@ -497,7 +497,7 @@ pub fn save_equiv_distribution_to_dir(ctx: &OptContext, assignment: &[u8], dir: 
         out.push_str(&format!("{}\t{:.4}\t{}\n", ch, eq, freq));
     }
 
-    crate::fsutil::write_with_backup(format!("{}/当量分布.txt", dir), out).unwrap();
+    crate::fsutil::write_output(format!("{}/当量分布.txt", dir), out);
 }
 
 /// 保存结果到输出目录
@@ -556,7 +556,7 @@ pub fn save_results(
         assignment,
         root_usage,
     );
-    crate::fsutil::write_with_backup(format!("{}/字根键位表.txt", output_dir), &root_out).unwrap();
+    crate::fsutil::write_output(format!("{}/字根键位表.txt", output_dir), &root_out);
 
     save_key_distribution_to_dir(ctx, assignment, output_dir);
     save_equiv_distribution_to_dir(ctx, assignment, output_dir);
@@ -692,7 +692,7 @@ pub fn save_full_code_table(
     output_dir: &str,
 ) -> 全量码表统计 {
     let (out, 统计) = 全量码表文本(ctx, assignment, 全量拆分);
-    crate::fsutil::write_with_backup(format!("{}/完整码表.txt", output_dir), out).unwrap();
+    crate::fsutil::write_output(format!("{}/完整码表.txt", output_dir), out);
     统计
 }
 
@@ -777,7 +777,7 @@ pub fn save_summary(
         }
     }
 
-    crate::fsutil::write_with_backup(format!("{}/汇总.txt", output_dir), summary).unwrap();
+    crate::fsutil::write_output(format!("{}/汇总.txt", output_dir), summary);
 }
 
 // =========================================================================

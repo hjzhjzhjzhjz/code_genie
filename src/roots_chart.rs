@@ -783,10 +783,12 @@ fn 生成页面(
         .values()
         .filter_map(|v| v.get(2).and_then(|s| s.parse::<f64>().ok()))
         .sum();
+    // 分页大小兜底：0 会让两个整除点 panic（clap 已限制 ≥1，这里防非 CLI 调用方）。
+    let 每页字数 = 参.每页字数.max(1);
     let 页数 = if 高频.is_empty() {
         1
     } else {
-        (高频.len() - 1) / 参.每页字数 + 1
+        (高频.len() - 1) / 每页字数 + 1
     };
 
     // 每字根：各页字数、覆盖字频、例字、简繁
@@ -817,7 +819,7 @@ fn 生成页面(
         let 页 = if 序位 == 0 {
             0
         } else {
-            (序位 - 1) / 参.每页字数 + 1
+            (序位 - 1) / 每页字数 + 1
         };
         let 繁体 = unihan.map(|u| u.繁体字.contains(&字.chars().next().unwrap_or('\0')));
         let 简体 = unihan.map(|u| u.简体字.contains(&字.chars().next().unwrap_or('\0')));

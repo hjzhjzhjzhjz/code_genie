@@ -516,7 +516,12 @@ pub fn run(
     }
 
     if let Some(目录) = 保留 {
-        std::fs::create_dir_all(目录).ok();
+        if let Err(e) = std::fs::create_dir_all(目录) {
+            eprintln!(
+                "⚠️ 无法创建保留目录 {}：{}（测评结果 JSON 将留在临时目录）",
+                目录, e
+            );
+        }
     }
 
     // 宇浩自己用的 CJK 区段，选重统计要和它一致
@@ -569,16 +574,30 @@ pub fn run(
         }
     }
 
-    // 保留结果 JSON
-    if let Some(目录) = 保留 {
-        for 文件 in &输出文件 {
-            if let Some(名) = 文件.file_name() {
-                std::fs::copy(文件, Path::new(目录).join(名)).ok();
-            }
-        }
-    }
+    // 保留结果 JSON：**先确认复制成功再删原件**。过去用 `.ok()` 吞掉复制失败，
+    // 随后无条件 remove_file，用户以为加了 --keep 就留住了原始 JSON，实际全丢。
     for 文件 in &输出文件 {
-        let _ = std::fs::remove_file(文件);
+        let 可删 = match 保留 {
+            None => true, // 没要求保留：本就是临时文件，照旧清掉
+            Some(目录) => match 文件.file_name().map(|名| Path::new(目录).join(名)) {
+                None => false,
+                Some(目标) => match std::fs::copy(文件, &目标) {
+                    Ok(_) => true,
+                    Err(e) => {
+                        eprintln!(
+                            "⚠️ 结果 JSON 保留失败（原文件已留在 {}）：复制到 {} 失败：{}",
+                            文件.display(),
+                            目标.display(),
+                            e
+                        );
+                        false
+                    }
+                },
+            },
+        };
+        if 可删 {
+            let _ = std::fs::remove_file(文件);
+        }
     }
 
     指标表.sort_by(|a, b| {

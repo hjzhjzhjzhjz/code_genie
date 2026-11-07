@@ -21,6 +21,18 @@ const OCC_CORE_KEY: u8 = 255;
 /// 等价表类型别名
 pub type EquivTable = [[f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
 
+/// 把覆盖率配置归一化到 `[0, 1]`：NaN / 负数 / 超过 1 一律按 `默认值` 或边界处理。
+///
+/// `f64::clamp` 在 `min > max` 时 panic、NaN 会原样透传（后续再 clamp 就 panic），
+/// 而覆盖率来自用户手写配置，必须容错。
+fn 归一覆盖率(v: f64, 默认值: f64) -> f64 {
+    if v.is_nan() {
+        默认值
+    } else {
+        v.clamp(0.0, 1.0)
+    }
+}
+
 /// 优化上下文 - 存储所有算法需要的数据
 pub struct OptContext {
     /// 是否启用简码优化
@@ -368,8 +380,12 @@ impl OptContext {
             // active ⊆ output（active 覆盖率钳制为 ≤ output 覆盖率）。
             // 注意（需求 21.3）：候选字按全集汉字选取，不受固定简码影响；固定简码字的剔除
             // 在选取完成之后进行（需求 21.4）。
-            let ratio_output = weights.simple_coverage_ratio;
-            let ratio_active = weights.simple_active_coverage.clamp(0.0, ratio_output);
+            // 覆盖率归一：`f64::clamp` 在 `min > max` 时直接 panic（且 NaN 会原样透传，
+            // 再参与下一次 clamp 就 panic）。配置层已告警钳制，这里再兜一层，保证
+            // 手改配置/老配置文件不会让优化器在构建上下文时崩掉。
+            let ratio_output = 归一覆盖率(weights.simple_coverage_ratio, 1.0);
+            let ratio_active =
+                归一覆盖率(weights.simple_active_coverage, ratio_output).min(ratio_output);
             let mut sorted_by_freq: Vec<usize> = (0..n_chars).collect();
             sorted_by_freq.sort_by(|&a, &b| {
                 char_infos[b]

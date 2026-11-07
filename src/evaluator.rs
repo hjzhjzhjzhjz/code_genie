@@ -929,15 +929,23 @@ impl SimpleEvaluator {
                 // 简码占用保护增量（需求 33）。full_buckets 此时已反映本次移动后状态。
                 if ctx.simple_protect_top_n == 0 {
                     // N=0（保护全部）：blocked(C)=全码桶非空。old_code 变空 → 解禁；
-                    // new_code 变为恰含此字（之前为空）→ 新禁；据此标脏对应简码桶。
+                    // new_code 由空变非空 → 新禁；据此标脏对应简码桶。
                     if full_buckets.get(old_code as u32).is_none() {
                         self.protect_dirty_buf.push(old_code);
                     }
-                    if full_buckets
-                        .get(new_code as u32)
-                        .is_some_and(|b| b.members.len() == 1)
-                    {
-                        self.protect_dirty_buf.push(new_code);
+                    // 「移动前为空」的判定：桶内成员**全部**是本次移动里编码变化的字。
+                    // 编码没变的字不可能凭空出现在这个桶里；而同一字存在多条重复拆分时，
+                    // 一次移动会同时塞进两条成员，`len() == 1` 会漏判（该简码桶不清空，
+                    // 仍按未禁选字），故按成员归属判定。
+                    if let Some(b) = full_buckets.get(new_code as u32) {
+                        // 成员数多于本次受影响字数时，必然含未变化的字 → 一定非空，跳过。
+                        if b.members.len() <= full_affected_chars.len()
+                            && b.members
+                                .iter()
+                                .all(|m| full_affected_chars.contains(&(*m as usize)))
+                        {
+                            self.protect_dirty_buf.push(new_code);
+                        }
                     }
                 } else if ctx.simple_is_topn[ci] {
                     // N>0：仅受保护(top-N)字影响占用计数；计数 1→0 解禁、0→1 新禁。
@@ -1333,6 +1341,24 @@ impl SimpleEvaluator {
         self.g_key_presses += freq_f * (klen as f64 - g_old_len as f64);
     }
 
+    /// 把排序键数组整理成「前 `n` 个按名次有序」，其余元素顺序不限。
+    ///
+    /// `select_nth_unstable_by` 只保证前 `n` 个**恰好**是最优的那 n 个（集合正确），
+    /// 集合内部顺序是任意的；而退火出简字的上屏键按**名次**分配
+    /// （`commit_key_for_rank`），多上屏键级别下乱序会让「字 → 上屏键」映射与全量重建
+    /// （整桶全排序）不一致，使当量表把末键转移记到错误的键上、`equiv_mean` 与用指分布
+    /// 随之漂移。故分划之后对前缀再排一次（`n` 通常 ≤ 3，代价可忽略）。
+    fn 按名次取前n个<F>(keys: &mut [(i64, u64, u32)], n: usize, cmp: F)
+    where
+        F: FnMut(&(i64, u64, u32), &(i64, u64, u32)) -> Ordering + Copy,
+    {
+        debug_assert!(n > 0 && n <= keys.len());
+        if n < keys.len() {
+            keys.select_nth_unstable_by(n - 1, cmp);
+        }
+        keys[..n].sort_unstable_by(cmp);
+    }
+
     /// 对单个脏桶做局部重排并重选前 `code_num` 个出简，检测出简翻转，更新聚合与跨级标记，
     /// 并把「原生新选中 / 新落选」分别记入 `newly_sel_buf` / `newly_desel_buf` 供跨级传播。
     fn reselect_bucket(
@@ -1448,12 +1474,12 @@ impl SimpleEvaluator {
                     ci32,
                 ));
             }
-            self.reselect_keys
-                .select_nth_unstable_by(code_num - 1, |a, b| {
-                    b.0.cmp(&a.0)
-                        .then_with(|| b.1.cmp(&a.1))
-                        .then_with(|| a.2.cmp(&b.2))
-                });
+            let 排序 = |a: &(i64, u64, u32), b: &(i64, u64, u32)| {
+                b.0.cmp(&a.0)
+                    .then_with(|| b.1.cmp(&a.1))
+                    .then_with(|| a.2.cmp(&b.2))
+            };
+            Self::按名次取前n个(&mut self.reselect_keys, code_num, 排序);
             for (i, e) in self.reselect_keys.iter().enumerate() {
                 self.reselect_members[i] = e.2;
             }
@@ -2644,6 +2670,21 @@ impl Evaluator {
             }
         }
         true
+    }
+
+    /// 硬约束统一入口（全码 + 简码 `*_max`），供不走 `try_move`/`try_swap` 的邻域算子复用。
+    ///
+    /// 三交换、整键互换、坐标下降都是「自行改 assignment → 自行算分 → 自行回滚」的路径，
+    /// 过去没有调用 `check_full_code_max`/`check_simple_code_max`，`[targets]` 里配的
+    /// 硬上限在这三条路径上可被静默突破（软惩罚拉不住时，解会跑到约束外）。
+    ///
+    /// `needs_simple` 为 false 时简码指标没变，无需重复检查。
+    #[inline(always)]
+    pub fn constraints_ok(&self, ctx: &OptContext, needs_simple: bool) -> bool {
+        if !self.check_full_code_max(ctx) {
+            return false;
+        }
+        !(ctx.enable_simple_code && needs_simple && !self.check_simple_code_max(ctx))
     }
 
     /// 计算全码得分
@@ -8397,6 +8438,46 @@ mod targets_proptest {
             // 温度极高 → 接受概率 ≈ 1，若被拒只可能是硬约束误判
             let 接受 = ev.try_move(&ctx, &mut assignment, 0, 新键, 1e12, &mut rng);
             prop_assert!(接受, "全部 _max=0 时不应因硬约束拒绝");
+        }
+    }
+}
+
+#[cfg(test)]
+mod rank_order_tests {
+    use super::*;
+
+    /// 分划之后前缀必须按名次有序：`select_nth_unstable_by` 只保证前 n 个是「最优 n 个」
+    /// 这个集合，集合内无序。多上屏键级别按名次分配上屏键，乱序会让增量结果与
+    /// 全量重建不一致（回归：曾在 `reselect_bucket` 里直接用分划下标当名次）。
+    #[test]
+    fn 分划后前缀按名次有序() {
+        let 比较 = |a: &(i64, u64, u32), b: &(i64, u64, u32)| {
+            b.0.cmp(&a.0)
+                .then_with(|| b.1.cmp(&a.1))
+                .then_with(|| a.2.cmp(&b.2))
+        };
+        // 含并列（排序键相同、字频相同 → 靠 ci 升序决胜）与完全打乱的初始顺序
+        let 原始: Vec<(i64, u64, u32)> = vec![
+            (5, 1, 0),
+            (9, 1, 1),
+            (5, 3, 2),
+            (9, 1, 3),
+            (1, 9, 4),
+            (9, 5, 5),
+            (1, 9, 6),
+        ];
+        let mut 全排 = 原始.clone();
+        全排.sort_unstable_by(比较);
+
+        for n in 1..=原始.len() {
+            let mut v = 原始.clone();
+            SimpleEvaluator::按名次取前n个(&mut v, n, 比较);
+            assert_eq!(&v[..n], &全排[..n], "n={n} 的前缀顺序与全排序不一致");
+            let mut 尾部 = v[n..].to_vec();
+            let mut 期望尾 = 全排[n..].to_vec();
+            尾部.sort_unstable_by(比较);
+            期望尾.sort_unstable_by(比较);
+            assert_eq!(尾部, 期望尾, "n={n} 的尾部集合不正确");
         }
     }
 }

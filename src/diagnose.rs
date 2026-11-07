@@ -147,8 +147,12 @@ fn 有汉字(s: &str) -> bool {
 }
 
 /// 读码表，自动判方向（字在前还是码在前）
-fn 读码表(路径: &Path) -> Vec<(String, String)> {
-    let 文本 = std::fs::read_to_string(路径).unwrap_or_default();
+///
+/// 读不到就返回 `Err`：过去用 `unwrap_or_default()` 静默返回空表，诊断会照常
+/// 生成一份「全是 0」的报告并参与排序，看起来像方案极差，实际是文件没读到。
+fn 读码表(路径: &Path) -> Result<Vec<(String, String)>, String> {
+    let 文本 = std::fs::read_to_string(路径)
+        .map_err(|e| format!("读不到码表 {}：{}", 路径.display(), e))?;
     let mut 出 = Vec::new();
     for 原行 in 文本.lines() {
         let 行 = 原行.trim_end_matches('\r');
@@ -169,7 +173,13 @@ fn 读码表(路径: &Path) -> Vec<(String, String)> {
             出.push((b.to_string(), a.to_string()));
         }
     }
-    出
+    if 出.is_empty() {
+        return Err(format!(
+            "码表 {} 里没有可识别的「字<TAB>码」行",
+            路径.display()
+        ));
+    }
+    Ok(出)
 }
 
 /// 十分位整数：与 int(Fraction(文本) * 10) 等价
@@ -198,8 +208,9 @@ fn 取十分位(s: &str) -> Option<i64> {
     Some(负 * (整 * 10 + 小))
 }
 
-fn 读当量(路径: &Path) -> HashMap<(char, char), i64> {
-    let 文本 = std::fs::read_to_string(路径).unwrap_or_default();
+fn 读当量(路径: &Path) -> Result<HashMap<(char, char), i64>, String> {
+    let 文本 = std::fs::read_to_string(路径)
+        .map_err(|e| format!("读不到当量表 {}：{}", 路径.display(), e))?;
     let mut 表 = HashMap::new();
     for 原行 in 文本.lines() {
         let 行 = 原行.trim_end_matches('\r');
@@ -218,11 +229,12 @@ fn 读当量(路径: &Path) -> HashMap<(char, char), i64> {
             表.insert((k[0], k[1]), v);
         }
     }
-    表
+    Ok(表)
 }
 
-fn 读字频(路径: &Path) -> Vec<(char, f64)> {
-    let 文本 = std::fs::read_to_string(路径).unwrap_or_default();
+fn 读字频(路径: &Path) -> Result<Vec<(char, f64)>, String> {
+    let 文本 = std::fs::read_to_string(路径)
+        .map_err(|e| format!("读不到字频表 {}：{}", 路径.display(), e))?;
     let mut 出 = Vec::new();
     for 原行 in 文本.lines() {
         let 行 = 原行.trim_end_matches('\r');
@@ -241,11 +253,15 @@ fn 读字频(路径: &Path) -> Vec<(char, f64)> {
             出.push((c, f));
         }
     }
-    出
+    if 出.is_empty() {
+        return Err(format!("字频表 {} 里没有可识别行", 路径.display()));
+    }
+    Ok(出)
 }
 
-fn 读词表(路径: &Path) -> Vec<(String, f64)> {
-    let 文本 = std::fs::read_to_string(路径).unwrap_or_default();
+fn 读词表(路径: &Path) -> Result<Vec<(String, f64)>, String> {
+    let 文本 = std::fs::read_to_string(路径)
+        .map_err(|e| format!("读不到词表 {}：{}", 路径.display(), e))?;
     let mut 出 = Vec::new();
     for 原行 in 文本.lines() {
         let 行 = 原行.trim_end_matches('\r');
@@ -262,7 +278,7 @@ fn 读词表(路径: &Path) -> Vec<(String, f64)> {
         let f = 段[1].trim().parse::<f64>().unwrap_or(0.0);
         出.push((段[0].trim().to_string(), f));
     }
-    出
+    Ok(出)
 }
 
 // -------------------------------------------------------------------------
@@ -679,17 +695,14 @@ struct 方案结果 {
     二码: HashMap<(char, char), i64>,
 }
 
-fn 算方案(名: &str, 码表: &Path, 数据: &Path) -> Option<方案结果> {
+fn 算方案(名: &str, 码表: &Path, 数据: &Path) -> Result<方案结果, String> {
     let 当量 = 当量表 {
-        对: 读当量(&数据.join("当量表.txt")),
+        对: 读当量(&数据.join("当量表.txt"))?,
     };
-    let 字频 = 读字频(&数据.join("字频表.txt"));
-    let 词表 = 读词表(&数据.join("词表.txt"));
-    if 字频.is_empty() {
-        return None;
-    }
+    let 字频 = 读字频(&数据.join("字频表.txt"))?;
+    let 词表 = 读词表(&数据.join("词表.txt"))?;
 
-    let 条目 = 读码表(码表);
+    let 条目 = 读码表(码表)?;
     let 字序: HashMap<char, usize> = 字频
         .iter()
         .enumerate()
@@ -738,7 +751,7 @@ fn 算方案(名: &str, 码表: &Path, 数据: &Path) -> Option<方案结果> {
     }
     let 缺词数 = 词行.iter().filter(|r| r.缺词 == 1).count();
 
-    Some(方案结果 {
+    Ok(方案结果 {
         名: 名.to_string(),
         单字段,
         单字小计,
@@ -1011,14 +1024,14 @@ pub fn run(目录: &str, 数据目录: &str, 文件名: &str, 汇总: Option<&st
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "码表".to_string());
         match 算方案(&名, 路径, &数据) {
-            Some(r) => {
+            Ok(r) => {
                 println!(
                     "  {} · 单字键长 {:.4} · 词组选重 {}",
                     r.名, r.单字总计[6], r.词总计[0]
                 );
                 全部.push(r);
             }
-            None => eprintln!("⚠️ {} 跳过（缺数据）", 名),
+            Err(e) => eprintln!("⚠️ {} 跳过：{}", 名, e),
         }
     }
     if 全部.is_empty() {
@@ -1061,5 +1074,27 @@ pub fn run(目录: &str, 数据目录: &str, 文件名: &str, 汇总: Option<&st
             Ok(_) => println!("诊断报告已写入 {}", 路径),
             Err(e) => eprintln!("⚠️ 写不了诊断报告: {}", e),
         }
+    }
+}
+
+#[cfg(test)]
+mod read_error_tests {
+    use super::*;
+
+    /// 读不到文件必须报错，不能静默返回空表——过去 `unwrap_or_default()` 会让诊断
+    /// 照常生成一份「全是 0」的报告并参与排序，看起来像方案极差，实际是路径写错了。
+    #[test]
+    fn 读码表失败返回错误而不是空表() {
+        let 不存在 = Path::new("D:/code_genie/绝对不存在的目录/码表.txt");
+        let e = 读码表(不存在).unwrap_err();
+        assert!(e.contains("读不到码表"), "{e}");
+        assert!(e.contains("码表.txt"), "错误信息应带路径：{e}");
+
+        // 文件存在但没有可识别行 → 也是错误
+        let 临时 = std::env::temp_dir().join(format!("cg_diag_{}.txt", std::process::id()));
+        std::fs::write(&临时, "不是制表符分隔的内容\n").unwrap();
+        let e = 读码表(&临时).unwrap_err();
+        assert!(e.contains("没有可识别"), "{e}");
+        let _ = std::fs::remove_file(&临时);
     }
 }

@@ -29,6 +29,31 @@ impl TemperatureSchedule {
     /// - `width`: 舒适区宽度
     /// - `slowdown`: 舒适区减速深度
     pub fn build(t_start: f64, t_end: f64, comfort_temp: f64, width: f64, slowdown: f64) -> Self {
+        // 兜底归一：正常配置已被 `Config::validate_annealing` 提前拦下，这里只保证
+        // 任何入参都不会让曲线变成 NaN（`0 * inf^q` 与 `0/0` 都会）。
+        // 不打印告警：本函数每个退火线程各调用一次，打印会刷屏。
+        let t_start = if t_start.is_finite() && t_start > 0.0 {
+            t_start
+        } else {
+            1.0
+        };
+        let t_end = if t_end.is_finite() && t_end > 0.0 {
+            t_end
+        } else {
+            t_start * 1e-6
+        };
+        let width = if width.is_finite() && width > 0.0 {
+            width
+        } else {
+            // 宽度 0 时中心点会出 `0/0 = NaN`；给一个极小正值等价于「只在中心减速一瞬」。
+            f64::EPSILON
+        };
+        let slowdown = if slowdown.is_finite() {
+            slowdown.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
         let comfort_p = if t_start <= t_end || comfort_temp >= t_start {
             0.0
         } else if comfort_temp <= t_end {
@@ -131,5 +156,48 @@ impl TemperatureSchedule {
             );
         }
         println!("   └──────────────────────────────────────────────────────");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 退化参数不能产出 NaN / 0：`0 * inf^q` 与 `0/0` 都会，NaN 温度会让
+    /// Metropolis 判据恒为假，退火静默变成严格爬山（不报错、结果莫名变差）。
+    #[test]
+    fn 退化温度参数不产生坏值() {
+        let 情况 = [
+            (0.0, 1e-3, 0.0, 0.15),
+            (-1.0, 1e-3, 0.0, 0.15),
+            (1.0, 0.0, 0.0, 0.15),
+            (f64::NAN, 1e-3, 0.0, 0.15),
+            (1.0, 1e-3, 0.0, 0.0),
+            (1.0, f64::NAN, 0.0, 0.15),
+        ];
+        for (ts, te, ct, w) in 情况 {
+            let s = TemperatureSchedule::build(ts, te, ct, w, 0.4);
+            for i in 0..=10 {
+                let t = s.get(i * 1000, 10_000);
+                assert!(
+                    t.is_finite() && t > 0.0,
+                    "参数 start={ts} end={te} comfort={ct} width={w} 在第 {i} 段得到 {t}"
+                );
+            }
+        }
+    }
+
+    /// 正常参数下温度单调不升，首段≈初温
+    #[test]
+    fn 正常曲线单调下降() {
+        let s = TemperatureSchedule::build(1.0, 1e-3, 0.03, 0.15, 0.4);
+        let mut 上一点 = f64::INFINITY;
+        for i in 0..=100 {
+            let t = s.get(i * 100, 10_000);
+            assert!(t <= 上一点 + 1e-12, "第 {i} 段温度回升：{t} > {上一点}");
+            上一点 = t;
+        }
+        let 首 = s.get(0, 10_000);
+        assert!((首 - 1.0).abs() < 1e-9, "首段应等于初温，实际 {首}");
     }
 }

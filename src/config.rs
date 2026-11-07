@@ -574,6 +574,56 @@ impl Config {
         }
     }
 
+    /// 验证退火温度与舒适区参数是否可用
+    ///
+    /// 温度必须为正、初温应高于末温：`TemperatureSchedule::build` 用 `t_start * (t_end/t_start)^q`
+    /// 生成曲线，`t_start = 0` 时 `0 * inf^q = NaN`；NaN 温度使 Metropolis 判据
+    /// `rng < (-delta/temp).exp()` 恒为假，整轮退火静默退化成严格爬山（不报错、结果莫名其妙变差）。
+    /// 舒适区宽度为 0 或负数会让高斯权重变 NaN。这里提前拦下，避免跑完几天才发现。
+    pub fn validate_annealing(&self) -> Result<(), String> {
+        let a = &self.annealing;
+        let mut problems: Vec<String> = Vec::new();
+
+        if !(a.temp_start.is_finite() && a.temp_start > 0.0) {
+            problems.push(format!("temp_start 必须为正数（当前: {}）", a.temp_start));
+        }
+        if !(a.temp_end.is_finite() && a.temp_end > 0.0) {
+            problems.push(format!("temp_end 必须为正数（当前: {}）", a.temp_end));
+        }
+        if a.temp_start.is_finite() && a.temp_end.is_finite() && a.temp_end > a.temp_start {
+            problems.push(format!(
+                "temp_end ({}) 大于 temp_start ({})：温度会反向上升",
+                a.temp_end, a.temp_start
+            ));
+        }
+        if !(a.comfort_width.is_finite() && a.comfort_width > 0.0) {
+            problems.push(format!(
+                "comfort_width 必须为正数（当前: {}）",
+                a.comfort_width
+            ));
+        }
+        if !(a.comfort_slowdown.is_finite() && (0.0..=1.0).contains(&a.comfort_slowdown)) {
+            problems.push(format!(
+                "comfort_slowdown 必须在 [0, 1] 内（当前: {}）",
+                a.comfort_slowdown
+            ));
+        }
+        if let Some(ct) = a.comfort_temp {
+            if !ct.is_finite() {
+                problems.push(format!("comfort_temp 不是有限数（当前: {}）", ct));
+            }
+        }
+
+        if problems.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "退火参数不合法（请修正后重跑）:\n  - {}",
+                problems.join("\n  - ")
+            ))
+        }
+    }
+
     /// 计算最小改进步数
     pub fn min_improve_steps(&self) -> usize {
         (self.annealing.total_steps as f64 * self.annealing.min_improve_steps_ratio) as usize
@@ -672,6 +722,28 @@ impl Config {
 
         // 简码占用保护性能优化（active/passive 候选）：active 覆盖率须 ≤ 输出覆盖率，
         // 否则钳制为 simple_coverage_ratio 并告警（active 候选应为输出候选的子集）。
+        // 先归一输出覆盖率：NaN / 负数 / >1 会让后续 clamp panic 或候选集失真。
+        if !sc.simple_coverage_ratio.is_finite() {
+            eprintln!(
+                "⚠️ 警告：simple_coverage_ratio 不是有限数 (当前: {})，按 1.0 处理",
+                sc.simple_coverage_ratio
+            );
+            sc.simple_coverage_ratio = 1.0;
+        } else if !(0.0..=1.0).contains(&sc.simple_coverage_ratio) {
+            let clamped = sc.simple_coverage_ratio.clamp(0.0, 1.0);
+            eprintln!(
+                "⚠️ 警告：simple_coverage_ratio 超出 [0,1] (当前: {:.3})，钳制为 {:.3}",
+                sc.simple_coverage_ratio, clamped
+            );
+            sc.simple_coverage_ratio = clamped;
+        }
+        if !sc.simple_active_coverage.is_finite() {
+            eprintln!(
+                "⚠️ 警告：simple_active_coverage 不是有限数 (当前: {})，按 simple_coverage_ratio 处理",
+                sc.simple_active_coverage
+            );
+            sc.simple_active_coverage = sc.simple_coverage_ratio;
+        }
         if sc.simple_active_coverage < 0.0 {
             eprintln!(
                 "⚠️ 警告：simple_active_coverage < 0 (当前: {:.3})，钳制为 0",
@@ -1559,5 +1631,39 @@ dist_max = 8.0
         );
 
         let _ = std::fs::remove_dir_all(&目录);
+    }
+}
+
+#[cfg(test)]
+mod annealing_validate_tests {
+    use super::*;
+
+    /// 初温/末温/舒适区宽度非法时必须报错：`temp_start = 0` 会让降温曲线出 NaN，
+    /// Metropolis 判据恒假，整轮退火静默退化成严格爬山。
+    #[test]
+    fn 退火参数校验() {
+        let mut cfg = Config::default();
+        assert!(cfg.validate_annealing().is_ok(), "默认配置应合法");
+
+        cfg.annealing.temp_start = 0.0;
+        assert!(cfg.validate_annealing().is_err(), "初温 0 应被拒");
+
+        cfg.annealing.temp_start = 1.0;
+        cfg.annealing.temp_end = 2.0;
+        assert!(
+            cfg.validate_annealing().is_err(),
+            "末温高于初温（温度反向上升）应被拒"
+        );
+
+        cfg.annealing.temp_end = 1e-3;
+        cfg.annealing.comfort_width = 0.0;
+        assert!(cfg.validate_annealing().is_err(), "舒适区宽度 0 应被拒");
+
+        cfg.annealing.comfort_width = 0.15;
+        cfg.annealing.comfort_slowdown = 1.5;
+        assert!(
+            cfg.validate_annealing().is_err(),
+            "减速深度超出 [0,1] 应被拒"
+        );
     }
 }

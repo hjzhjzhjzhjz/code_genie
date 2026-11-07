@@ -53,6 +53,18 @@ pub fn copy_with_backup<S: AsRef<Path>, D: AsRef<Path>>(src: S, dst: D) -> std::
     std::fs::copy(src, dst)
 }
 
+/// 写最终产物：失败时打印「哪个文件 + OS 原因」后退出，而不是 `unwrap()`。
+///
+/// release 构建是 `panic = abort`，`unwrap()` 只会抛一行 `panicked at ...`（有时连
+/// 文件名都不在 panic 信息里），磁盘满 / 目录只读 / 文件被占用时用户完全看不出发生了什么。
+pub fn write_output<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) {
+    let path = path.as_ref();
+    if let Err(e) = write_with_backup(path, contents) {
+        eprintln!("❌ 写入 {} 失败：{}", path.display(), e);
+        std::process::exit(1);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

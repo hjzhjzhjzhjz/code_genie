@@ -132,19 +132,20 @@ pub(crate) fn 解析字根码(行们: &[String]) -> Result<Vec<(String, String)>
         let 码字 = 码.chars().next().map(|c| c.to_ascii_lowercase());
 
         if let Some((基, 尾)) = 名.rsplit_once('.') {
-            if let (true, Some(码字)) = (尾.chars().count() == 1, 码字) {
-                let 槽 = 槽表.entry(基.to_string()).or_default();
-                match 尾 {
-                    "A" => 槽.a = Some(码字),
-                    "S" => 槽.s = Some(码字),
-                    "Y" => 槽.y = Some(码字),
-                    _ => {}
-                }
-                if matches!(尾, "A" | "S" | "Y") {
+            // 只对 A/S/Y 建槽：`.0`/`.1` 这类后缀不是槽位，过去先 `or_default()` 再判尾，
+            // 会留下一个空槽，最后统一报「字根「X」只有小码没有 `.A` 大码」，把整张表判失败。
+            if 尾.chars().count() == 1 && matches!(尾, "A" | "S" | "Y") {
+                if let Some(码字) = 码字 {
+                    let 槽 = 槽表.entry(基.to_string()).or_default();
+                    match 尾 {
+                        "A" => 槽.a = Some(码字),
+                        "S" => 槽.s = Some(码字),
+                        _ => 槽.y = Some(码字),
+                    }
                     continue;
                 }
-                // 后缀不是槽位（如 `.0`）→ 当朴素行，不能动已收集的槽位
             }
+            // 后缀不是槽位（如 `.0`）→ 当朴素行，不能动已收集的槽位
         }
         朴素.push((名.to_string(), 码.to_string()));
     }
@@ -788,5 +789,21 @@ mod tests {
         assert_eq!(归类("鸟"), "简");
         assert_eq!(归类("鳥"), "繁");
         assert_eq!(归类("白"), "通");
+    }
+
+    /// `.0`/`.1` 这类非槽位后缀不能顺手建空槽：否则整张表会被判成
+    /// 「字根「X」只有小码没有 `.A` 大码」而整体失败（回归：过去先 or_default 再判尾）。
+    #[test]
+    fn 非槽位后缀不建空槽() {
+        // 同一份表里既有 `.0` 行又有完整的 A/S/Y 行：只应输出真正的槽位字根
+        let 出 = 解析字根码(&行(&[
+            "白.A\tf", "白.S\th", "白.Y\tk", "丶.0\te", "丶.1\tk",
+        ]))
+        .unwrap();
+        assert_eq!(出, vec![("白".to_string(), "Fhk".to_string())]);
+
+        // 全是非槽位后缀 → 一律当朴素行，不因「缺 .A」报错
+        let 出 = 解析字根码(&行(&["口.0\tIe", "口.1\tIe"])).unwrap();
+        assert_eq!(出.len(), 2);
     }
 }
