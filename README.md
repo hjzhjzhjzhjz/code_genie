@@ -165,6 +165,7 @@ tools/
 ├── 对比码表.py       # 两版 output-keymap.txt 的字根键位差异（内部走 csvdiff）
 ├── 画收敛曲线.py     # optimize 日志的「采样」行 → 收敛曲线 SVG
 ├── 记录实验.py       # 一次 optimize 运行 → 一份实验档案（参数 + 得分 + 曲线 PNG）
+├── 调参扫描.py       # Optuna / nevergrad / SALib 的退火参数扫描与敏感性分析
 └── 检查红线.py       # 按 diff 范围执行 CONSTRAINTS.md 的底线规则
 ```
 
@@ -179,6 +180,38 @@ python tools/记录实验.py runs/xxx/optimize.log --标签 降初温 --假设 "
 产物是 `<日期>-<时间>-<标签>.md`（假设 / 结论 / 参数 / 结果）。
 「假设」跑之前写、「结论」跑完写，其余由脚本从日志和 `config.ron` 自动提取。
 细节见 `experiments/README.md`。
+
+## 参数扫描（Optuna / nevergrad / SALib）
+
+`tools/调参扫描.py` 是**外围离线工具**，Rust 侧零改动：每个 trial 生成一份临时 TOML
+（覆写 `[annealing]` 参数、把 `[files]` 改成绝对路径、剥掉旧配置的简码段），
+子进程调 release 版 `code_genie.exe`，再解析综合得分（**越低越好**）。
+三个库全部本地运行，零 API key、零外部服务：
+
+```bash
+python -m pip install optuna nevergrad SALib
+
+# 先验证接口、估单次耗时
+python tools/调参扫描.py 试跑 --配置 dlrk/xxx.toml --步数 200 \
+    --初始解 dlrk/output-xxx/thread-00/字根键位表.txt
+# TPE 调参：SQLite study 支持断点续跑，重复同一条命令即可继续
+python tools/调参扫描.py optuna --配置 dlrk/xxx.toml --试验数 30
+# 差分进化：--优化器 可换 DE / RandomSearch
+python tools/调参扫描.py nevergrad --配置 dlrk/xxx.toml --试验数 30
+# Sobol 敏感性分析：正式分析建议 --样本数 16 --重复 2
+python tools/调参扫描.py salib --配置 dlrk/xxx.toml --样本数 2
+```
+
+产物在 `调参结果/`（已忽略）：`trials.csv` 逐次记录、`optuna.db` study、`日志/` 每次运行的
+完整 stdout。公共参数：`--步数`（默认 2000）、`--线程`（默认 1）、`--重复`（同参数取中位数）、
+`--初始解`、`--超时`、`--输出`、`--二进制`。
+
+两点必须知道：
+
+- 退火主循环的 RNG 取自系统熵，CLI 没有固定种子的开关；`--初始解` 只能固定起点，同一组
+  参数仍会抖动。做 SALib 时务必 `--重复 2` 以上；样本不足时脚本会直接提示「结论不可解读」
+  （Sobol 指数理论范围 S1 ∈ [0,1]、ST ≥ 0，出现负值或大于 1 就是噪声）。
+- 小步数只适合**筛参数**，选出的最优点必须回到全量步数复跑确认。
 
 ## 质量红线
 

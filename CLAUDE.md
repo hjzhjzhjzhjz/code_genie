@@ -45,6 +45,11 @@ python tools/画收敛曲线.py runs/xxx/optimize.log --含当前
 # 一次 optimize 运行 → 一份实验档案（假设 / 结论 / 参数 / 得分），入库到 experiments/
 python tools/记录实验.py runs/xxx/optimize.log --标签 降初温 --假设 "初温降到 12 后最优能否低于 6.5"
 
+# 参数扫描：Optuna / nevergrad / SALib，Rust 侧零改动（临时 TOML + 子进程调 release 二进制）
+python tools/调参扫描.py 试跑 --配置 dlrk/xxx.toml --步数 200 --初始解 dlrk/output-xxx/thread-00/字根键位表.txt
+python tools/调参扫描.py optuna --配置 dlrk/xxx.toml --试验数 30
+python tools/调参扫描.py salib --配置 dlrk/xxx.toml --样本数 16 --重复 2
+
 # 码表对比：两版 output-keymap.txt 的字根键位差异（剥 # 注释、补表头后走 csvdiff）
 # 退出码 0=无差异、1=有差异，可直接当 CI 门禁
 python tools/对比码表.py 旧/output-keymap.txt 新/output-keymap.txt
