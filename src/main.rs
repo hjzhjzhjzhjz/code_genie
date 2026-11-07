@@ -7,6 +7,15 @@
 // 其中一个下标，其余数组仍要裸下标，读起来反而更绕；故全局关闭这条纯风格 lint。
 #![allow(clippy::needless_range_loop)]
 
+// 全局分配器：退火主循环每步都有大量短命分配（邻域候选、增量维护缓冲），
+// Windows/mingw 的 CRT 堆分配后只扩段、不把空闲页还给 OS，长跑时私有内存与
+// 页文件峰值会单调抬高（120 万步实测 62MB → 852MB）。mimalloc 用线程本地堆、
+// 按 arena 回收，配合 release 的 LTO 能同时改善吞吐与高水位。
+// 关掉 feature（`--no-default-features`）即回退系统分配器，便于 A/B。
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static 全局分配器: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

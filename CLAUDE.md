@@ -235,6 +235,7 @@ cargo test --release
 - 简码出简走增量（阶段 1 候选集 + 阶段 2 受影响桶），热路径零全量重建，靠 `reconcile` 周期对账兜底
 - SA 主循环输出实时速度统计（万步/分钟）
 - 温度调度使用预计算查找表 (LUT, 100001 个采样点 + 线性插值)
+- 全局分配器用 `mimalloc`（`Cargo.toml` 的 `mimalloc` feature，默认开）：每步大量短命分配会让 CRT 堆段只扩不缩，长跑内存高水位单调抬高；换线程本地堆后 120 万步 ×3 线程实测峰值工作集 −39%、墙钟 −17%。`--no-default-features` 回退系统分配器
 - Release 编译启用 `opt-level=3`、LTO、单代码单元、`panic=abort`
 - `calibrate_scales` 自动校准使各指标在初始状态贡献均衡
 
@@ -262,12 +263,13 @@ cargo test --release
 |-------|------|
 | `clap` (4, derive) | CLI 参数解析 |
 | `rayon` (1.10) | 并行迭代 |
-| `rand` (0.8) | 随机数生成 |
+| `rand` (0.9) | 随机数生成 |
 | `ctrlc` (3.4) | Ctrl-C 中断并写 checkpoint |
 | `serde` (1.0, derive) + `toml` (0.8) | TOML 配置反序列化 |
 | `chrono` (0.4) | 输出目录时间戳 |
 | `hashbrown` (0.14) / `rustc-hash` (1.1) | 高性能哈希容器 |
 | `smallvec` (1) | 小数组免堆分配 |
+| `mimalloc` (0.1, 可选) | 全局分配器（默认开启，见「性能优化要点」） |
 | `serde_json` (1.0) | JSON 支持（尺度/方案档案/检查点） |
 | `sha2` (0.10) | 方案档案校验 |
 | `proptest` (1, dev) | 属性测试 |
