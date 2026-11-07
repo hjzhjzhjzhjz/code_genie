@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
 """把一次 optimize 运行归档成一份实验档案。
 
-每次调参跑完 200 万 / 4000 万步，参数、得分、曲线散落在日志和 config 里，
+每次调参跑完 200 万 / 4000 万步，参数、得分散落在日志和 config 里，
 过几天就记不清「那次 6.58 是初始解还是优化出来的」。这个脚本把一次运行压成
-一份 markdown：参数、结果、收敛曲线，加上留给人填的「假设」和「结论」。
+一份 markdown：参数、结果，加上留给人填的「假设」和「结论」。
 
 用法::
 
     python tools/记录实验.py runs/xxx/optimize.log --标签 降初温
     python tools/记录实验.py runs/xxx/optimize.log -c moling/config.ron --标签 权重调整 --假设 "把重码权重提到 0.6 能否压到 6.5 以下"
 
-产物：`experiments/<日期>-<时间>-<标签>.md` 与同名 `.png`（曲线）。
+产物：`experiments/<日期>-<时间>-<标签>.md`。
 """
 
 from __future__ import annotations
 
 import argparse
 import re
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -76,34 +75,6 @@ def 取(配置: dict[str, str], 键: str, 缺省: str = "—") -> str:
     return 配置.get(键, 缺省)
 
 
-def 找二进制() -> Path | None:
-    for 候选 in (
-        "target/x86_64-pc-windows-gnu/release/code_genie.exe",
-        "target/release/code_genie.exe",
-        "target/release/code_genie",
-    ):
-        路径 = 根目录 / 候选
-        if 路径.exists():
-            return 路径
-    return None
-
-
-def 出图(日志: Path, 输出: Path) -> tuple[bool, str]:
-    程序 = 找二进制()
-    if 程序 is None:
-        return False, "找不到 code_genie 可执行文件，先 cargo build --release --features chart"
-    结果 = subprocess.run(
-        [str(程序), "plot", str(日志), "-o", str(输出), "--含当前"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if 结果.returncode != 0:
-        return False, (结果.stderr or 结果.stdout).strip()
-    return True, ""
-
-
 def 相对项目(路径: Path) -> str:
     try:
         return str(路径.resolve().relative_to(根目录)).replace("\\", "/")
@@ -120,7 +91,6 @@ def 主() -> int:
     解析器.add_argument("--标签", help="档案标签；缺省取日志文件名")
     解析器.add_argument("--假设", default="", help="跑之前想验证什么，写进档案开头")
     解析器.add_argument("--输出", default="experiments", help="档案目录（默认 experiments）")
-    解析器.add_argument("--no-png", action="store_true", help="不出曲线图")
     参数 = 解析器.parse_args()
 
     日志 = Path(参数.日志)
@@ -143,7 +113,6 @@ def 主() -> int:
     目录.mkdir(parents=True, exist_ok=True)
     基名 = f"{现在:%Y-%m-%d-%H%M}-{标签}"
     档案 = 目录 / f"{基名}.md"
-    图片 = 目录 / f"{基名}.png"
 
     配置 = 解析配置(Path(参数.配置))
 
@@ -152,12 +121,6 @@ def 主() -> int:
     改进次数 = sum(1 for 前, 后 in zip(点, 点[1:]) if 后[1] < 前[1] - 1e-12)
     相对 = (初始最优 - 最终最优) / 初始最优 * 100 if 初始最优 else 0.0
     温度区间 = f"{首[3]:.4f} → {末[3]:.6f}"
-
-    画好, 错误 = (False, "已跳过（--no-png）")
-    if not 参数.no_png:
-        画好, 错误 = 出图(日志, 图片)
-        if not 画好:
-            图片 = None  # type: ignore[assignment]
 
     行 = [
         f"# 实验 {现在:%Y-%m-%d %H:%M} · {标签}",
@@ -197,14 +160,7 @@ def 主() -> int:
         f"| 权重·CV | {取(配置, 'weights.full_code.equiv_cv')} |",
         f"| 权重·分布 | {取(配置, 'weights.full_code.distribution')} |",
         f"| 简码 | {'启用' if 取(配置, 'weights.simple_code.enabled') == 'true' else '关闭'} |",
-        "",
-        "## 曲线",
-        "",
     ]
-    if 画好 and 图片 is not None:
-        行.append(f"![收敛曲线]({图片.name})")
-    else:
-        行.append(f"<!-- 未出图：{错误} -->")
     行 += [
         "",
         "## 出处",
@@ -218,10 +174,6 @@ def 主() -> int:
 
     print(f"✅ 已写出 {相对项目(档案)}")
     print(f"   最优 {初始最优:.4f} → {最终最优:.4f}（改进了 {改进次数} 次）")
-    if 画好:
-        print(f"   曲线 {相对项目(图片)}")
-    else:
-        print(f"   ⚠️ 没出图：{错误}")
     return 0
 
 

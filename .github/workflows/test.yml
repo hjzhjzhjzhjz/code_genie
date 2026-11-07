@@ -144,18 +144,6 @@ jobs:
             exit 1
           fi
 
-      # chart 是可选 feature，默认构建根本碰不到它；不单独兜一次，那边坏了
-      # 要等谁想起来 --features chart 才会发现。只编译不跑测试（测试在本地跑）。
-      - name: Clippy（含 chart 图表 feature）
-        id: chart
-        run: |
-          set -o pipefail
-          if ! cargo clippy --all-targets --features chart -- -D warnings 2>&1 | tee chart.log; then
-            echo "::error::--features chart 下 Clippy 有告警或错误"
-            grep -E -A 12 '^(error|warning)' chart.log | head -n 120
-            exit 1
-          fi
-
       - name: 单元测试与属性测试
         id: test
         run: |
@@ -177,7 +165,6 @@ jobs:
             echo "| --- | --- |"
             echo "| 格式（cargo fmt --check） | ${{ steps.fmt.outcome }} |"
             echo "| Clippy（-D warnings） | ${{ steps.clippy.outcome }} |"
-            echo "| Clippy（--features chart） | ${{ steps.chart.outcome }} |"
             echo "| 测试（cargo test） | ${{ steps.test.outcome }} |"
             echo ""
             echo '```'

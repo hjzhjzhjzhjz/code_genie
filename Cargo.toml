@@ -3,13 +3,6 @@ name = "code_genie"
 version = "0.1.0"
 edition = "2021"
 
-[features]
-default = []
-# 出图能力（`chart` 子命令）：把 optimize 日志的收敛采样画成 PNG。
-# 默认关闭——charts-rs 依赖树含 resvg/fontdb 等几十个 crate，日常优化用不到，
-# 打开会让每次 cargo build 都多编译一大坨。需要出报告时用 --features chart。
-chart = ["dep:charts-rs"]
-
 [dependencies]
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
@@ -25,8 +18,6 @@ smallvec = "1"
 ron = "0.8"
 # 配置文件同时支持 RON 与 TOML（加载器按扩展名优先、另一格式兜底）
 toml = "0.8"
-# 图表：PNG 落盘用于正式报告（Word 对 SVG 支持一般），SVG 用于 Markdown/浏览器。
-charts-rs = { version = "2", features = ["png"], optional = true }
 
 [dev-dependencies]
 proptest = { version = "1", default-features = false, features = ["std"] }

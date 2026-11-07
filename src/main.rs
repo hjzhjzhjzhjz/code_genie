@@ -14,14 +14,12 @@ use std::time::Instant;
 
 use chrono::Local;
 use clap::{Parser, Subcommand};
-use rand::Rng;
 use rayon::prelude::*;
 
 mod annealing;
 mod assess;
 mod bucket_store;
 mod calibrate;
-mod chart;
 mod checkpoint;
 mod clusters;
 mod config;
@@ -29,7 +27,6 @@ mod context;
 mod data_dir;
 mod diagnose;
 mod evaluator;
-mod explore;
 mod export_table;
 mod fsutil;
 mod handfeel;
@@ -45,7 +42,6 @@ mod run;
 mod schedule;
 mod sentence;
 mod simple;
-mod tune;
 mod types;
 mod validate;
 mod zigen;
@@ -97,43 +93,6 @@ enum Commands {
         /// 复用尺度文件（尺度.json）：跳过校准，保证跨运行口径一致
         #[arg(long = "scale")]
         scale: Option<String>,
-    },
-
-    /// 种子微调：只以「全码当量」为目标，对既有 keymap 做穷尽式下降搜索（不跑退火）
-    Tune {
-        /// 待微调的种子 keymap（字根<TAB>编码[<TAB>使用次数]）
-        #[arg(short = 'k', long = "seed-keymap")]
-        seed_keymap: String,
-
-        /// 输出目录
-        #[arg(short = 'd', long = "output-dir", default_value = "output-tune")]
-        output_dir: String,
-
-        /// 当量目标：达到即停止
-        #[arg(long = "target")]
-        target: Option<f64>,
-
-        /// 重码硬上限：交换后重码数超过该值则拒绝
-        #[arg(long = "max-collisions")]
-        max_collisions: Option<usize>,
-
-        /// 最大交换轮数
-        #[arg(long = "rounds", default_value_t = 5000)]
-        rounds: usize,
-
-        /// 每轮精确试算的候选数（从代理估价最优的前 K 个里挑）
-        #[arg(long = "candidates", default_value_t = 400)]
-        candidates: usize,
-    },
-
-    /// 基准测试：压测目标函数评估、邻域算子（含 full_key_swap）与 SA 吞吐
-    Bench {
-        /// 每个微基准的迭代次数
-        #[arg(long, default_value_t = 20000)]
-        iters: usize,
-        /// SA 吞吐基准的步数
-        #[arg(long, default_value_t = 200000)]
-        steps: usize,
     },
 
     /// 跑一轮完整优化：备份输入 → prepare → optimize/resume，写 COMMENT.txt 与日志
@@ -316,24 +275,6 @@ enum Commands {
         /// 简易模式的输出文件
         #[arg(short = 'o', long, default_value = "字根图.html")]
         output: String,
-    },
-    /// 把 optimize 日志的收敛采样画成折线图（PNG 需构建时加 --features chart）
-    #[command(name = "plot")]
-    Plot {
-        /// optimize 日志文件（要含「采样 step=」行）
-        log: String,
-
-        /// 输出文件，按扩展名决定格式（.png / .svg）
-        #[arg(short = 'o', long, default_value = "收敛曲线.png")]
-        output: String,
-
-        /// 同时画「当前得分」（左右双轴：高温期它比最优高好几倍）
-        #[arg(long = "含当前")]
-        含当前: bool,
-
-        /// 图表标题；缺省用「收敛曲线 · <日志文件名>」
-        #[arg(long)]
-        title: Option<String>,
     },
     /// 跑宇浩测评并输出对比表（内部调 yuhao-assess 的 CLI）
     #[command(name = "assess")]
@@ -571,27 +512,6 @@ enum Commands {
         config: Option<String>,
     },
 
-    /// 权重空间探索：汇总一批 optimize 日志，出平行坐标网页
-    /// （取代 `moling/analyze-results-of-batch-test-weights.sh`）
-    #[command(name = "explore")]
-    Explore {
-        /// 输入日志（通常是同一份配置、每次换一套全码权重跑出来的 `test-*.log`）
-        #[arg(value_name = "日志", num_args = 1..)]
-        logs: Vec<String>,
-
-        /// 汇总表输出（TSV）
-        #[arg(long = "table", default_value = "batch-test-weights.txt")]
-        table: String,
-
-        /// 平行坐标网页输出（HTML，需联网加载 Plotly）
-        #[arg(long = "html", default_value = "batch-test-weights.html")]
-        html: String,
-
-        /// 网页标题
-        #[arg(long, default_value = "算码权重空间探索")]
-        title: String,
-    },
-
     /// 聚类重码分析：某一行聚类压成一个大码，要付出多少重码
     #[command(name = "clusters")]
     Clusters {
@@ -741,27 +661,6 @@ fn main() {
         return;
     }
 
-    // plot 只读日志文件，同样不依赖主配置；放在最前，配置缺失也能出图。
-    if let Some(Commands::Plot {
-        log,
-        output,
-        含当前,
-        title,
-    }) = &cli.command
-    {
-        let 参 = chart::参数 {
-            日志: log.clone(),
-            输出: output.clone(),
-            含当前: *含当前,
-            标题: title.clone(),
-        };
-        if let Err(e) = chart::run(&参) {
-            eprintln!("❌ {e}");
-            std::process::exit(1);
-        }
-        return;
-    }
-
     // chart 的完整模式只读产物文件与上游素材，不依赖主配置
     if let Some(Commands::Chart {
         dir: Some(dir),
@@ -813,27 +712,6 @@ fn main() {
             逐行: *per_row,
         };
         if let Err(e) = clusters::run(&参) {
-            eprintln!("❌ {}", e);
-            std::process::exit(1);
-        }
-        return;
-    }
-
-    // explore 只读 optimize 日志与 summary.txt，同样不依赖主配置
-    if let Some(Commands::Explore {
-        logs,
-        table,
-        html,
-        title,
-    }) = &cli.command
-    {
-        let 参 = explore::参数 {
-            日志: logs.clone(),
-            表: table.clone(),
-            网页: html.clone(),
-            标题: title.clone(),
-        };
-        if let Err(e) = explore::run(&参) {
             eprintln!("❌ {}", e);
             std::process::exit(1);
         }
@@ -903,22 +781,6 @@ fn main() {
             );
         }
         Some(Commands::Resume { dir }) => run_resume(&dir),
-        Some(Commands::Tune {
-            seed_keymap,
-            output_dir,
-            target,
-            max_collisions,
-            rounds,
-            candidates,
-        }) => run_tune(
-            &cfg,
-            &seed_keymap,
-            &output_dir,
-            target,
-            max_collisions,
-            rounds,
-            candidates,
-        ),
         Some(Commands::ExportTable {
             keymap,
             chaifen,
@@ -1109,185 +971,12 @@ fn main() {
             scale,
             &停止标志(),
         ),
-        Some(Commands::Bench { iters, steps }) => run_bench(&cfg, iters, steps),
         // prepare 在加载配置之前就已返回，这里只是让 match 完备
         Some(Commands::Prepare { .. }) => unreachable!("prepare 已在加载配置前处理"),
         Some(Commands::Clusters { .. }) => unreachable!("clusters 已在加载配置前处理"),
         Some(Commands::Zigen { .. }) => unreachable!("zigen 已在加载配置前处理"),
-        Some(Commands::Explore { .. }) => unreachable!("explore 已在加载配置前处理"),
         Some(Commands::Run { .. }) => unreachable!("run 已在加载配置前处理"),
-        Some(Commands::Plot { .. }) => unreachable!("plot 已在加载配置前处理"),
         None => run_optimize(&cfg, &cli.config, None, None, None, None, &停止标志()),
-    }
-}
-
-// =========================================================================
-// bench 子命令
-// =========================================================================
-
-/// 基准测试：压测目标函数评估、邻域算子（含新增 full_key_swap）与 SA 吞吐。
-///
-/// 用法：`cargo run --release -- -c config.ron bench [--iters N] [--steps N]`
-fn run_bench(cfg: &Config, iters: usize, steps: usize) {
-    println!("=== CodeGenie 基准测试 ===");
-    println!("  迭代: {}    SA 步数: {}", iters, steps);
-
-    // 加载输入并构建上下文（perf 与 scale 数值无关，用默认 scale/targets）
-    let (fixed_roots, constrained) = must(loader::load_fixed(&cfg.files.fixed));
-    let splits = must(loader::load_splits(&cfg.files.splits));
-    let equiv_table = or_warn_default(loader::load_pair_equivalence(&cfg.files.pair_equiv));
-    let key_dist_config = or_warn_default(loader::load_key_distribution(&cfg.files.key_dist));
-    let simple_config = if cfg.weights.simple_code.enabled {
-        cfg.get_simple_code_config()
-    } else {
-        SimpleCodeConfig { levels: vec![] }
-    };
-    let weights = cfg.get_weight_config();
-    let ctx = OptContext::new_with_fixed_and_termination(
-        &splits,
-        &fixed_roots,
-        &constrained,
-        equiv_table,
-        key_dist_config,
-        ScaleConfig::default(),
-        simple_config,
-        weights,
-        TargetsConfig::default(),
-        &cfg.get_fixed_simple_codes(),
-        &cfg.keys.termination_keys,
-    );
-    println!("  组数: {}, 编码空间: {}", ctx.num_groups, ctx.code_space);
-    // 后端选择直接决定评估器的内存与随机访问模式，bench 必须报出来，
-    // 否则「这次的数字是 Dense 还是 Sparse 跑出来的」无从判断。
-    evaluator::log_bucket_backends(&ctx);
-
-    let assign = annealing::deterministic_init(&ctx, cfg);
-    let n = assign.len();
-    if n == 0 {
-        eprintln!("❌ 组数为 0，无法基准测试");
-        return;
-    }
-    // 算子基准用的固定温度（近似混合接受/拒绝，测平均成本）
-    let bench_temp = 1e-3;
-
-    // 1) 目标函数评估（构建 + 打分）
-    {
-        let t = Instant::now();
-        let mut acc = 0.0f64;
-        for _ in 0..iters {
-            let mut ev = Evaluator::new_full_only(&ctx, &assign);
-            acc += ev.get_score(&ctx);
-        }
-        let dt = t.elapsed().as_secs_f64();
-        std::hint::black_box(acc);
-        println!(
-            "  [eval]          {:>10.2} μs/次  ({:>12.0} 次/秒)",
-            dt * 1e6 / iters as f64,
-            iters as f64 / dt
-        );
-    }
-
-    // 2) try_move
-    {
-        let mut ev = Evaluator::new(&ctx, &assign);
-        let mut a = assign.clone();
-        let mut rng = rand::rng();
-        let t = Instant::now();
-        let mut acc = 0usize;
-        for _ in 0..iters {
-            let gi = rng.random_range(0..n);
-            let allowed = &ctx.groups[gi].allowed_keys;
-            let nk = allowed[rng.random_range(0..allowed.len())];
-            if ev.try_move(&ctx, &mut a, gi, nk, bench_temp, &mut rng) {
-                acc += 1;
-            }
-        }
-        let dt = t.elapsed().as_secs_f64();
-        std::hint::black_box(acc);
-        println!(
-            "  [try_move]      {:>10.2} μs/次  ({:>12.0} 次/秒)",
-            dt * 1e6 / iters as f64,
-            iters as f64 / dt
-        );
-    }
-
-    if n >= 2 {
-        // 3) try_swap
-        {
-            let mut ev = Evaluator::new(&ctx, &assign);
-            let mut a = assign.clone();
-            let mut rng = rand::rng();
-            let t = Instant::now();
-            let mut acc = 0usize;
-            for _ in 0..iters {
-                let r1 = rng.random_range(0..n);
-                let r2 = rng.random_range(0..n - 1);
-                let r2 = if r2 >= r1 { r2 + 1 } else { r2 };
-                let k1 = a[r1];
-                let k2 = a[r2];
-                if k1 != k2
-                    && ctx.groups[r1].allowed_keys.contains(&k2)
-                    && ctx.groups[r2].allowed_keys.contains(&k1)
-                    && ev.try_swap(&ctx, &mut a, r1, r2, bench_temp, &mut rng)
-                {
-                    acc += 1;
-                }
-            }
-            let dt = t.elapsed().as_secs_f64();
-            std::hint::black_box(acc);
-            println!(
-                "  [try_swap]      {:>10.2} μs/次  ({:>12.0} 次/秒)",
-                dt * 1e6 / iters as f64,
-                iters as f64 / dt
-            );
-        }
-
-        // 4) try_full_key_swap（新增大邻域算子）
-        {
-            let mut ev = Evaluator::new(&ctx, &assign);
-            let mut a = assign.clone();
-            let mut rng = rand::rng();
-            let t = Instant::now();
-            let mut acc = 0usize;
-            for _ in 0..iters {
-                if annealing::try_full_key_swap(&ctx, &mut a, &mut ev, bench_temp, &mut rng) {
-                    acc += 1;
-                }
-            }
-            let dt = t.elapsed().as_secs_f64();
-            std::hint::black_box(acc);
-            println!(
-                "  [full_key_swap] {:>10.2} μs/次  ({:>12.0} 次/秒)",
-                dt * 1e6 / iters as f64,
-                iters as f64 / dt
-            );
-        }
-    }
-
-    // 5) SA 吞吐（单线程跑 steps 步）
-    {
-        let mut c = cfg.clone();
-        c.annealing.total_steps = steps.max(1);
-        let stop = Arc::new(AtomicBool::new(false));
-        let t = Instant::now();
-        let r = simulated_annealing_resumable(
-            &ctx,
-            &c,
-            0,
-            &stop,
-            None,
-            None,
-            usize::MAX,
-            Some(assign.as_slice()),
-        );
-        let dt = t.elapsed().as_secs_f64();
-        println!(
-            "  [SA]            {:>10.1} 步/秒  ({} 步 / {:.3}s, best={:.4})",
-            c.annealing.total_steps as f64 / dt,
-            c.annealing.total_steps,
-            dt,
-            r.score
-        );
     }
 }
 
@@ -1920,120 +1609,6 @@ fn 停止标志() -> Arc<AtomicBool> {
     let f = Arc::clone(&flag);
     let _ = ctrlc::set_handler(move || f.store(true, Ordering::Relaxed));
     flag
-}
-
-// =========================================================================
-// tune 子命令：种子当量微调（只优化全码平均当量）
-// =========================================================================
-
-fn run_tune(
-    cfg: &Config,
-    seed_path: &str,
-    output_dir: &str,
-    target: Option<f64>,
-    max_collisions: Option<usize>,
-    rounds: usize,
-    candidates: usize,
-) {
-    println!("=== CodeGenie 种子微调器（只优化全码当量）===");
-    println!("  种子: {}", seed_path);
-
-    let splits = must(loader::load_splits(&cfg.files.splits));
-    let (fixed_roots, constrained) = must(loader::load_fixed(&cfg.files.fixed));
-    let equiv_table = or_warn_default(loader::load_pair_equivalence(&cfg.files.pair_equiv));
-    let key_dist_config = or_warn_default(loader::load_key_distribution(&cfg.files.key_dist));
-    let simple_config = if cfg.weights.simple_code.enabled {
-        cfg.get_simple_code_config()
-    } else {
-        SimpleCodeConfig { levels: vec![] }
-    };
-    let ctx = OptContext::new_with_fixed_and_termination(
-        &splits,
-        &fixed_roots,
-        &constrained,
-        equiv_table,
-        key_dist_config,
-        ScaleConfig::default(),
-        simple_config,
-        cfg.get_weight_config(),
-        cfg.get_targets_config(),
-        &cfg.get_fixed_simple_codes(),
-        &cfg.keys.termination_keys,
-    );
-    println!(
-        "  约束: {}（可动码位 {} 个，锁死单键 {} 个，汉字 {} 个）",
-        cfg.files.fixed,
-        ctx.num_groups,
-        fixed_roots.len(),
-        splits.len()
-    );
-
-    let map = must(loader::load_keymap(seed_path, &cfg.files.splits));
-    let mut rng = rand::rng();
-    let (asg0, filled) = must(loader::keymap_to_assignment(&ctx, &map, &mut rng));
-    if filled > 0 {
-        println!("⚠️ 种子有 {} 个组未被覆盖，已随机合法填充", filled);
-    }
-
-    let opts = tune::TuneOpts {
-        max_rounds: rounds,
-        candidates,
-        max_collisions,
-        target_equiv: target,
-        max_rounds_without_gain: 3,
-        allow_move: true,
-    };
-    let t0 = Instant::now();
-    let (asg, rep) = tune::tune(&ctx, asg0, &opts);
-    let elapsed = t0.elapsed().as_secs_f64();
-
-    // === 保存 keymap ===
-    std::fs::create_dir_all(output_dir).expect("无法创建输出目录");
-    let usage = output::count_root_usage(&ctx);
-    let mut keymap_text = String::new();
-    output::write_keymap_output(&mut keymap_text, &fixed_roots, &constrained, &asg, &usage);
-    let keymap_path = format!("{}/字根键位表.txt", output_dir);
-    std::fs::write(&keymap_path, &keymap_text).expect("写 keymap 失败");
-
-    let delta = rep.equiv_end - rep.equiv_start;
-    let pct = if rep.equiv_start > 0.0 {
-        delta / rep.equiv_start * 100.0
-    } else {
-        0.0
-    };
-    let report = format!(
-        "# 种子微调报告\n\
-         # 种子: {}\n\
-         # 约束: {}\n\
-         # 轮数: {}  接受交换: {}  耗时: {:.1}s\n\
-         #\n\
-         # 当量: {:.6} → {:.6}  ({:+.6}, {:+.3}%)\n\
-         # 重码: {} → {}\n",
-        seed_path,
-        cfg.files.fixed,
-        rep.rounds,
-        rep.applied,
-        elapsed,
-        rep.equiv_start,
-        rep.equiv_end,
-        delta,
-        pct,
-        rep.collisions_start,
-        rep.collisions_end,
-    );
-    std::fs::write(format!("{}/微调报告.txt", output_dir), &report).expect("写报告失败");
-
-    println!();
-    println!(
-        "  当量: {:.6} → {:.6}  ({:+.6}, {:+.3}%)",
-        rep.equiv_start, rep.equiv_end, delta, pct
-    );
-    println!("  重码: {} → {}", rep.collisions_start, rep.collisions_end);
-    println!(
-        "  接受交换: {} 次 / {} 轮，耗时 {:.1}s",
-        rep.applied, rep.rounds, elapsed
-    );
-    println!("  已写出: {}", keymap_path);
 }
 
 fn run_optimize(

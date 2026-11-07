@@ -21,9 +21,8 @@ cargo run --release
 # 使用指定配置文件
 cargo run --release -- -c config.ron optimize -d out
 
-# 断点续算 / 压测 / 编码 / 评估
+# 断点续算 / 编码 / 评估
 cargo run --release -- resume -d out
-cargo run --release -- bench --iters 20000 --steps 200000
 cargo run --release -- encode -k 字根键位表.txt -d 单字拆分.txt -o 单字编码表.txt
 cargo run --release -- evaluate -k 字根键位表.txt
 
@@ -39,19 +38,11 @@ cargo run --release -- diagnose --dir runs
 # 聚类重码分析：哪一簇压成大码代价最高（聚类表内嵌于 assets/roots_cluster.ron）
 cargo run --release -- clusters --per-row --schema moling
 
-# 权重空间探索：汇总一批 optimize 日志 → 表 + 平行坐标网页
-cargo run --release -- explore test-*.log --table batch-test-weights.txt --html batch-test-weights.html
-
 # 收敛曲线：optimize 每 1% 步数输出一行「采样 step=… 得分=… 当前=… 温度=…」，
 # 这里解析成 SVG（默认只画最优；--含当前 加右轴看震荡）
 python tools/画收敛曲线.py runs/xxx/optimize.log --含当前
 
-# 同一条曲线出 PNG（正式报告用；charts-rs 是可选 feature，默认构建不编译它，
-# 否则每次 cargo build 都要多编 resvg/fontdb 那几十个 crate）
-cargo build --release --features chart
-cargo run --release --features chart -- plot runs/xxx/optimize.log -o 收敛.png --含当前
-
-# 一次 optimize 运行 → 一份实验档案（假设 / 结论 / 参数 / 得分 / 曲线），入库到 experiments/
+# 一次 optimize 运行 → 一份实验档案（假设 / 结论 / 参数 / 得分），入库到 experiments/
 python tools/记录实验.py runs/xxx/optimize.log --标签 降初温 --假设 "初温降到 12 后最优能否低于 6.5"
 
 # 码表对比：两版 output-keymap.txt 的字根键位差异（剥 # 注释、补表头后走 csvdiff）
@@ -72,7 +63,7 @@ cargo test --release
 ```
 
 全局参数：`-c/--config`（默认 `config.ron`）。
-子命令共 16 个：`optimize`(默认) / `resume` / `prepare` / `clusters` / `zigen` / `bench` / `encode` / `evaluate` /
+子命令共 16 个：`optimize`(默认) / `run` / `resume` / `prepare` / `clusters` / `zigen` / `encode` / `evaluate` /
 `export` / `chart` / `assess` / `rime-convert` / `sentence` / `pipeline` / `merge` / `diagnose`。
 
 ## 核心架构
@@ -87,7 +78,7 @@ cargo test --release
 
 | 模块 | 职责 |
 |------|------|
-| `main.rs` | CLI 入口（clap），17 个子命令的分发、多轮播种、尺度解析、收尾保存编排 |
+| `main.rs` | CLI 入口（clap），16 个子命令的分发、多轮播种、尺度解析、收尾保存编排 |
 | `prepare/` | `prepare` 子命令：把上游 yaml/lua/csv 数据加工成优化器输入文件（13 步，逐字节等价重写原 `moling/prepare-inputs.sh`）；`schema.rs` 存三套方案的参数表。上游素材（`yustar_chaifen*.dict.yaml`、`yuhao_charsets.lua`、`yuhao-zigens.csv`、`chars.dict.yaml`、`beiyu-char-freq.txt`、`charAbsoluteFrequency*.json`）统一放在仓库根的 `yuhao-data/`，产物只写 `--dir` |
 | `data_dir.rs` | 素材目录定位：`<dir>/yuhao-data` → `<dir>/../yuhao-data` → `<dir>`（最后一项兼容素材平铺在 `--dir` 下的老布局）；`prepare`/`zigen` 找素材都走它 |
 | `annealing.rs` | 混合优化算法核心：4 种初始化策略、multi-start + hill climb 热身、冲突导向邻域搜索、SA 主循环 |
@@ -105,7 +96,6 @@ cargo test --release
 | `rime_convert.rs` | 以星月方案包为底包，只重算 chaifen/full/words/quick/short/roots 六张表的码 |
 | `sentence.rs` | 整句准确率：逐单元首候选 + 连续码流解码；词典吃 dict.yaml 或纯 TSV；可调外部 librime 解码器 |
 | `pipeline.rs` | 逐字取码推导表（Markdown）与字根归并对比 |
-| `explore.rs` | 权重空间探索：读一批 `optimize` 日志里自己打印的「全码权重 / 输出目录」，汇总各轮 `summary.txt` 的线程指标，出 TSV + Plotly 平行坐标 HTML（20 根轴：5 权重 + 5 指标 × 最小/首选/最大）；取代已删的 `moling/analyze-results-of-batch-test-weights.sh` |
 | `zigen.rs` | 字形变体表：`zigen-<方案>.csv`（`rime-convert` 写字根提示时读它）、`roots-mapping.tsv`（`chart -m` 用）、`zigen-trainer-<方案>.json`（背字根用）；取代已删的 `moling/generate-root-chart.sh` 里纯数据的三步，其余产物 Rust 侧已有同口径实现 |
 | `clusters.rs` | 聚类重码分析：复用 `prepare::inputs::展开` 得到码位序列，按五种取码法（去第 0~3 码、全码）统计动重/静重/组数；`--per-row` 逐行代入聚类表与基线做差 |
 | `diagnose.rs` | 批量诊断码表目录（重码、当量、分布、选重） |

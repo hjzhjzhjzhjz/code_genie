@@ -29,7 +29,6 @@ cargo build --release
 |------|------|----------|
 | `optimize`（默认） | 跑模拟退火优化 | `code_genie -c config.ron optimize -d out` |
 | `resume` | 从 checkpoint 断点续算 | `code_genie resume -d out` |
-| `bench` | 压测 eval / 算子 / SA 吞吐 | `code_genie bench --iters 20000 --steps 200000` |
 | `encode` | 按 keymap 给拆分表编码 | `code_genie encode -k 字根键位表.txt -d 单字拆分.txt` |
 | `evaluate` | 评估现有方案指标 | `code_genie evaluate -k 字根键位表.txt` |
 | `export` | 导出测评码表（`字\t码`，简码在前） | `code_genie export -k 字根键位表.txt -c 拆分全表.txt -o 全码表.txt` |
@@ -43,8 +42,6 @@ cargo build --release
 | `clusters` | 聚类重码分析：把一簇压成一个大码要付出多少重码（聚类表内嵌于 `assets/roots_cluster.ron`） | `code_genie clusters --per-row` |
 | `zigen` | 字形变体表：`zigen-<方案>.csv` + `roots-mapping.tsv` + `zigen-trainer-<方案>.json` | `code_genie zigen --schema moling --source moling` |
 | `prepare` | 从上游 yaml/lua/csv 数据加工出优化器输入文件（13 步） | `code_genie prepare --dir moling` |
-| `explore` | 权重空间探索：汇总一批 optimize 日志，出平行坐标网页 | `code_genie explore test-*.log --html batch-test-weights.html` |
-| `plot` | 收敛曲线出图（PNG 需 `--features chart`） | `code_genie plot optimize.log -o 收敛.png --含当前` |
 
 ## 输入文件
 
@@ -190,11 +187,10 @@ tools/
 调参跑的每一步都在 `experiments/` 里留一份可查的记录：
 
 ```bash
-cargo build --release --features chart      # 出 PNG 需要这个 feature
 python tools/记录实验.py runs/xxx/optimize.log --标签 降初温 --假设 "初温降到 12 后最优能否低于 6.5"
 ```
 
-产物是 `<日期>-<时间>-<标签>.md`（假设 / 结论 / 参数 / 结果 / 曲线）加一张同名 PNG。
+产物是 `<日期>-<时间>-<标签>.md`（假设 / 结论 / 参数 / 结果）。
 「假设」跑之前写、「结论」跑完写，其余由脚本从日志和 `config.ron` 自动提取。
 细节见 `experiments/README.md`。
 
@@ -239,7 +235,6 @@ python tools/检查红线.py --base HEAD   # 只看未提交改动
 - 增量更新 `try_move()` / `try_swap()`，周期对账（reconcile）代替每步全量重建
 - 温度调度预计算 LUT
 - Release 启用 LTO + 单 codegen-unit + `panic=abort`
-- `cargo run --release -- bench` 可压测各算子成本与 SA 步速
 
 ## 许可证
 
