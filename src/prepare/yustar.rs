@@ -25,7 +25,7 @@
 
 use std::collections::HashMap;
 
-use crate::prepare::{inputs, names, roots, 共用步骤, 上下文};
+use crate::prepare::{inputs, names, roots, 上下文, 共用步骤};
 
 /// 星陈的单步入口：按步骤号分派，与魔灵/灵明的步骤表互不相干
 pub fn 步骤(上: &上下文, 步骤: usize) -> Result<(), String> {
@@ -57,7 +57,10 @@ pub fn 步骤(上: &上下文, 步骤: usize) -> Result<(), String> {
 /// `彳 亍 咼 尢`、以及完全查不到读音的花括号无名部件 / 符号根仍是单字符）。
 /// 该表由 字根读音 + 字根频率 确定性推导，因此无条件重建，避免残留旧口径。
 fn 步骤6_星陈声韵表(上: &上下文) -> Result<(), String> {
-    println!("(6) 生成星陈字根声韵表 {}（不做非常用字根削声母）...", 上.字根表);
+    println!(
+        "(6) 生成星陈字根声韵表 {}（不做非常用字根削声母）...",
+        上.字根表
+    );
 
     let mut 声韵码: HashMap<String, String> = HashMap::new();
     let mut 读音: HashMap<String, String> = HashMap::new();

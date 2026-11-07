@@ -241,7 +241,11 @@ fn 选配置(工作: &Path, 方案名: &str) -> Result<String, String> {
             return Ok(名.clone());
         }
     }
-    Err(format!("{} 下找不到任何配置文件（试过 {:?}）", 工作.display(), 候选))
+    Err(format!(
+        "{} 下找不到任何配置文件（试过 {:?}）",
+        工作.display(),
+        候选
+    ))
 }
 
 /// 缺省输出目录：`<方案>-output/output-<时间戳>`

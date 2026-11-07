@@ -1529,8 +1529,7 @@ dist_max = 8.0
     #[test]
     fn load_from_path_两种格式解析结果一致() {
         let 基 = Config::default();
-        let ron文本 =
-            ron::ser::to_string_pretty(&基, ron::ser::PrettyConfig::default()).unwrap();
+        let ron文本 = ron::ser::to_string_pretty(&基, ron::ser::PrettyConfig::default()).unwrap();
         let toml文本 = toml::to_string(&基).expect("Config 应能序列化成 TOML");
 
         let 目录 = std::env::temp_dir().join(format!("cg_cfg_fmt_{}", std::process::id()));
@@ -1554,7 +1553,10 @@ dist_max = 8.0
         std::fs::write(&错名路径, &ron文本).unwrap();
         let 丙 = Config::load_from_path(&错名路径.to_string_lossy())
             .expect("扩展名与实际格式不符时应兜底成功");
-        assert_eq!(ron::ser::to_string(&丙).unwrap(), ron::ser::to_string(&甲).unwrap());
+        assert_eq!(
+            ron::ser::to_string(&丙).unwrap(),
+            ron::ser::to_string(&甲).unwrap()
+        );
 
         let _ = std::fs::remove_dir_all(&目录);
     }

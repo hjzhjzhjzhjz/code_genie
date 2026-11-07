@@ -2024,9 +2024,15 @@ fn run_tune(
     std::fs::write(format!("{}/微调报告.txt", output_dir), &report).expect("写报告失败");
 
     println!();
-    println!("  当量: {:.6} → {:.6}  ({:+.6}, {:+.3}%)", rep.equiv_start, rep.equiv_end, delta, pct);
+    println!(
+        "  当量: {:.6} → {:.6}  ({:+.6}, {:+.3}%)",
+        rep.equiv_start, rep.equiv_end, delta, pct
+    );
     println!("  重码: {} → {}", rep.collisions_start, rep.collisions_end);
-    println!("  接受交换: {} 次 / {} 轮，耗时 {:.1}s", rep.applied, rep.rounds, elapsed);
+    println!(
+        "  接受交换: {} 次 / {} 轮，耗时 {:.1}s",
+        rep.applied, rep.rounds, elapsed
+    );
     println!("  已写出: {}", keymap_path);
 }
 

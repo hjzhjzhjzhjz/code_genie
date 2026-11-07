@@ -115,7 +115,11 @@ pub(crate) fn 大码约束(上: &上下文, 槽位: &str) -> Result<(), String> 
         if 列[0].is_empty() || 已用.contains(列[0]) {
             continue;
         }
-        出.push_str(&format!("{}{槽位}\t{}\n", 列[0], text::打散(方案.全部字根键位)));
+        出.push_str(&format!(
+            "{}{槽位}\t{}\n",
+            列[0],
+            text::打散(方案.全部字根键位)
+        ));
     }
     上.写(names::字根约束, &出)
 }
@@ -138,7 +142,9 @@ pub fn 步骤9_声韵约束(上: &上下文) -> Result<(), String> {
 ///
 /// `声码槽` / `韵码槽`：魔灵/灵明 写 `.S` / `.Y`，星陈 写 `.1`（无韵码，
 /// `韵码槽` 用不到），见 [`super::yustar`]。
-pub(crate) fn 声韵约束(上: &上下文, 声码槽: &str, 韵码槽: &str) -> Result<(), String> {
+pub(crate) fn 声韵约束(
+    上: &上下文, 声码槽: &str, 韵码槽: &str
+) -> Result<(), String> {
     println!("(9) 添加码灵输入文件 字根约束.txt, 声码和韵码约束 ...");
     let 方案 = 上.方案;
     let 笔画 = if 方案.韵码 == 韵码来源::首笔 {
@@ -215,7 +221,10 @@ pub(crate) fn 声韵约束(上: &上下文, 声码槽: &str, 韵码槽: &str) ->
     // 小码键后，同簇全码必然互异；跨簇重码仍由退火的重码惩罚处理。
     // 声母钉死单键的方案（魔灵 / 灵明）不走这条分支，仍是一行一根。
     if let Some(键集) = 方案.声码键位 {
-        let 大码槽 = 声码槽.trim_end_matches(|c: char| c.is_ascii_digit()).to_owned() + "0";
+        let 大码槽 = 声码槽
+            .trim_end_matches(|c: char| c.is_ascii_digit())
+            .to_owned()
+            + "0";
         let mut 内容表: HashMap<&str, &str> = HashMap::new();
         for (根, 内容) in &声码行 {
             内容表.insert(根.as_str(), 内容.as_str());
@@ -365,9 +374,8 @@ pub(crate) fn 展开(
 ) -> Vec<String> {
     // 星陈（`小码恒有`）不看声母：候选键集对每个根一视同仁，查不到读音的部件根
     // 也照样分到一个小码；魔灵/灵明 仍按「声码长度 > 1」判定。
-    let 有声母 = |r: &str| {
-        方案.小码恒有 || 码表.get(r).map(|c| c.chars().count() > 1).unwrap_or(false)
-    };
+    let 有声母 =
+        |r: &str| 方案.小码恒有 || 码表.get(r).map(|c| c.chars().count() > 1).unwrap_or(false);
     let 末 = 根[根.len() - 1];
     let mut 序列: Vec<String> = Vec::with_capacity(6);
 

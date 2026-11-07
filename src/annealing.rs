@@ -3,8 +3,8 @@
 // =========================================================================
 
 use rand::prelude::*;
-use smallvec::SmallVec;
 use rayon::prelude::*;
+use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -589,11 +589,7 @@ impl CollisionCache {
 /// 找出特定键位上的所有字根组
 /// 返回 SmallVec：同键组数常态 ≤ 每键平均组数（数十个），内联在栈上即可，
 /// 避免 sa 主循环每步一次堆分配（长跑下分配器堆段只增不减，是内存膨胀主因）。
-fn find_groups_on_key(
-    ctx: &OptContext,
-    assignment: &[u8],
-    key: u8,
-) -> SmallVec<[usize; 64]> {
+fn find_groups_on_key(ctx: &OptContext, assignment: &[u8], key: u8) -> SmallVec<[usize; 64]> {
     (0..ctx.num_groups)
         .filter(|&gi| assignment[gi] == key)
         .collect()
@@ -830,11 +826,8 @@ fn try_key_reorganization(
     let allowed = &ctx.groups[gi].allowed_keys;
 
     // 同上：栈上内联，随机序列与 collect 顺序完全不变。
-    let other_keys: SmallVec<[u8; KEY_SPACE]> = allowed
-        .iter()
-        .filter(|&&k| k != k1)
-        .copied()
-        .collect();
+    let other_keys: SmallVec<[u8; KEY_SPACE]> =
+        allowed.iter().filter(|&&k| k != k1).copied().collect();
 
     if other_keys.is_empty() {
         return false;
@@ -1004,8 +997,7 @@ pub(crate) fn try_full_key_swap(
         return false;
     }
 
-    let affected: SmallVec<[usize; 64]> =
-        groups_a.iter().chain(groups_b.iter()).copied().collect();
+    let affected: SmallVec<[usize; 64]> = groups_a.iter().chain(groups_b.iter()).copied().collect();
 
     let old_score = evaluator.get_score(ctx);
     let needs_simple = affected
@@ -3174,10 +3166,7 @@ mod activation_reheat_tests {
         let (assignment, score, _metrics, simple_metrics) = simulated_annealing(&ctx, &cfg, 1);
 
         assert_eq!(assignment.len(), ctx.num_groups);
-        assert!(
-            score.is_finite(),
-            "关闭 reheat 后最终得分仍应有限：{score}"
-        );
+        assert!(score.is_finite(), "关闭 reheat 后最终得分仍应有限：{score}");
         assert_sane_simple_metrics(&simple_metrics);
         // 候选覆盖率=1.0 且 code_num=1，激活后应确有出简，覆盖率 > 0 佐证简码确实生效。
         assert!(

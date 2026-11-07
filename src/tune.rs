@@ -155,7 +155,10 @@ pub fn tune(ctx: &OptContext, init: Vec<u8>, opts: &TuneOpts) -> (Vec<u8>, TuneR
         }
     }
     if repaired > 0 {
-        println!("⚠️ 种子有 {} 个组落在非法键位上，已投影到首个允许键", repaired);
+        println!(
+            "⚠️ 种子有 {} 个组落在非法键位上，已投影到首个允许键",
+            repaired
+        );
     }
 
     let mut ev = Evaluator::new_full_only(ctx, &asg);
