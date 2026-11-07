@@ -2029,10 +2029,10 @@ fn finalize_and_save(
 
 /// 备份依赖输入文件到 `{output_dir}/inputs/`（需求 4）。失败仅告警，不中止。
 ///
-/// 返回成功备份的文件数。空路径（`pair_equiv` / `key_dist` 省略时使用内嵌默认表）
-/// 不参与备份：早期直接拼 `format!("{inputs_dir}/{base}")` 会拼出 `inputs/` 这个目录，
-/// 于是刷出「重命名旧文件 inputs/ 失败 (os error 32)」+「备份输入文件  失败 (os error 3)」
-/// 两行误导性告警，且末尾仍无条件打印「已备份」。这里改为逐项统计、如实汇总。
+/// 返回成功备份的文件数。空路径（`pair_equiv` / `key_dist` / `full_splits` 省略时使用
+/// 内嵌默认表）不参与备份：早期直接拼 `format!("{inputs_dir}/{base}")` 会拼出 `inputs/`
+/// 这个目录，于是刷出「重命名旧文件 inputs/ 失败 (os error 32)」+「备份输入文件  失败
+/// (os error 3)」两行误导性告警，且末尾仍无条件打印「已备份」。这里改为逐项统计、如实汇总。
 fn backup_inputs(cfg: &Config, cli_config_path: &str, output_dir: &str) -> usize {
     let inputs_dir = format!("{}/inputs", output_dir);
     if let Err(e) = std::fs::create_dir_all(&inputs_dir) {
@@ -2043,6 +2043,8 @@ fn backup_inputs(cfg: &Config, cli_config_path: &str, output_dir: &str) -> usize
     // (标签, 源路径, 目标路径)；标签只用于日志，便于一眼看出漏了哪个输入。
     let mut 待备份: Vec<(&str, String, String)> = Vec::new();
     let mut 跳过: Vec<&str> = Vec::new();
+    // 复制前就能判定的问题（如两个输入撞同一个 basename），同样计入失败汇总。
+    let mut 预检失败: Vec<String> = Vec::new();
 
     // config 文件备份成 `config.<源扩展名>`（`.ron`/`.toml`），resume 按这两个名字找。
     // 保留扩展名是为了备份件能自己说明格式；内容仍以解析结果为准（加载器两种都认）。
@@ -2067,6 +2069,9 @@ fn backup_inputs(cfg: &Config, cli_config_path: &str, output_dir: &str) -> usize
         ("单字拆分", cfg.files.splits.as_str()),
         ("当量表", cfg.files.pair_equiv.as_str()),
         ("用指分布", cfg.files.key_dist.as_str()),
+        // 全量拆分表只影响「完整码表」这份附属产物，但显式配置时同样要备份：
+        // 否则 resume 重定向/读不到它，续算后会整份跳过完整码表。
+        ("全量拆分", cfg.files.full_splits.as_str()),
     ] {
         if src.trim().is_empty() {
             跳过.push(标签);
@@ -2080,7 +2085,25 @@ fn backup_inputs(cfg: &Config, cli_config_path: &str, output_dir: &str) -> usize
             eprintln!("⚠️ 跳过 {标签} 备份：路径 {} 取不到文件名", src);
             continue;
         }
-        待备份.push((标签, src.to_string(), format!("{}/{}", inputs_dir, base)));
+        let dst = format!("{}/{}", inputs_dir, base);
+        // full_splits 常与 splits 指向同一份全字集拆分表：同 (源,目标) 只备份一次，
+        // 否则第二次会触发 archive_if_exists 把刚写好的备份改名，inputs/ 里凭空多出归档副本。
+        if 待备份
+            .iter()
+            .any(|项| 项.1.as_str() == src && 项.2.as_str() == dst)
+        {
+            continue;
+        }
+        // 不同源却撞同一个 basename：备份件会互相覆盖，resume 只能读到后写的那份。
+        // 计为失败并跳过，不让「✅ 已备份 N 个」把漏项盖过去。
+        if let Some(已有) = 待备份.iter().find(|项| 项.2.as_str() == dst) {
+            预检失败.push(format!(
+                "{标签} {src} 与 {} {} 的备份同名（{base}），会互相覆盖",
+                已有.0, 已有.1
+            ));
+            continue;
+        }
+        待备份.push((标签, src.to_string(), dst));
     }
 
     if !跳过.is_empty() {
@@ -2090,8 +2113,8 @@ fn backup_inputs(cfg: &Config, cli_config_path: &str, output_dir: &str) -> usize
         );
     }
 
-    let 总数 = 待备份.len();
-    let mut 失败: Vec<String> = Vec::new();
+    let 总数 = 待备份.len() + 预检失败.len();
+    let mut 失败: Vec<String> = 预检失败;
     for (标签, src, dst) in &待备份 {
         if let Err(e) = fsutil::copy_with_backup(src, dst) {
             失败.push(format!("{标签} {src} → {dst}: {e}"));
@@ -2107,6 +2130,20 @@ fn backup_inputs(cfg: &Config, cli_config_path: &str, output_dir: &str) -> usize
         }
     }
     成功
+}
+
+/// 把配置里的输入路径重定向到 `{inputs_dir}/` 下的备份副本（按 basename）。
+/// 空串（= 用内嵌默认表，如 pair_equiv / key_dist / full_splits）原样返回，
+/// 否则会拼成 "inputs/" 这个目录去当文件读，反而刷出「读…失败」的假告警。
+fn 重定向输入路径(p: &str, inputs_dir: &str) -> String {
+    if p.trim().is_empty() {
+        return p.to_string();
+    }
+    let base = std::path::Path::new(p)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| p.to_string());
+    format!("{}/{}", inputs_dir, base)
 }
 
 /// resume 子命令（需求 7）：从既有 output 目录的 checkpoint 续算，复用该目录。
@@ -2150,22 +2187,24 @@ fn run_resume(dir: &str, rng_seed: Option<u64>) {
         }
     };
     // 将 files.* 重定向到 inputs/ 下的备份副本（按 basename），确保用一致输入重建。
-    // 空串（= 用内嵌默认表，如 pair_equiv / key_dist / full_splits）原样返回，
-    // 否则会拼成 "inputs/" 这个目录去当文件读，反而刷出「读…失败」的假告警。
-    let redirect = |p: &str| -> String {
-        if p.trim().is_empty() {
-            return p.to_string();
-        }
-        let base = std::path::Path::new(p)
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| p.to_string());
-        format!("{}/{}", inputs_dir, base)
-    };
-    cfg.files.fixed = redirect(&cfg.files.fixed);
-    cfg.files.splits = redirect(&cfg.files.splits);
-    cfg.files.pair_equiv = redirect(&cfg.files.pair_equiv);
-    cfg.files.key_dist = redirect(&cfg.files.key_dist);
+    cfg.files.fixed = 重定向输入路径(&cfg.files.fixed, &inputs_dir);
+    cfg.files.splits = 重定向输入路径(&cfg.files.splits, &inputs_dir);
+    cfg.files.pair_equiv = 重定向输入路径(&cfg.files.pair_equiv, &inputs_dir);
+    cfg.files.key_dist = 重定向输入路径(&cfg.files.key_dist, &inputs_dir);
+    let 原全量拆分 = cfg.files.full_splits.clone();
+    cfg.files.full_splits = 重定向输入路径(&原全量拆分, &inputs_dir);
+    // 全量拆分表只影响「完整码表」这份附属产物，不影响优化得分。修复前生成的输出目录
+    // 没有它的备份，此时退回原路径并提示，避免续算后整份完整码表被静默跳过。
+    if !原全量拆分.trim().is_empty()
+        && !std::path::Path::new(&cfg.files.full_splits).is_file()
+        && std::path::Path::new(&原全量拆分).is_file()
+    {
+        println!(
+            "ℹ️ inputs/ 里没有全量拆分表备份（旧输出目录），沿用原路径: {}",
+            原全量拆分
+        );
+        cfg.files.full_splits = 原全量拆分;
+    }
     let cfg = cfg;
 
     // 3) 重建优化上下文（复用 meta.scale_config，跳过 calibrate，需求 6.3）。
@@ -2454,6 +2493,120 @@ mod backup_tests {
 
         assert_eq!(成功, 2, "config + splits 成功，缺失的 fixed 应计入失败");
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// `files.full_splits` 显式配置时必须一并备份，否则 resume 续算会读不到它、
+    /// 整份跳过完整码表。
+    #[test]
+    fn backup_inputs_includes_full_splits() {
+        let base = std::env::temp_dir().join(format!("cg_backup_full_{}", std::process::id()));
+        let src = base.join("src");
+        let out = base.join("output-test");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        for name in [
+            "cfg.toml",
+            "fixed.txt",
+            "splits.txt",
+            "full.txt",
+            "keydist.txt",
+        ] {
+            std::fs::write(src.join(name), name).unwrap();
+        }
+
+        let mut cfg = Config::default();
+        cfg.files.fixed = src.join("fixed.txt").to_string_lossy().to_string();
+        cfg.files.splits = src.join("splits.txt").to_string_lossy().to_string();
+        cfg.files.key_dist = src.join("keydist.txt").to_string_lossy().to_string();
+        cfg.files.full_splits = src.join("full.txt").to_string_lossy().to_string();
+        let config_path = src.join("cfg.toml").to_string_lossy().to_string();
+
+        let 成功 = backup_inputs(&cfg, &config_path, &out.to_string_lossy());
+
+        assert_eq!(成功, 5, "config + 4 个数据文件均应成功备份");
+        let inputs = out.join("inputs");
+        assert!(inputs.join("full.txt").is_file(), "全量拆分表应被备份");
+        assert_eq!(
+            std::fs::read_dir(&inputs).unwrap().count(),
+            5,
+            "inputs/ 里应恰好 5 个文件"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// `full_splits` 与 `splits` 指向同一文件时只备份一次，不能触发归档产生多余副本。
+    #[test]
+    fn backup_inputs_dedups_same_full_splits_path() {
+        let base = std::env::temp_dir().join(format!("cg_backup_dup_{}", std::process::id()));
+        let src = base.join("src");
+        let out = base.join("output-test");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        for name in ["cfg.toml", "fixed.txt", "splits.txt", "keydist.txt"] {
+            std::fs::write(src.join(name), name).unwrap();
+        }
+        let 拆分表 = src.join("splits.txt").to_string_lossy().to_string();
+
+        let mut cfg = Config::default();
+        cfg.files.fixed = src.join("fixed.txt").to_string_lossy().to_string();
+        cfg.files.splits = 拆分表.clone();
+        cfg.files.key_dist = src.join("keydist.txt").to_string_lossy().to_string();
+        cfg.files.full_splits = 拆分表;
+        let config_path = src.join("cfg.toml").to_string_lossy().to_string();
+
+        let 成功 = backup_inputs(&cfg, &config_path, &out.to_string_lossy());
+
+        assert_eq!(成功, 4, "同一个文件不应被复制两次而重复计数");
+        let inputs = out.join("inputs");
+        let 文件: Vec<String> = std::fs::read_dir(&inputs)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(文件.len(), 4, "不应产生带时间戳的归档副本: {文件:?}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 不同源撞同一个 basename 会互相覆盖，必须计入失败而不是静默漏备份。
+    #[test]
+    fn backup_inputs_reports_basename_conflict() {
+        let base = std::env::temp_dir().join(format!("cg_backup_conflict_{}", std::process::id()));
+        let dir_a = base.join("a");
+        let dir_b = base.join("b");
+        let out = base.join("output-test");
+        std::fs::create_dir_all(&dir_a).unwrap();
+        std::fs::create_dir_all(&dir_b).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::write(base.join("cfg.toml"), "x = 1\n").unwrap();
+        std::fs::write(dir_a.join("拆分表.txt"), "A").unwrap();
+        std::fs::write(dir_b.join("拆分表.txt"), "B").unwrap();
+
+        let mut cfg = Config::default();
+        cfg.files.splits = dir_a.join("拆分表.txt").to_string_lossy().to_string();
+        cfg.files.full_splits = dir_b.join("拆分表.txt").to_string_lossy().to_string();
+        let config_path = base.join("cfg.toml").to_string_lossy().to_string();
+
+        let 成功 = backup_inputs(&cfg, &config_path, &out.to_string_lossy());
+
+        assert_eq!(
+            成功, 2,
+            "config + splits 成功，同名的 full_splits 应计为失败"
+        );
+        assert_eq!(
+            std::fs::read_to_string(out.join("inputs/拆分表.txt")).unwrap(),
+            "A",
+            "先备份的内容不应被后来的同名文件覆盖"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn 重定向输入路径_keeps_empty_and_uses_basename() {
+        assert_eq!(重定向输入路径("", "/out/inputs"), "");
+        assert_eq!(重定向输入路径("  ", "/out/inputs"), "  ");
+        assert_eq!(
+            重定向输入路径("D:/data/拆分表.txt", "/out/inputs"),
+            "/out/inputs/拆分表.txt"
+        );
     }
 }
 
