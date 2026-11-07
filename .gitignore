@@ -1,6 +1,8 @@
 **/.DS_Store
 **/__pycache__/
 **/examples
+# graphify 代码图谱产物（本地生成，可随时用 graphify update 重建）
+**/graphify-out/
 **/target
 **/output*
 **/missing-*
