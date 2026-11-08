@@ -3,10 +3,62 @@
 // =========================================================================
 
 use rand::prelude::*;
+use std::collections::HashMap;
 
 use crate::bucket_store::{BucketStore, FullBucket};
 use crate::context::OptContext;
 use crate::types::{KeyDistConfig, MetricScores, Metrics, EQUIV_TABLE_SIZE};
+
+/// 一个字根槽位的键位来源。
+///
+/// `字根键位表.txt` 的一行是「基名 + 该基名各槽位落到的键」，编码就是这些键拼成的串。
+/// 固定字根（约束文件里一列只有一个键）直接给键位；其余字根属于某个根组，查该组的分配结果。
+#[derive(Clone, Copy, Debug)]
+enum 槽来源 {
+    固定(u8),
+    组(u32),
+}
+
+/// 预计算「基名 → 各槽位来源」，供编码种数统计使用。
+///
+/// 与 `output::build_root_encodings_sorted` 同口径（都按基名聚合、按槽位号排序），
+/// 只是这里保留来源而不是当场解析键位，避免退火每步重建哈希表。
+fn 构建根槽来源(ctx: &OptContext) -> (Vec<槽来源>, Vec<u32>) {
+    use crate::types::{extract_base_name, extract_suffix_num};
+
+    let mut 分组: HashMap<String, Vec<(i32, 槽来源)>> = HashMap::new();
+    for (根, &键) in &ctx.fixed_roots {
+        分组
+            .entry(extract_base_name(根))
+            .or_default()
+            .push((extract_suffix_num(根), 槽来源::固定(键)));
+    }
+    for (gi, 组) in ctx.groups.iter().enumerate() {
+        for 根 in &组.roots {
+            分组
+                .entry(extract_base_name(根))
+                .or_default()
+                .push((extract_suffix_num(根), 槽来源::组(gi as u32)));
+        }
+    }
+
+    // 排序只为结果稳定（便于单测与重现），统计本身与顺序无关。
+    let mut 基名们: Vec<String> = 分组.keys().cloned().collect();
+    基名们.sort();
+
+    let mut 来源: Vec<槽来源> = Vec::new();
+    let mut 偏移: Vec<u32> = Vec::with_capacity(基名们.len() + 1);
+    偏移.push(0);
+    for 名 in &基名们 {
+        let mut 槽们 = 分组.remove(名).unwrap_or_default();
+        槽们.sort_by_key(|(号, _)| *号);
+        for (_, s) in 槽们 {
+            来源.push(s);
+        }
+        偏移.push(来源.len() as u32);
+    }
+    (来源, 偏移)
+}
 
 // =========================================================================
 // 主评估器
@@ -125,6 +177,15 @@ pub struct Evaluator {
     pub cached_full_score: f64,
     /// 全码分量得分是否需要重新计算
     pub full_score_dirty: bool,
+
+    /// 各基名的槽位来源（按基名连续存放）
+    根槽来源: Vec<槽来源>,
+    /// 每个基名的槽位区间起点，长度 = 基名数 + 1
+    根槽偏移: Vec<u32>,
+    /// 复用缓冲：各基名的编码指纹，排序去重后即编码种数
+    编码指纹缓冲: Vec<u64>,
+    /// 当前编码种数（字根键位组合去重后的个数）
+    编码种数: usize,
 }
 
 impl Evaluator {
@@ -132,6 +193,7 @@ impl Evaluator {
     pub fn new(ctx: &OptContext, assignment: &[u8]) -> Self {
         let n = ctx.char_infos.len();
         let cs = ctx.code_space;
+        let (根槽来源, 根槽偏移) = 构建根槽来源(ctx);
         let mut full_buckets: BucketStore<FullBucket> = BucketStore::new(cs, n);
         // 稀疏后端预留 n_chars 容量：避免退火期 rehash、降低负载因子（缩短探测、减少缓存缺失）。
         full_buckets.reserve_nonempty(n);
@@ -216,7 +278,12 @@ impl Evaluator {
             score_dirty: true,
             cached_full_score: 0.0,
             full_score_dirty: true,
+            根槽来源,
+            根槽偏移,
+            编码指纹缓冲: Vec::new(),
+            编码种数: 0,
         };
+        e.刷新编码种数(ctx, assignment);
         e.cached_full_score = e.compute_full_score(ctx);
         e.full_score_dirty = false;
         e.cached_score = e.cached_full_score;
@@ -473,7 +540,7 @@ impl Evaluator {
                 score += ctx.weights.weight_distribution * (d + d * d + lw * (v * s));
             }
 
-            score
+            score + self.编码罚分(ctx)
         } else {
             // 原有绝对值最小化模式（保持不变）
             let mut score = ctx.weights.weight_collision_count
@@ -509,14 +576,80 @@ impl Evaluator {
                     * ctx.scale_config.distribution;
             }
 
-            score
+            score + self.编码罚分(ctx)
+        }
+    }
+
+    /// 重新统计编码种数（字根键位组合去重后的个数）。
+    ///
+    /// 只在 `[constraints].max_encodings > 0` 时统计：未启用时直接置 0，不付任何代价，
+    /// 保证老配置的行为与性能完全不变。启用后每次求值多一次 368 项的小排序，
+    /// 相对一次 `update_char` 可以忽略。
+    fn 刷新编码种数(&mut self, ctx: &OptContext, assignment: &[u8]) {
+        if !ctx.constraints.enabled() {
+            self.编码种数 = 0;
+            return;
+        }
+        let 基名数 = self.根槽偏移.len().saturating_sub(1);
+        self.编码指纹缓冲.clear();
+        self.编码指纹缓冲.reserve(基名数);
+        for i in 0..基名数 {
+            let 起 = self.根槽偏移[i] as usize;
+            let 止 = self.根槽偏移[i + 1] as usize;
+            if 起 == 止 {
+                continue;
+            }
+            // 每槽 8 位：键位索引最大 30（26 字母 + 4 个标点键），8 位足够；
+            // 一基名最多 8 槽，超出部分截断（星陈实测恒为 2 槽）。
+            let mut 指纹 = 0u64;
+            for (槽, 来源) in self.根槽来源[起..止].iter().enumerate().take(8) {
+                let 键 = match 来源 {
+                    槽来源::固定(k) => *k as u64,
+                    槽来源::组(gi) => assignment[*gi as usize] as u64,
+                };
+                指纹 |= 键 << (8 * 槽);
+            }
+            self.编码指纹缓冲.push(指纹);
+        }
+        self.编码指纹缓冲.sort_unstable();
+        self.编码指纹缓冲.dedup();
+        self.编码种数 = self.编码指纹缓冲.len();
+    }
+
+    /// 当前编码种数（未启用编码种数约束时为 0）
+    #[inline(always)]
+    pub fn 编码种数(&self) -> usize {
+        self.编码种数
+    }
+
+    /// 回滚时把编码种数恢复成移动前的值。
+    ///
+    /// 回滚路径为了让拒绝的移动尽快返回，不重新遍历整表统计；调用方在移动前已取过旧值，
+    /// 这里直接写回，保证后续 `get_metrics` 读到的仍是真实状态的种数。
+    #[inline(always)]
+    pub fn 恢复编码种数(&mut self, 值: usize) {
+        self.编码种数 = 值;
+    }
+
+    /// 编码种数超限罚分；未启用或未超限时为 0，因此达标解的得分与旧口径完全一致
+    #[inline(always)]
+    pub fn 编码罚分(&self, ctx: &OptContext) -> f64 {
+        if !ctx.constraints.enabled() {
+            return 0.0;
+        }
+        let 超 = self.编码种数.saturating_sub(ctx.constraints.max_encodings);
+        if 超 == 0 {
+            0.0
+        } else {
+            ctx.constraints.encoding_penalty * 超 as f64
         }
     }
 
     /// 获取得分
     #[inline(always)]
-    pub fn get_score(&mut self, ctx: &OptContext) -> f64 {
+    pub fn get_score(&mut self, ctx: &OptContext, assignment: &[u8]) -> f64 {
         if self.score_dirty {
+            self.刷新编码种数(ctx, assignment);
             self.cached_full_score = self.compute_full_score(ctx);
             self.full_score_dirty = false;
             self.cached_score = self.cached_full_score;
@@ -576,6 +709,7 @@ impl Evaluator {
             },
             equiv_cv: self.calc_equiv_cv(),
             dist_deviation: self.calc_distribution_deviation(&ctx.key_dist_config),
+            encoding_count: self.编码种数,
         }
     }
 
@@ -658,7 +792,9 @@ impl Evaluator {
             return false;
         }
 
-        let old_score = self.get_score(ctx);
+        let old_score = self.get_score(ctx, assignment);
+        // 回滚路径不重算编码种数（那是整表遍历），直接恢复移动前的值即可。
+        let 旧种数 = self.编码种数;
 
         // O(1) key_weighted_usage 更新
         let gfs = ctx.group_freq_sum[r];
@@ -680,11 +816,12 @@ impl Evaluator {
             }
             self.cached_score = old_score;
             self.score_dirty = false;
+            self.编码种数 = 旧种数;
             return false;
         }
 
         self.score_dirty = true;
-        let new_score = self.get_score(ctx);
+        let new_score = self.get_score(ctx, assignment);
         let delta = new_score - old_score;
 
         if delta <= 0.0 || rng.random::<f64>() < (-delta / temp).exp() {
@@ -701,6 +838,7 @@ impl Evaluator {
 
             self.cached_score = old_score;
             self.score_dirty = false;
+            self.编码种数 = 旧种数;
             false
         }
     }
@@ -722,7 +860,9 @@ impl Evaluator {
             return false;
         }
 
-        let old_score = self.get_score(ctx);
+        let old_score = self.get_score(ctx, assignment);
+        // 回滚路径不重算编码种数（那是整表遍历），直接恢复移动前的值即可。
+        let 旧种数 = self.编码种数;
 
         // O(1) key_weighted_usage 更新
         let gfs1 = ctx.group_freq_sum[r1];
@@ -757,11 +897,12 @@ impl Evaluator {
             }
             self.cached_score = old_score;
             self.score_dirty = false;
+            self.编码种数 = 旧种数;
             return false;
         }
 
         self.score_dirty = true;
-        let new_score = self.get_score(ctx);
+        let new_score = self.get_score(ctx, assignment);
         let delta = new_score - old_score;
 
         if delta <= 0.0 || rng.random::<f64>() < (-delta / temp).exp() {
@@ -784,6 +925,7 @@ impl Evaluator {
 
             self.cached_score = old_score;
             self.score_dirty = false;
+            self.编码种数 = 旧种数;
             false
         }
     }
@@ -989,7 +1131,7 @@ mod targets_proptest {
 #[cfg(test)]
 mod full_evaluator_tests {
     use super::*;
-    use crate::config::TargetsConfig;
+    use crate::config::{ConstraintsConfig, TargetsConfig};
     use crate::context::OptContext;
     use crate::types::{KeyDistConfig, RootGroup, ScaleConfig, WeightConfig, EQUIV_TABLE_SIZE};
     use std::collections::HashMap;
@@ -1093,7 +1235,7 @@ mod full_evaluator_tests {
         let ctx = 造上下文(10, 3);
         let 初始: Vec<u8> = (0..10).map(|i| (i % 3) as u8).collect();
         let mut ev = Evaluator::new(&ctx, &初始);
-        let 原始分 = ev.get_score(&ctx);
+        let 原始分 = ev.get_score(&ctx, &初始);
         let 原始碰撞 = ev.total_collisions;
 
         let mut asg = 初始.clone();
@@ -1112,7 +1254,7 @@ mod full_evaluator_tests {
         );
         if asg == 初始 {
             assert!(
-                (ev.get_score(&ctx) - 原始分).abs() < 1e-12,
+                (ev.get_score(&ctx, &asg) - 原始分).abs() < 1e-12,
                 "未接受任何移动时得分应保持不变"
             );
             assert_eq!(ev.total_collisions, 原始碰撞);
@@ -1128,7 +1270,7 @@ mod full_evaluator_tests {
         let mut b = Evaluator::new(&ctx, &asg);
         assert_eq!(a.total_collisions, b.total_collisions);
         assert_eq!(a.collision_frequency, b.collision_frequency);
-        assert_eq!(a.get_score(&ctx), b.get_score(&ctx));
+        assert_eq!(a.get_score(&ctx, &asg), b.get_score(&ctx, &asg));
     }
 
     /// 分项得分之和必须等于总分（日志口径与算分公式不能分叉）。
@@ -1181,5 +1323,96 @@ mod full_evaluator_tests {
         let ev = Evaluator::new(&ctx, &asg);
         assert_eq!(ev.get_metrics(&ctx).equiv_mean, 0.0);
         assert_eq!(ev.get_metrics(&ctx).equiv_cv, 0.0);
+    }
+
+    /// 未启用 `[constraints]` 时编码种数恒为 0、罚分恒为 0，老配置的评分与性能都不受影响。
+    #[test]
+    fn 未启用约束时编码种数不参与评分() {
+        let ctx = 造上下文(4, 2);
+        let asg: Vec<u8> = vec![0, 0, 1, 1];
+        let ev = Evaluator::new(&ctx, &asg);
+        assert_eq!(ev.编码种数(), 0);
+        assert_eq!(ev.编码罚分(&ctx), 0.0);
+    }
+
+    /// 编码种数 = 各基名「两槽键位拼成的串」去重后的个数。
+    ///
+    /// 星陈的每个字根有 `.0` / `.1` 两个槽、各选一键，所以种数不是字根数，而是键位组合数。
+    #[test]
+    fn 编码种数按两槽键位组合去重() {
+        let allowed: Vec<u8> = (0..3).collect();
+        let groups: Vec<RootGroup> = ["a.0", "a.1", "b.0", "b.1"]
+            .iter()
+            .map(|r| RootGroup {
+                roots: vec![(*r).to_string()],
+                allowed_keys: allowed.clone(),
+            })
+            .collect();
+        let splits: Vec<(char, Vec<String>, u64)> = vec![
+            ('甲', vec!["a.0".to_string(), "a.1".to_string()], 1),
+            ('乙', vec!["b.0".to_string(), "b.1".to_string()], 1),
+        ];
+        let mut ctx = OptContext::new(
+            &splits,
+            &HashMap::new(),
+            &groups,
+            [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE],
+            [KeyDistConfig::default(); EQUIV_TABLE_SIZE],
+            ScaleConfig::default(),
+            WeightConfig::default(),
+            TargetsConfig::default(),
+        );
+        ctx.constraints = ConstraintsConfig {
+            max_encodings: 1,
+            encoding_penalty: 0.5,
+        };
+
+        // a = (0,1)、b = (0,2) → 两种不同键位组合
+        let ev = Evaluator::new(&ctx, &[0, 1, 0, 2]);
+        assert_eq!(ev.编码种数(), 2);
+
+        // 两个基名落在同一组合 → 只算一种
+        let ev = Evaluator::new(&ctx, &[0, 1, 0, 1]);
+        assert_eq!(ev.编码种数(), 1);
+    }
+
+    /// 罚分只在超出上限时按个数线性计费，达标时为 0（因此最终得分与旧口径可比）。
+    #[test]
+    fn 编码罚分达标为零超限线性() {
+        let mut ctx = 造上下文(4, 3);
+        ctx.constraints = ConstraintsConfig {
+            max_encodings: 3,
+            encoding_penalty: 0.25,
+        };
+        let asg: Vec<u8> = vec![0, 1, 2, 0];
+        let ev = Evaluator::new(&ctx, &asg);
+        assert_eq!(ev.编码种数(), 3);
+        assert_eq!(ev.编码罚分(&ctx), 0.0, "未超限不该有罚分");
+
+        ctx.constraints.max_encodings = 2;
+        assert!(
+            (ev.编码罚分(&ctx) - 0.25).abs() < 1e-12,
+            "超 1 种应罚一个系数"
+        );
+    }
+
+    /// 被拒绝的移动必须把编码种数恢复原值，否则汇总与进度行会读到移动中途的脏值。
+    #[test]
+    fn 拒绝移动后编码种数复原() {
+        let mut ctx = 造上下文(4, 3);
+        ctx.constraints = ConstraintsConfig {
+            max_encodings: 1,
+            encoding_penalty: 0.5,
+        };
+        let 初始: Vec<u8> = vec![0, 0, 0, 0];
+        let mut ev = Evaluator::new(&ctx, &初始);
+        assert_eq!(ev.编码种数(), 1);
+
+        let mut asg = 初始.clone();
+        let mut rng = rand::rng();
+        // 温度 0 → 只接受改进；把一组挪到新键会让种数与罚分变差，必然回滚。
+        let _ = ev.try_move(&ctx, &mut asg, 0, 2, 0.0, &mut rng);
+        assert_eq!(ev.编码种数(), 1, "回滚后编码种数应复原");
+        assert_eq!(asg, 初始, "回滚后键位应复原");
     }
 }

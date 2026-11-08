@@ -187,6 +187,7 @@ mod tests {
             equiv_mean: (seed % 53) as f64 / 10.0,
             equiv_cv: (seed % 31) as f64 / 10.0,
             dist_deviation: (seed % 41) as f64 / 10.0,
+            encoding_count: (seed % 251) as usize,
         }
     }
     prop_compose! {

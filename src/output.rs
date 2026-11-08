@@ -214,6 +214,12 @@ pub fn save_thread_results(
         "# 用指分布偏差(L2): {:.4}\n",
         metrics.dist_deviation
     ));
+    if metrics.encoding_count > 0 {
+        root_out.push_str(&format!(
+            "# 编码种数: {} / 上限 {}\n",
+            metrics.encoding_count, ctx.constraints.max_encodings
+        ));
+    }
     root_out.push_str("#\n");
     root_out.push_str("# 格式: 字根名 [tab] 编码 [tab] 使用次数(频率加权)\n");
     root_out.push_str("#\n");
@@ -346,6 +352,12 @@ pub fn save_results(
         "# 用指分布偏差(L2): {:.4}\n",
         metrics.dist_deviation
     ));
+    if metrics.encoding_count > 0 {
+        root_out.push_str(&format!(
+            "# 编码种数: {} / 上限 {}\n",
+            metrics.encoding_count, ctx.constraints.max_encodings
+        ));
+    }
     root_out.push_str("#\n");
     root_out.push_str("# 格式: 字根名 [tab] 编码 [tab] 使用次数(频率加权)\n");
     root_out.push_str("#\n");
@@ -485,6 +497,31 @@ pub fn save_summary(
             m.dist_deviation,
             marker
         ));
+    }
+
+    // 编码种数是设计约束（不在五项指标里），单独列在表后，避免撑宽主表破坏既有解析。
+    if cfg
+        .constraints
+        .as_ref()
+        .map(|c| c.enabled())
+        .unwrap_or(false)
+    {
+        let 上限 = cfg
+            .constraints
+            .as_ref()
+            .map(|c| c.max_encodings)
+            .unwrap_or(0);
+        summary.push_str(&format!(
+            "\n# 编码种数（字根键位组合去重数，上限 {上限}）\n"
+        ));
+        for (tid, _, _, m) in &sorted {
+            let 标记 = if m.encoding_count > 上限 {
+                " 超限"
+            } else {
+                ""
+            };
+            summary.push_str(&format!("T{tid}\t{}{标记}\n", m.encoding_count));
+        }
     }
 
     crate::fsutil::write_output(format!("{}/汇总.txt", output_dir), summary);

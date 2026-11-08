@@ -22,6 +22,47 @@ pub struct Config {
     pub scale: Option<ScaleConfigToml>, // 可选，缺失则完全依赖 calibrate
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub targets: Option<TargetsConfig>, // 可选，缺失则使用默认（disabled）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraints: Option<ConstraintsConfig>, // 可选，缺失则不启用任何结构约束
+}
+
+/// 结构约束（`[constraints]` 段，可选）
+///
+/// 目前只有「编码种数上限」。编码种数指所有字根去重后的键位对数量——星陈的每个字根
+/// 有 `.0` / `.1` 两个槽位、各选一键，所以字根编码恒为两个字母，去重后就是键位对种数。
+/// 它不在常规五项评分里（重码/当量/CV/分布），纯属设计约束：字根键位图每键的格子数有限，
+/// 种数超了排不下。
+///
+/// 启用后按 `encoding_penalty × max(0, 种数 − max_encodings)` 计入得分。达标时该项为 0，
+/// 因此最终得分与未启用时同口径可比，只是搜索路径会被这条约束引导。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ConstraintsConfig {
+    /// 编码种数上限；0 或省略表示不启用
+    #[serde(default)]
+    pub max_encodings: usize,
+    /// 每超出一种编码的罚分系数
+    #[serde(default = "default_encoding_penalty")]
+    pub encoding_penalty: f64,
+}
+
+fn default_encoding_penalty() -> f64 {
+    0.002
+}
+
+impl Default for ConstraintsConfig {
+    fn default() -> Self {
+        Self {
+            max_encodings: 0,
+            encoding_penalty: default_encoding_penalty(),
+        }
+    }
+}
+
+impl ConstraintsConfig {
+    /// 上限为正且罚系数为正时才真正生效
+    pub fn enabled(&self) -> bool {
+        self.max_encodings > 0 && self.encoding_penalty > 0.0
+    }
 }
 
 /// 文件路径配置
@@ -449,6 +490,7 @@ impl Default for Config {
             },
             scale: None,
             targets: None,
+            constraints: None,
         }
     }
 }

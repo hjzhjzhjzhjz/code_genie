@@ -771,7 +771,9 @@ fn try_triple_swap(
         return false;
     }
 
-    let old_score = evaluator.get_score(ctx);
+    let old_score = evaluator.get_score(ctx, assignment);
+    // 回滚时直接写回，省一次整表遍历（回滚路径要尽快返回）
+    let 旧种数 = evaluator.编码种数();
 
     // 更新 key_weighted_usage
     for &(gi, old_k, new_k) in &[(g1, k1, k2), (g2, k2, k3), (g3, k3, k1)] {
@@ -802,7 +804,7 @@ fn try_triple_swap(
     }
 
     evaluator.score_dirty = true;
-    let new_score = evaluator.get_score(ctx);
+    let new_score = evaluator.get_score(ctx, assignment);
     let delta = new_score - old_score;
 
     // 硬约束：[targets] 里的 *_max 在自定义邻域（三交换/整键互换）上同样要生效。
@@ -842,6 +844,7 @@ fn try_triple_swap(
 
         evaluator.cached_score = old_score;
         evaluator.score_dirty = false;
+        evaluator.恢复编码种数(旧种数);
         false
     }
 }
@@ -889,7 +892,9 @@ pub(crate) fn try_full_key_swap(
 
     let affected: SmallVec<[usize; 64]> = groups_a.iter().chain(groups_b.iter()).copied().collect();
 
-    let old_score = evaluator.get_score(ctx);
+    let old_score = evaluator.get_score(ctx, assignment);
+    // 回滚时直接写回，省一次整表遍历（回滚路径要尽快返回）
+    let 旧种数 = evaluator.编码种数();
 
     // 更新 key_weighted_usage
     for &gi in &affected {
@@ -910,7 +915,7 @@ pub(crate) fn try_full_key_swap(
         }
     }
     evaluator.score_dirty = true;
-    let new_score = evaluator.get_score(ctx);
+    let new_score = evaluator.get_score(ctx, assignment);
     let delta = new_score - old_score;
 
     // 硬约束：[targets] 里的 *_max 在自定义邻域（三交换/整键互换）上同样要生效。
@@ -940,6 +945,7 @@ pub(crate) fn try_full_key_swap(
         }
         evaluator.cached_score = old_score;
         evaluator.score_dirty = false;
+        evaluator.恢复编码种数(旧种数);
         false
     }
 }
@@ -960,7 +966,8 @@ fn enhanced_hill_climb(
     let mut evaluator = Evaluator::new(ctx, &assignment);
     let n = assignment.len();
     if n == 0 {
-        return (assignment, evaluator.get_score(ctx));
+        let 分 = evaluator.get_score(ctx, &assignment);
+        return (assignment, 分);
     }
 
     let zero_temp = 1e-15;
@@ -1046,7 +1053,8 @@ fn enhanced_hill_climb(
         }
     }
 
-    (assignment, evaluator.get_score(ctx))
+    let 末分 = evaluator.get_score(ctx, &assignment);
+    (assignment, 末分)
 }
 
 fn hill_climb_warmup(
@@ -1073,7 +1081,7 @@ fn coordinate_descent(ctx: &OptContext, init: Vec<u8>) -> (Vec<u8>, f64) {
         improved = false;
         for gi in 0..n {
             let current_key = assignment[gi];
-            let current_score = evaluator.get_score(ctx);
+            let current_score = evaluator.get_score(ctx, &assignment);
 
             let mut best_key = current_key;
             let mut best_score = current_score;
@@ -1100,7 +1108,7 @@ fn coordinate_descent(ctx: &OptContext, init: Vec<u8>) -> (Vec<u8>, f64) {
                     evaluator.update_char(ctx, &assignment, ci);
                 }
                 evaluator.score_dirty = true;
-                let score = evaluator.get_score(ctx);
+                let score = evaluator.get_score(ctx, &assignment);
 
                 // 硬约束：越界的候选即使分数更低也不接受（软惩罚拉不住时解会跑到约束外），
                 // 与 try_move / 三交换 / 整键互换的判定保持一致。
@@ -1148,7 +1156,7 @@ fn coordinate_descent(ctx: &OptContext, init: Vec<u8>) -> (Vec<u8>, f64) {
         }
     }
 
-    let score = evaluator.get_score(ctx);
+    let score = evaluator.get_score(ctx, &assignment);
     (assignment, score)
 }
 
@@ -1389,7 +1397,7 @@ pub fn simulated_annealing_resumable(
     }
 
     let mut best_assignment = assignment.clone();
-    let mut best_score = evaluator.get_score(ctx);
+    let mut best_score = evaluator.get_score(ctx, &assignment);
     let mut best_metrics = evaluator.get_metrics(ctx);
 
     if thread_id == 0 {
@@ -1657,7 +1665,7 @@ pub fn simulated_annealing_resumable(
             win_accepted += 1;
         }
 
-        let current_score = evaluator.get_score(ctx);
+        let current_score = evaluator.get_score(ctx, &assignment);
         if current_score < best_score {
             best_score = current_score;
             best_assignment = assignment.clone();
@@ -1743,16 +1751,26 @@ pub fn simulated_annealing_resumable(
                 0.0
             };
 
-            let total = evaluator.get_score(ctx);
+            let total = evaluator.get_score(ctx, &assignment);
+            // 编码种数是非五项指标的设计约束；未启用时不追加，保持既有日志格式与解析脚本可用。
+            let 编码项 = if ctx.constraints.enabled() {
+                format!(
+                    " 编码={}/{}",
+                    evaluator.编码种数(),
+                    ctx.constraints.max_encodings
+                )
+            } else {
+                String::new()
+            };
             println!(
-                "   [T0] 进度: {:>3}% | 基温: {:.6} | 重码={}({:.4}) 重码率={:.4}%({:.4}) 当量={:.4}({:.4}) CV={:.4}({:.4}) 分布={:.4}({:.4}) | 当前: {:.4} 🏆最优: {:.4}",
+                "   [T0] 进度: {:>3}% | 基温: {:.6} | 重码={}({:.4}) 重码率={:.4}%({:.4}) 当量={:.4}({:.4}) CV={:.4}({:.4}) 分布={:.4}({:.4}) | 当前: {:.4} 🏆最优: {:.4}{}",
                 pct, base_temp,
                 m.collision_count, scores.collision_count,
                 m.collision_rate * 100.0, scores.collision_rate,
                 m.equiv_mean, scores.equivalence,
                 m.equiv_cv, scores.equiv_cv,
                 m.dist_deviation, scores.distribution,
-                total, best_score
+                total, best_score, 编码项
             );
             // 速率行：左起加进度百分比（与进度行对齐）；先「总吞吐」（会话累计均速）
             // 后「窗口吞吐」（自上次汇报以来），再窗口接受率（附原始计数）。
@@ -1787,7 +1805,7 @@ pub fn simulated_annealing_resumable(
     //（主循环里的 best_score 是搜索过程中记录的，续算/外部播种时可能与当前分配不同步）。
     {
         let mut best_eval = Evaluator::new(ctx, &best_assignment);
-        best_score = best_eval.get_score(ctx);
+        best_score = best_eval.get_score(ctx, &best_assignment);
     }
 
     // 最终精炼
@@ -1830,7 +1848,7 @@ pub fn simulated_annealing_resumable(
     // 最终上报指标在精炼之后统一重算一次，使日志总结、summary.txt 与 output 文件头三者一致。
     {
         let mut best_eval = Evaluator::new(ctx, &best_assignment);
-        best_score = best_eval.get_score(ctx);
+        best_score = best_eval.get_score(ctx, &best_assignment);
         best_metrics = best_eval.get_metrics(ctx);
 
         if thread_id == 0 {
@@ -2467,8 +2485,8 @@ mod resume_tests {
             r0.score,
             r1.score,
             tc.best_score,
-            Evaluator::new(&ctx, &r0.assignment).get_score(&ctx),
-            Evaluator::new(&ctx, &tc.best_assignment).get_score(&ctx)
+            Evaluator::new(&ctx, &r0.assignment).get_score(&ctx, &r0.assignment),
+            Evaluator::new(&ctx, &tc.best_assignment).get_score(&ctx, &tc.best_assignment)
         );
         assert!(r1.score <= tc.best_score + 1e-9);
         let _ = std::fs::remove_dir_all(&ckpt_dir);
@@ -2483,7 +2501,7 @@ mod resume_tests {
             .map(|gi| ctx.groups[gi].allowed_keys[0])
             .collect();
         // 种子起点的初始得分（以该种子直接构建评估器）。
-        let seed_init_score = Evaluator::new(&ctx, &seed).get_score(&ctx);
+        let seed_init_score = Evaluator::new(&ctx, &seed).get_score(&ctx, &seed);
 
         let total_steps = 500usize; // 极小步数
         let cfg = tiny_cfg(total_steps);

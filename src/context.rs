@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::config::TargetsConfig;
+use crate::config::{ConstraintsConfig, TargetsConfig};
 use crate::types::{
     char_to_key_index, CharInfo, KeyDistConfig, RootGroup, ScaleConfig, WeightConfig,
     EQUIV_TABLE_SIZE, GROUP_MARKER, KEY_SPACE,
@@ -53,6 +53,8 @@ pub struct OptContext {
     pub group_freq_sum: Vec<f64>,
     /// 目标配置（用于目标偏差评分和 _max 硬约束检查）
     pub targets_config: TargetsConfig,
+    /// 结构约束（编码种数上限等）；默认不启用
+    pub constraints: ConstraintsConfig,
 }
 
 impl OptContext {
@@ -83,10 +85,11 @@ impl OptContext {
             weights,
             targets_config,
             "_",
+            ConstraintsConfig::default(),
         )
     }
 
-    /// 创建优化上下文（含全码终止键配置）。
+    /// 创建优化上下文（含全码终止键配置与结构约束）。
     #[allow(clippy::too_many_arguments)]
     pub fn new_with_termination(
         splits: &[(char, Vec<String>, u64)],
@@ -98,6 +101,7 @@ impl OptContext {
         weights: WeightConfig,
         targets_config: TargetsConfig,
         termination_keys: &str,
+        constraints: ConstraintsConfig,
     ) -> Self {
         let mut termination_key_mask = [false; EQUIV_TABLE_SIZE];
         for c in termination_keys.chars() {
@@ -194,6 +198,7 @@ impl OptContext {
             scale_config,
             group_freq_sum,
             targets_config,
+            constraints,
         }
     }
 

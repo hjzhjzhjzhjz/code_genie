@@ -153,6 +153,10 @@ pub struct Metrics {
     pub equiv_cv: f64,
     /// 分布偏差
     pub dist_deviation: f64,
+    /// 编码种数（所有字根去重后的键位组合数）；未启用 `[constraints]` 时为 0。
+    /// `serde(default)` 让旧 checkpoint 仍可读取。
+    #[serde(default)]
+    pub encoding_count: usize,
 }
 
 /// 全码各指标的分数分量（用于日志输出，避免在日志代码中重复算分公式）

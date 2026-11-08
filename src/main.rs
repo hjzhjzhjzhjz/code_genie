@@ -1098,6 +1098,7 @@ fn run_evaluate(
         weights,
         TargetsConfig::default(),
         &cfg.keys.termination_keys,
+        cfg.constraints.clone().unwrap_or_default(),
     );
     ctx.display_order = cfg.keys.display_order.clone();
 
@@ -1557,6 +1558,12 @@ fn run_optimize(
         cfg.weights.full_code.distribution,
     );
     println!("用指分布输出顺序: {}", cfg.keys.display_order);
+    if let Some(c) = cfg.constraints.as_ref().filter(|c| c.enabled()) {
+        println!(
+            "编码种数约束: 上限 {}, 罚系数 {}（超出部分计入得分，达标为 0）",
+            c.max_encodings, c.encoding_penalty
+        );
+    }
 
     // 创建/复用输出目录
     let output_dir = match output_dir_opt {
@@ -1648,6 +1655,7 @@ fn run_optimize(
             weights,
             TargetsConfig::default(),
             &cfg.keys.termination_keys,
+            cfg.constraints.clone().unwrap_or_default(),
         );
 
         let initial_assignment = annealing::smart_init(&temp_ctx, cfg);
@@ -1703,6 +1711,7 @@ fn run_optimize(
                 weights,
                 targets_config,
                 &cfg.keys.termination_keys,
+                cfg.constraints.clone().unwrap_or_default(),
             )
         }
     };
@@ -2233,6 +2242,7 @@ fn run_resume(dir: &str, rng_seed: Option<u64>) {
         // #2：复用首轮写入的 targets，避免续算时因配置文件漂移导致评分口径“冻结”/不一致。
         resume_targets,
         &cfg.keys.termination_keys,
+        cfg.constraints.clone().unwrap_or_default(),
     );
     ctx.display_order = cfg.keys.display_order.clone();
     evaluator::log_bucket_backends(&ctx);
