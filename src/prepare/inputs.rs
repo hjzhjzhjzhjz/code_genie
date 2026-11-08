@@ -209,92 +209,23 @@ pub(crate) fn 声韵约束(
 
     // ---- 声码输出 ----
     // `声码键位` 存在时（星陈这类「统一候选键集」方案），按已生成的 `.0` 段顺序
-    // 排列，让 `.0` 的簇与 `.1` 的根上下对照。分两种写法：
+    // 排列，让 `.0` 的簇与 `.1` 的根上下对照；**每一行都写完整候选键集**，小码
+    // 完全交给退火在集合内分配，不按簇钉死单键。
     //
-    // - **簇内只有一根** → 写候选集（16 键），小码交退火在集合内分配，不固定；
-    // - **簇内多根** → 每根写固定单键，且同一簇内互不相同。
-    //
-    // 为什么必须分开：`load_fixed` 把同一行的多根建成一个 `RootGroup`，组内共享同一个
-    // `group_key`，退火只能整组同键。`.0` 同簇的根大码本来就同键，小码若再由退火归到
-    // 同键，就会得到「大小码完全相同」的死重码，算法无从避开。钉死成组内互不相同的
-    // 小码键后，同簇全码必然互异；跨簇重码仍由退火的重码惩罚处理。
+    // 历史行为曾把多根簇内的根钉成互不相同的单键，理由是 `load_fixed` 把 `.0` 同行
+    // 多根建为共享 `group_key` 的 `RootGroup`，组内大码必然同键；若小码也撞同键就
+    // 出现「大小码完全相同」的死重码。现在取消钉死以换取小码的完整自由度，代价是
+    // 这条硬保证消失——同簇根是否撞小码改由退火的重码惩罚驱散。
     // 声母钉死单键的方案（魔灵 / 灵明）不走这条分支，仍是一行一根。
-    if let Some(键集) = 方案.声码键位 {
+    if 方案.声码键位.is_some() {
         let 大码槽 = 声码槽
             .trim_end_matches(|c: char| c.is_ascii_digit())
             .to_owned()
             + "0";
-        let mut 内容表: HashMap<&str, &str> = HashMap::new();
-        for (根, 内容) in &声码行 {
-            内容表.insert(根.as_str(), 内容.as_str());
-        }
-        // 候选键序：按 `声码键位` 串的书写顺序，分散时依次挑全局负载最轻的键
-        let 键序: Vec<char> = 键集.chars().filter(|c| !c.is_whitespace()).collect();
-        // 全局负载：已固定的小码根各键计数，用于让多根簇的分散尽量均衡
-        let mut 负载: HashMap<char, usize> = HashMap::new();
-
-        let mut 已出: HashSet<String> = HashSet::new();
         // 单独跑第 9 步时 `字根约束.txt` 可能还没生成（第 8 步没跑过），
-        // 这时退化成按字根表顺序一行一根，与改造前的行为一致，不报错。
+        // 这时 `已有分组` 为空，函数退化为按字根表顺序一行一根，不报错。
         let 已有分组 = 上.读(names::字根约束).unwrap_or_default();
-        for 行 in 已有分组 {
-            let 列: Vec<&str> = 行.split('\t').collect();
-            if 列.len() < 2 {
-                continue;
-            }
-            // 只认本方案的大码槽；上一次跑留下的 `.1` 行等其它槽位自然被过滤掉
-            let 根们: Vec<&str> = 列[0]
-                .split_whitespace()
-                .filter_map(|t| t.strip_suffix(大码槽.as_str()))
-                .collect();
-            if 根们.is_empty() {
-                continue;
-            }
-            // 组内仍按内容分桶（星陈恒为一个桶），只为保持内容归类语义
-            let mut 桶: Vec<(&str, Vec<&str>)> = Vec::new();
-            for 根 in 根们 {
-                let Some(内容) = 内容表.get(根).copied() else {
-                    continue;
-                };
-                match 桶.iter_mut().find(|(c, _)| *c == 内容) {
-                    Some((_, v)) => v.push(根),
-                    None => 桶.push((内容, vec![根])),
-                }
-            }
-            // 去重后按桶顺序摊平，先知道本簇有几根，再决定写候选集还是固定单键
-            let 待出: Vec<(&str, &str)> = 桶
-                .into_iter()
-                .flat_map(|(内容, 根列表)| 根列表.into_iter().map(move |r| (内容, r)))
-                .filter(|(_, r)| !已出.contains(*r))
-                .collect();
-            if 待出.len() == 1 {
-                let (内容, 根) = 待出[0];
-                已出.insert(根.to_string());
-                出.push_str(&format!("{根}{声码槽}\t{内容}\n"));
-                continue;
-            }
-            let mut 已用: Vec<char> = Vec::new();
-            for (_, 根) in 待出 {
-                // 组内未用的键里挑全局负载最轻的；并列时按键序取先出现的，结果确定
-                let 键 = 键序
-                    .iter()
-                    .filter(|k| !已用.contains(k))
-                    .min_by_key(|k| 负载.get(k).copied().unwrap_or(0))
-                    .copied()
-                    .unwrap_or(键序[0]);
-                已用.push(键);
-                *负载.entry(键).or_insert(0) += 1;
-                已出.insert(根.to_string());
-                出.push_str(&format!("{根}{声码槽}\t{键}\n"));
-            }
-        }
-        // 没出现在 `.0` 段的根（正常不会发生）按原顺序兜底，避免丢条目
-        for (根, 内容) in &声码行 {
-            if 已出.contains(根.as_str()) {
-                continue;
-            }
-            出.push_str(&format!("{根}{声码槽}\t{内容}\n"));
-        }
+        出.push_str(&写小码行(&声码行, &已有分组, &大码槽, 声码槽));
     } else {
         for (根, 内容) in &声码行 {
             出.push_str(&format!("{根}{声码槽}\t{内容}\n"));
@@ -316,6 +247,49 @@ pub(crate) fn 声韵约束(
 
     出.push_str(&尾段);
     上.追加(names::字根约束, &出)
+}
+
+/// 生成小码段：按 `.0` 共键组的出现顺序逐根一行写出，每行都保留 `声码行` 里
+/// 的候选键集（星陈即 `声码键位` 全集），不把任何根钉成单键。
+///
+/// `已有分组` 只用于排序与去重；未出现在 `.0` 段的根按 `声码行` 原顺序兜底，
+/// 保证 `.1` 条目数恒等于应有根数，不会因为约束文件缺行而丢根。
+fn 写小码行(
+    声码行: &[(String, String)],
+    已有分组: &[String],
+    大码槽: &str,
+    声码槽: &str,
+) -> String {
+    let 内容表: HashMap<&str, &str> = 声码行
+        .iter()
+        .map(|(根, 内容)| (根.as_str(), 内容.as_str()))
+        .collect();
+    let mut 已出: HashSet<String> = HashSet::new();
+    let mut 出 = String::new();
+    for 行 in 已有分组 {
+        let 列: Vec<&str> = 行.split('\t').collect();
+        if 列.len() < 2 {
+            continue;
+        }
+        // 只认本方案的大码槽；上一次跑留下的 `.1` 行等其它槽位自然被过滤掉
+        let 根们 = 列[0]
+            .split_whitespace()
+            .filter_map(|t| t.strip_suffix(大码槽));
+        for 根 in 根们 {
+            let Some(内容) = 内容表.get(根).copied() else {
+                continue;
+            };
+            if 已出.insert(根.to_string()) {
+                出.push_str(&format!("{根}{声码槽}\t{内容}\n"));
+            }
+        }
+    }
+    for (根, 内容) in 声码行 {
+        if 已出.insert(根.clone()) {
+            出.push_str(&format!("{根}{声码槽}\t{内容}\n"));
+        }
+    }
+    出
 }
 
 /// 步骤 12：按编码规则把拆分展开成码位序列 `单字拆分.txt`
@@ -598,6 +572,32 @@ mod tests {
     fn 星陈单根重复小码() {
         let 表 = 码表(&[("一", "yi")]);
         assert_eq!(展开(&["一"], &表, &星陈), vec!["一.A", "一.S", "一.S"]);
+    }
+
+    #[test]
+    fn 小码全部写候选集且按大码簇排序() {
+        let 全集 = text::打散(星陈.声码键位.unwrap());
+        let 声码行: Vec<(String, String)> = ["乙", "己", "已", "巳", "巴"]
+            .iter()
+            .map(|r| (r.to_string(), 全集.clone()))
+            .collect();
+        let 分组 = vec![
+            "己.0 已.0 巳.0 巴.0\tq w e\n".to_string(),
+            "乙.0\tq w e\n".to_string(),
+            "己.1\tw\n".to_string(), // 上一次跑残留的 .1 行必须被忽略
+        ];
+        let 文本 = 写小码行(&声码行, &分组, ".0", ".1");
+        let 行: Vec<&str> = 文本.lines().collect();
+        assert_eq!(行.len(), 5, "每根一行，不能因分组去重丢根");
+        for (i, 根) in ["己", "已", "巳", "巴", "乙"].iter().enumerate() {
+            assert_eq!(行[i], format!("{根}.1\t{全集}").as_str());
+        }
+        assert!(
+            行.iter()
+                .all(|l| l.split('\t').nth(1) == Some(全集.as_str())),
+            "所有 .1 行必须是完整候选键集，不能有钉死单键"
+        );
+        assert_eq!(全集.split_whitespace().count(), 16);
     }
 
     #[test]
