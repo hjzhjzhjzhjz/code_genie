@@ -51,6 +51,7 @@ mod roots_cluster;
 mod run;
 mod schedule;
 mod sentence;
+mod shortcode;
 mod types;
 mod validate;
 mod zigen;
@@ -553,6 +554,33 @@ enum Commands {
         #[arg(long)]
         strict: bool,
     },
+
+    /// 给已经算完的输出目录补生成三级前缀简码（不重跑优化）
+    #[command(name = "shortcode")]
+    ShortCode {
+        /// 输出目录（含 完整码表.txt / 合并码表.txt）
+        #[arg(short = 'd', long)]
+        dir: String,
+
+        /// 字频表（字<TAB>…<TAB>字频）；缺省自动探测 inputs/ 下的拆分表、
+        /// 全字频表.txt，最后回退到内嵌全量拆分表
+        #[arg(long)]
+        freq: Option<String>,
+
+        /// 按「实际按键数」口径分配：未满 4 码的短码补一个 `_` 计键（三级简码 + 空格
+        /// = 4 键不省键故不分配，一级简码写成单字母）。等价于主配置
+        /// `[shortcode] padding_space = true`。本项目按「每级简码都带空格上屏」口径，
+        /// 优化测评「簡碼效率」统一用本档；测评源码该指标用纯编码长度，数值不可直接比。
+        /// 【缺省即本档】传 `--padding-space=false` 可切回旧的码串长度档。
+        #[arg(
+            long = "padding-space",
+            default_value_t = true,
+            num_args = 0..=1,
+            default_missing_value = "true",
+            action = clap::ArgAction::Set
+        )]
+        padding_space: bool,
+    },
 }
 
 // =========================================================================
@@ -674,6 +702,20 @@ fn main() {
             跳过页面: *no_page,
         };
         if let Err(e) = roots_chart::run(&参) {
+            eprintln!("❌ {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    // shortcode 只读产物文件与字频表，不依赖主配置（可对历史输出目录补生成）
+    if let Some(Commands::ShortCode {
+        dir,
+        freq,
+        padding_space,
+    }) = &cli.command
+    {
+        if let Err(e) = run_shortcode(dir, freq.as_deref(), *padding_space) {
             eprintln!("❌ {e}");
             std::process::exit(1);
         }
@@ -958,6 +1000,7 @@ fn main() {
         Some(Commands::Clusters { .. }) => unreachable!("clusters 已在加载配置前处理"),
         Some(Commands::Zigen { .. }) => unreachable!("zigen 已在加载配置前处理"),
         Some(Commands::Run { .. }) => unreachable!("run 已在加载配置前处理"),
+        Some(Commands::ShortCode { .. }) => unreachable!("shortcode 已在加载配置前处理"),
         None => {
             let cfg = 载入配置();
             run_optimize(
@@ -977,6 +1020,79 @@ fn main() {
 // =========================================================================
 // encode 子命令
 // =========================================================================
+
+/// 给已经算完的输出目录补生成三级前缀简码：不加载主配置、不重跑优化。
+fn run_shortcode(dir: &str, freq: Option<&str>, 补空格: bool) -> Result<(), String> {
+    let 全码路径 = format!("{dir}/完整码表.txt");
+    let 全码文本 =
+        std::fs::read_to_string(&全码路径).map_err(|e| format!("读 {全码路径} 失败: {e}"))?;
+    let (字频, 来源) = 探测字频(dir, freq)?;
+    let 条目 = shortcode::合成全码条目(&全码文本, &字频);
+    if 条目.is_empty() {
+        return Err(format!("{全码路径} 里没有可用的全码行"));
+    }
+    let 口径 = shortcode::码长口径::由开关(补空格);
+    let 结果 = shortcode::生成_按口径(&条目, 口径);
+    shortcode::打印统计(&结果.统计);
+    shortcode::保存(dir, &结果, &来源);
+    println!(
+        "已写入 {dir}/简码表.txt [{}]，简码段已并入 合并码表.txt（重复运行会替换旧段）",
+        口径.名称()
+    );
+    Ok(())
+}
+
+/// 字频来源优先级：显式 `--freq` > `inputs/` 下的拆分表（与退火同源）>
+/// `全字频表.txt` > 内嵌 `assets/拆分全表.txt`（口径不同，只作兜底）。
+fn 探测字频(dir: &str, 指定: Option<&str>) -> Result<(HashMap<char, u64>, String), String> {
+    if let Some(p) = 指定 {
+        let 文本 = std::fs::read_to_string(p).map_err(|e| format!("读字频表 {p} 失败: {e}"))?;
+        let 表 = shortcode::读字频(&文本);
+        if 表.is_empty() {
+            return Err(format!("{p} 里没解析到字频"));
+        }
+        return Ok((表, p.to_string()));
+    }
+
+    let inputs = format!("{dir}/inputs");
+    let mut 候选: Vec<String> = std::fs::read_dir(&inputs)
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| n.ends_with(".txt") && n.contains("拆分"))
+                .collect()
+        })
+        .unwrap_or_default();
+    // 优化用的拆分表优先，名字里带「全表」的排后面
+    候选.sort_by_key(|n| (n.contains("全表"), n.clone()));
+    for 名 in &候选 {
+        let p = format!("{inputs}/{名}");
+        if let Ok(文本) = std::fs::read_to_string(&p) {
+            let 表 = shortcode::读字频(&文本);
+            if !表.is_empty() {
+                return Ok((表, p));
+            }
+        }
+    }
+
+    let p = format!("{dir}/全字频表.txt");
+    if let Ok(文本) = std::fs::read_to_string(&p) {
+        let 表 = shortcode::读字频(&文本);
+        if !表.is_empty() {
+            return Ok((表, p));
+        }
+    }
+
+    let 全量 = crate::export_table::加载拆分表内容(内嵌拆分全表);
+    let 表: HashMap<char, u64> = 全量
+        .iter()
+        .filter_map(|(字, _, 频)| 字.chars().next().map(|c| (c, *频)))
+        .collect();
+    Ok((
+        表,
+        "内嵌 assets/拆分全表.txt（兜底：字频口径与优化不同）".to_string(),
+    ))
+}
 
 fn run_encode(division_path: &str, keymap_path: &str, output_path: &str) {
     println!("=== CodeGenie 编码模式 ===");
@@ -2023,11 +2139,31 @@ fn finalize_and_save(
 
     save_summary(cfg, &all_results, best_thread, output_dir, elapsed);
 
+    // 全码已定稿：后处理生成三级前缀简码（效率优先），不参与退火、不改全码评分。
+    let 简码统计 = if cfg.shortcode.enabled {
+        let s = output::save_shortcode_outputs(
+            ctx,
+            &best_assignment,
+            output_dir,
+            cfg.shortcode.码长口径(),
+        );
+        shortcode::打印统计(&s);
+        Some(s)
+    } else {
+        None
+    };
+
     println!("\n所有结果已保存至 {}/", output_dir);
     println!("  - 汇总.txt              汇总排名");
     println!("  - output-*.txt             全局最优结果");
     if 出了完整码表 {
         println!("  - 完整码表.txt           覆盖全部字的码表");
+    }
+    if 简码统计.is_some() {
+        println!(
+            "  - 简码表.txt             三级前缀简码 [{}]（已并入合并码表）",
+            cfg.shortcode.码长口径().名称()
+        );
     }
     println!("  - thread-XX/               各线程结果");
     if interrupted {

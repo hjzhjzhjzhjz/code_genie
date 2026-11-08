@@ -146,6 +146,34 @@ pub fn save_combined_from_full(
     crate::fsutil::write_output(format!("{}/合并码表.txt", dir), out);
 }
 
+/// 全码定稿后自动生成三级前缀简码（效率优先）：写 `简码表.txt`，并把简码段追加到
+/// 已有的 `合并码表.txt`。**不碰** `完整码表.txt`（字根图 / Rime / 句子解码按纯全码读它）。
+///
+/// 只喂优化字集（`ctx.raw_splits`）：字频与退火评分同源，避免和全量拆分表的另一套
+/// 字频混用；只在全量表里出现的冷僻字不参与分配，也不会白占前缀位。
+///
+/// `口径` 来自 `[shortcode] padding_space`，决定短码要不要按测评「补空格」计键。
+pub fn save_shortcode_outputs(
+    ctx: &OptContext,
+    assignment: &[u8],
+    dir: &str,
+    口径: crate::shortcode::码长口径,
+) -> crate::shortcode::简码统计 {
+    let 字根表 = 根键位串(ctx, assignment);
+    let mut 条目 = Vec::with_capacity(ctx.raw_splits.len());
+    for (i, (ch, roots, _)) in ctx.raw_splits.iter().enumerate() {
+        if let Ok(code) = 按槽位取码(roots, &字根表) {
+            if !code.is_empty() {
+                条目.push((*ch, code, ctx.char_infos[i].frequency));
+            }
+        }
+    }
+    let 结果 = crate::shortcode::生成_按口径(&条目, 口径);
+    let 统计 = 结果.统计.clone();
+    crate::shortcode::保存(dir, &结果, "files.splits（优化字集字频，与退火评分同源）");
+    统计
+}
+
 /// 根 → 键位串（首字母大写、小码小写），与「字根键位表.txt」同口径
 fn 根键位串(ctx: &OptContext, assignment: &[u8]) -> HashMap<String, String> {
     let mut 表: HashMap<String, String> = HashMap::new();

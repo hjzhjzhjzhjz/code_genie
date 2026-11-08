@@ -24,6 +24,59 @@ pub struct Config {
     pub targets: Option<TargetsConfig>, // 可选，缺失则使用默认（disabled）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub constraints: Option<ConstraintsConfig>, // 可选，缺失则不启用任何结构约束
+    /// 全码算完后的三级前缀简码后处理；缺省启用。
+    /// 不用 `Option`：这里「没写这段」表示**开**，与 `constraints` 的「没写 = 关」相反。
+    #[serde(default)]
+    pub shortcode: ShortCodeConfig,
+}
+
+/// 三级前缀简码后处理（可选 `[shortcode]` 段）
+///
+/// 只在全码定稿后跑一次，不参与退火、不改变全码评分。
+/// `enabled = false` 可回到「纯全码、不写简码表」的旧行为。
+///
+/// `padding_space` 切换「上屏码长」口径：
+///   · `false` 按码表字符串长度计，一级简码写作 `a_`（2 键）；接近测评
+///     「簡碼效率加權碼長」的纯编码长度口径。
+///   · `true`（缺省）按实际按键数计——短码补一个 `_`（测评按键表规则），一级简码
+///     改写成单字母 `a`（补成 `a_`），三级简码因不省键而不再分配；对应测评
+///     「速度当量/按键数」链路。
+/// 两档的码长数值不可直接比较，且都不改变全码评分。
+///
+/// 本项目口径（用户 2026-11-08 明确）：一/二/三级简码上屏都要按一次空格，三级简码
+/// `abc` + 空格 = 4 键、与全码持平，本来就不省键。因此「优化测评簡碼效率」统一采用
+/// 补空格档，配置缺省即为 `true`；要回到旧的码串长度档，显式写 `false` 或给独立
+/// 命令传 `--padding-space=false`。`output-v8-enc210-40m/` 的测评码表已按此生成。
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ShortCodeConfig {
+    #[serde(default = "default_shortcode_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_shortcode_padding_space")]
+    pub padding_space: bool,
+}
+
+fn default_shortcode_enabled() -> bool {
+    true
+}
+
+fn default_shortcode_padding_space() -> bool {
+    true
+}
+
+impl Default for ShortCodeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            padding_space: true,
+        }
+    }
+}
+
+impl ShortCodeConfig {
+    /// 转换成短码模块的口径枚举
+    pub fn 码长口径(&self) -> crate::shortcode::码长口径 {
+        crate::shortcode::码长口径::由开关(self.padding_space)
+    }
 }
 
 /// 结构约束（`[constraints]` 段，可选）
@@ -491,6 +544,7 @@ impl Default for Config {
             scale: None,
             targets: None,
             constraints: None,
+            shortcode: ShortCodeConfig::default(),
         }
     }
 }
@@ -574,6 +628,44 @@ distribution = 0.2
         );
         let cfg: Config = toml::from_str(&toml_str).expect("旧配置应能被忽略简码段后解析");
         assert_eq!(cfg.annealing.total_steps, 100);
+    }
+
+    // -----------------------------------------------------------------------
+    // 三级前缀简码后处理开关
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn 简码后处理缺省启用_补空格档为默认_可显式关闭() {
+        let 缺省: Config = toml::from_str(minimal_config_prefix()).expect("解析失败");
+        assert!(缺省.shortcode.enabled, "没写 [shortcode] 时应默认启用");
+        assert!(
+            缺省.shortcode.padding_space,
+            "本项目口径：没写 padding_space 时应默认补空格档"
+        );
+        assert_eq!(
+            缺省.shortcode.码长口径(),
+            crate::shortcode::码长口径::补空格
+        );
+        let 关闭: Config = toml::from_str(&format!(
+            "{}\n[shortcode]\nenabled = false\npadding_space = false\n",
+            minimal_config_prefix()
+        ))
+        .expect("解析失败");
+        assert!(!关闭.shortcode.enabled);
+        assert!(!关闭.shortcode.padding_space);
+        assert_eq!(
+            关闭.shortcode.码长口径(),
+            crate::shortcode::码长口径::码串长度
+        );
+    }
+
+    #[test]
+    fn 规范示例配置能解析且默认补空格档() {
+        let 路径 = format!("{}/config.ron.example", env!("CARGO_MANIFEST_DIR"));
+        let cfg = Config::load_from_path(&路径).expect("规范示例配置应能解析");
+        assert!(cfg.shortcode.enabled);
+        assert!(cfg.shortcode.padding_space);
+        assert_eq!(cfg.shortcode.码长口径(), crate::shortcode::码长口径::补空格);
     }
 
     // -----------------------------------------------------------------------
