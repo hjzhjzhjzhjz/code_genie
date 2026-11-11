@@ -12,7 +12,7 @@
 //     用词频做 Viterbi，衡量词组能不能帮忙、以及三码字会不会把对齐带歪。
 //
 // 两者默认都不依赖 librime：词典吃 Rime 的 dict.yaml，也吃纯 TSV
-// （`完整码表.txt` / `export` 的 `全码表.txt`），权重就是字频/词频，
+// （`完整码表.txt` / 纯全码 TSV），权重就是字频/词频，
 // 结果可复现，也不受外部库版本影响。给了 `--decoder` 才会调外部 librime 解码器。
 // =========================================================================
 
@@ -52,7 +52,7 @@ struct 条目 {
 ///
 /// 两种输入都吃：
 /// - Rime `dict.yaml`：头部跳过，`...` 之后才是数据；
-/// - 纯 TSV（`完整码表.txt` / `export` 的 `全码表.txt`）：没有 `...` 头行，整文件当数据。
+/// - 纯 TSV（`完整码表.txt` / 其它纯全码表）：没有 `...` 头行，整文件当数据。
 ///
 /// 无头行时，靠「必须含 TAB 且不以 `#` 开头」把 `---` / `name:` 之类的行滤掉。
 fn 读词典(路径: &Path) -> Vec<(String, String, u64)> {
@@ -60,7 +60,15 @@ fn 读词典(路径: &Path) -> Vec<(String, String, u64)> {
         eprintln!("⚠️ 读不了词典 {}", 路径.display());
         return Vec::new();
     };
-    let 行们: Vec<&str> = 文本.lines().collect();
+    // 纯 TSV（`完整码表.txt`）的简码置顶且无注释，先剥掉简码再当数据；
+    // Rime dict.yaml 有 `...` 头行，保持原样（含多字词、同字多码）。
+    let 有无头行 = 文本.lines().any(|l| l.trim() == "...");
+    let 数据文本 = if 有无头行 {
+        文本
+    } else {
+        crate::shortcode::剥离简码段(&文本)
+    };
+    let 行们: Vec<&str> = 数据文本.lines().collect();
     // 有 `...` 头行 → 之后才是数据；没有 → 整文件当数据
     let 起 = match 行们.iter().position(|l| l.trim() == "...") {
         Some(i) => i + 1,
@@ -68,6 +76,10 @@ fn 读词典(路径: &Path) -> Vec<(String, String, u64)> {
     };
     let mut 出 = Vec::new();
     for 行 in &行们[起..] {
+        if 行.starts_with(crate::shortcode::简码段标记) {
+            // 兼容历史产物：尾部带标记的简码段，整句解码只吃纯全码段。
+            break;
+        }
         if 行.starts_with('#') {
             continue;
         }
@@ -507,6 +519,16 @@ mod 词典读取测试 {
         assert_eq!(表.len(), 2, "无 `...` 时应把整文件当数据");
         assert_eq!(表[0].0, "到");
         assert_eq!(表[1].1, "fyek");
+    }
+
+    #[test]
+    fn 简码置顶时只读全码() {
+        // 完整码表新格式：短码在最前、无注释；整句解码不能把简码当全码
+        let p = 写临时文件("e.txt", "的\tk\n的\tfyek\n一\tg\n一\tgkk\n");
+        let 表 = 读词典(&p);
+        assert_eq!(表.len(), 2);
+        assert_eq!(表[0].1, "fyek");
+        assert_eq!(表[1].1, "gkk");
     }
 
     #[test]

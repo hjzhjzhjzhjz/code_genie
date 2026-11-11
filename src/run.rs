@@ -52,7 +52,7 @@ pub struct 参数 {
     pub 素材目录: Option<String>,
     /// 输出目录；`None` 时用 `<方案>-output/output-<时间戳>`（相对工作目录）
     pub 输出目录: Option<String>,
-    /// 断点续算（走 `resume` 而不是 `optimize`）
+    /// 断点续算（走 `optimize --resume`）
     pub 续算: bool,
     /// 备注；`None` 时交互式提问
     pub 备注: Option<String>,
@@ -90,7 +90,7 @@ pub fn run(参: &参数) -> Result<(), String> {
 
     if 参.续算 && 参.输出目录.is_none() {
         return Err(
-            "resume 必须用 -d 指定既有的 output 目录（不会自动新建一个空目录再续算）".to_string(),
+            "断点续算必须用 -d 指定既有的 output 目录（不会自动新建一个空目录再续算）".to_string(),
         );
     }
 
@@ -452,19 +452,22 @@ fn 准备任务(自身: &Path, 方案名: &str, 素材: &Path, 显式素材: boo
     }
 }
 
-/// `-c <配置> (optimize|resume) -d <输出> [种子参数]`
+/// `-c <配置> optimize [--resume] -d <输出> [种子参数]`
 fn 优化任务(自身: &Path, 配置: &str, 输出: &str, 参: &参数) -> 任务 {
     let mut 参数 = vec!["-c".to_string(), 配置.to_string()];
-    // --rng-seed 是 Cli 上的全局参数，必须放在子命令之前；resume 也吃这个参数。
+    // --rng-seed 是 Cli 上的全局参数，必须放在子命令之前；续算模式也吃这个参数。
     if let Some(s) = 参.随机种子 {
         参数.push("--rng-seed".to_string());
         参数.push(s.to_string());
     }
-    参数.push(if 参.续算 { "resume" } else { "optimize" }.to_string());
+    参数.push("optimize".to_string());
+    if 参.续算 {
+        参数.push("--resume".to_string());
+    }
     参数.push("-d".to_string());
     参数.push(输出.to_string());
 
-    // resume 不接受种子/尺度参数，给了也只会被忽略，索性不传
+    // 续算模式不接受播种/尺度参数，给了也只会被忽略，索性不传
     if !参.续算 {
         for (旗, 值) in [
             ("--seed-dir", &参.播种目录),
@@ -788,7 +791,7 @@ mod tests {
         );
     }
 
-    /// resume 不吃播种目录/尺度（但接受全局 --rng-seed），拼进去只会让参数看着像生效了
+    /// 续算模式不吃播种目录/尺度（但接受全局 --rng-seed），拼进去只会让参数看着像生效了
     #[test]
     fn 续算命令不带种子与尺度() {
         let 自身 = Path::new("/tmp/code_genie");
@@ -797,10 +800,10 @@ mod tests {
         参.播种目录 = Some("old".to_string());
         参.尺度 = Some("尺度.json".to_string());
         let 文 = 优化任务(自身, "config.ron", "out-1", &参).渲染();
-        assert_eq!(文, "code_genie -c config.ron resume -d out-1");
+        assert_eq!(文, "code_genie -c config.ron optimize --resume -d out-1");
     }
 
-    /// --rng-seed 是 Cli 上的全局参数：必须排在子命令之前，resume 也接受它。
+    /// --rng-seed 是 Cli 上的全局参数：必须排在子命令之前，续算模式也接受它。
     #[test]
     fn 固定种子排在子命令之前且续算也透传() {
         let 自身 = Path::new("/tmp/code_genie");
@@ -813,7 +816,10 @@ mod tests {
         );
         参.续算 = true;
         let 文 = 优化任务(自身, "config.ron", "out-1", &参).渲染();
-        assert_eq!(文, "code_genie -c config.ron --rng-seed 42 resume -d out-1");
+        assert_eq!(
+            文,
+            "code_genie -c config.ron --rng-seed 42 optimize --resume -d out-1"
+        );
     }
 
     #[test]

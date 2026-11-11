@@ -29,11 +29,6 @@ on:
         required: false
         default: runs/s4-export/output-keymap.txt
         type: string
-      simple:
-        description: 简码表（仓库内路径，可留空）
-        required: false
-        default: runs/s4-export/output-simple-codes.txt
-        type: string
 
 permissions:
   contents: read
@@ -122,19 +117,16 @@ jobs:
           PY
 
       # ---- 手动模式：只测给定的一份码表 ----
-      - name: 导出码表
+      - name: 准备码表（直接用 optimize 产出的 完整码表.txt）
         if: github.event_name == 'workflow_dispatch' && inputs.run_id == ''
         env:
           KEYMAP: ${{ inputs.keymap }}
-          SIMPLE: ${{ inputs.simple }}
         run: |
+          set -euo pipefail
           mkdir -p out-assess
-          ARG=""
-          if [ -n "$SIMPLE" ]; then ARG="--simple $SIMPLE"; fi
-          ./target/release/code_genie export \
-            --keymap "$KEYMAP" --chaifen moling/拆分全表.txt $ARG \
-            --output out-assess/全码表.txt
-          wc -l < out-assess/全码表.txt
+          # optimize 收尾已产出「简码置顶 + 全码段」的完整码表，与 keymap 同目录。
+          cp "$(dirname "$KEYMAP")/完整码表.txt" out-assess/完整码表.txt
+          wc -l < out-assess/完整码表.txt
 
       - name: 跑测评（单表）
         if: github.event_name == 'workflow_dispatch' && inputs.run_id == ''
@@ -142,6 +134,7 @@ jobs:
           set -e
           ./target/release/code_genie assess \
             --dir out-assess \
+            --file-name 完整码表.txt \
             --scheme codegenie-s4.jsonc \
             --yuhao-dir yuhao-assess \
             --keep out-assess/结果 \
@@ -165,11 +158,12 @@ jobs:
         run: |
           echo "### 参与对比的码表" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          find artifacts -name 全码表.txt | sort | tee -a "$GITHUB_STEP_SUMMARY"
+          find artifacts -name 完整码表.txt | sort | tee -a "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           ./target/release/code_genie assess \
             --dir artifacts \
+            --file-name 完整码表.txt \
             --scheme codegenie-s4.jsonc \
             --yuhao-dir yuhao-assess \
             --keep artifacts/结果 \
@@ -186,8 +180,7 @@ jobs:
           set -e
           K=runs/s4-export/output-keymap.txt
           C=moling/拆分全表.txt
-          S=runs/s4-export/output-simple-codes.txt
-          ./target/release/code_genie pipeline --keymap "$K" --chaifen "$C" --simple "$S" \
+          ./target/release/code_genie pipeline --keymap "$K" --chaifen "$C" \
             --fixed moling/字根约束.txt --chars "$CHARS" --top 5 --output 流水线.md
           args=()
           while IFS= read -r line; do
@@ -195,21 +188,11 @@ jobs:
             args+=(--rules "$line")
           done <<< "$MERGES"
           if [ ${#args[@]} -gt 0 ]; then
-            ./target/release/code_genie merge --keymap "$K" --chaifen "$C" --simple "$S" \
+            ./target/release/code_genie pipeline --keymap "$K" --chaifen "$C" \
               "${args[@]}" --out 归并对比 --summary 归并.md
             cat 归并.md >> "$GITHUB_STEP_SUMMARY"
           fi
           cat 流水线.md >> "$GITHUB_STEP_SUMMARY"
-
-      - name: 形码测评诊断
-        run: |
-          set -e
-          if [ -d artifacts ]; then TARGET=artifacts; else TARGET=out-assess; fi
-          ./target/release/code_genie diagnose \
-            --dir "$TARGET" \
-            --data ceping-data \
-            --summary 诊断.md
-          if [ -f 诊断.md ]; then cat 诊断.md >> "$GITHUB_STEP_SUMMARY"; fi
 
       - name: 补连续文本当量
         run: |
@@ -236,7 +219,6 @@ jobs:
             artifacts/
             方案档案/
             汇总.md
-            诊断.md
             流水线.md
             归并.md
             归并对比/

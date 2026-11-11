@@ -4,14 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       keymap:
-        description: 键位映射文件（仓库内路径）
+        description: 键位映射文件（仓库内路径；同目录需有 optimize 产出的 完整码表.txt）
         required: true
         default: runs/s4-export/output-keymap.txt
-        type: string
-      simple:
-        description: 简码表（仓库内路径，留空表示不导简码）
-        required: false
-        default: runs/s4-export/output-simple-codes.txt
         type: string
       chaifen:
         description: 纯拆分表（仓库内路径）
@@ -62,38 +57,37 @@ jobs:
           set -euo pipefail
           ./target/release/code_genie prepare --dir moling
 
-      - name: 导出码表
+      - name: 提取完整码表（optimize 已产出，无需再导）
         env:
           KEYMAP: ${{ inputs.keymap }}
-          SIMPLE: ${{ inputs.simple }}
-          CHAIFEN: ${{ inputs.chaifen }}
           OUT_NAME: ${{ inputs.out_name }}
         run: |
-          set -o pipefail
-          if [ -n "$SIMPLE" ]; then
-            ./target/release/code_genie export \
-              --keymap "$KEYMAP" --chaifen "$CHAIFEN" --simple "$SIMPLE" --output "$OUT_NAME"
-          else
-            ./target/release/code_genie export \
-              --keymap "$KEYMAP" --chaifen "$CHAIFEN" --output "$OUT_NAME"
-          fi
+          set -euo pipefail
+          cp "$(dirname "$KEYMAP")/完整码表.txt" "$OUT_NAME"
           echo "--- 前 6 行 ---"
           head -n 6 "$OUT_NAME"
           echo "--- 行数 ---"
           wc -l < "$OUT_NAME"
 
-      - name: 生成字根图
+      - name: 生成字根表页面（完整分页）
         if: always()
         env:
           KEYMAP: ${{ inputs.keymap }}
+          CHAIFEN: ${{ inputs.chaifen }}
           MAPPING: ${{ inputs.mapping }}
         run: |
-          if [ -z "$MAPPING" ]; then
-            ./target/release/code_genie chart --keymap "$KEYMAP" --output 字根图.html
-          else
-            ./target/release/code_genie chart --keymap "$KEYMAP" --mapping "$MAPPING" --output 字根图.html
+          set -euo pipefail
+          # chart -d 要求目录内齐备 output-keymap.txt / 拆分全表.txt / 全字频表.txt；
+          # 后两者由上面的 prepare 步骤产出，故这里只做拼装。
+          mkdir -p 字根图
+          cp "$KEYMAP" 字根图/output-keymap.txt
+          cp "$CHAIFEN" 字根图/拆分全表.txt
+          cp moling/全字频表.txt 字根图/全字频表.txt
+          if [ -n "$MAPPING" ] && [ -f "$MAPPING" ]; then
+            cp "$MAPPING" 字根图/roots-mapping.tsv
           fi
-          ls -l 字根图.html
+          ./target/release/code_genie chart -d 字根图
+          ls -l 字根图/
 
       - name: 上传码表
         if: always()
@@ -103,6 +97,6 @@ jobs:
           path: |
             ${{ inputs.out_name }}
             build.log
-            字根图.html
+            字根图/
           if-no-files-found: warn
           retention-days: 14

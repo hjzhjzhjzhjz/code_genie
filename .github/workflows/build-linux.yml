@@ -93,7 +93,7 @@ jobs:
                     moling/单字拆分.txt moling/字根声韵.txt \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - name: 功能冒烟（全子命令 + 真实数据跑通导出）
+      - name: 功能冒烟（全子命令 + 真实数据跑通取码链路）
         run: |
           set -e
           CG=./target/release/code_genie
@@ -101,12 +101,12 @@ jobs:
           $CG --version
           echo "--- 子命令清单（应含全部功能）---"
           $CG --help
-          echo "--- 导出冒烟（真实数据）---"
-          $CG -c config.ron export \
+          echo "--- 取码链路冒烟（真实数据）---"
+          $CG pipeline \
             --keymap runs/s4-export/output-keymap.txt \
             --chaifen moling/拆分全表.txt \
-            --output /tmp/全码表.txt
-          wc -l < /tmp/全码表.txt
+            --chars "的 一" --output /tmp/流水线.md
+          wc -l < /tmp/流水线.md
 
       - name: 优化冒烟（内嵌当量/用指分布 + 5000 步）
         run: |
@@ -149,7 +149,6 @@ jobs:
               dst.parent.mkdir(parents=True, exist_ok=True)
               shutil.copy2(f, dst)
 
-          shutil.copytree("ceping-data", pkg / "ceping-data")
           shutil.copytree("yuhao-data", pkg / "yuhao-data")
 
           # 宇浩测评：源码（不含 .git），并把测评数据放进它的 public/
@@ -212,36 +211,30 @@ jobs:
               "                                          退火优化（改 config.ron 的",
               "                                          [annealing] threads / total_steps）",
               "  中途按 Ctrl-C 会写 checkpoint，之后",
-              "  ./code_genie resume -d out              断点续算",
-              "  ./code_genie export -k out/字根键位表.txt -c moling/拆分全表.txt -o 全码表.txt",
-              "                                          导出码表（有简码表加 -s）",
-              "  ./code_genie chart -k out/字根键位表.txt -o 字根图.html",
-              "                                          字根图",
+              "  ./code_genie optimize --resume -d out   断点续算",
+              "  optimize 收尾会自动产出 out/完整码表.txt（简码置顶 + 全码段），",
+              "                                          测评直接用它，无需另行导出码表",
+              "  ./code_genie chart -d out              生成字根表页面（完整分页）",
+              "                                          out/ 需含 output-keymap.txt / 拆分全表.txt / 全字频表.txt",
               "",
               "宇浩测评（一键）",
-              "  先把要测的码表放进一个目录（如 out/全码表.txt，可含简码表.txt），然后",
+              "  先把要测的码表放进一个目录（如 out/完整码表.txt），然后",
               "  bash 宇浩测评.sh out",
               "  结果：out/汇总.md（五套字频速度/码长、选重、方案档案）",
               "  首次会自动 pnpm install（bash 宇浩测评-准备.sh 可单独执行）",
               "",
               "子命令一览",
               "  optimize   模拟退火优化（核心）",
-              "  encode     根据 keymap 为汉字编码",
-              "  evaluate   全方位评估编码方案",
-              "  resume     从 checkpoint 断点续算",
-              "  export     导出测评用码表（字 TAB 码）",
+              "  encode     编码 / 导出测评码表（-c 拆分全表）",
               "  chart      字根键位图（HTML）",
               "  assess     宇浩测评对比（yuhao-assess 已含在包内）",
               "  rime-convert  以星月方案包为底包只换码",
-              "  pipeline   拆分流水线展示",
-              "  merge      字根归并对比",
-              "  diagnose   码表诊断（ceping-data 在包内）",
+              "  pipeline   取码推导 / 归并对比（--rules）",
               "  sentence   整句准确率（语料：yuhao-assess/public/texts/literature.txt）",
               "",
               "数据目录",
               "  moling/          prepare 产物（字根约束/单字拆分/字根声韵/拆分全表）",
               "  yuhao-data/      prepare 输入（星摩/字集字典）与宇浩测评数据源",
-              "  ceping-data/     诊断用的当量/字频/词表",
               "  yuhao-assess/    宇浩测评 CLI 源码与数据（public/ 已含测评数据与语料；",
               "                   node_modules 首次 pnpm install 生成）",
           ]
@@ -260,9 +253,11 @@ jobs:
           rm -rf /tmp/yh && cp -r code_genie-linux-x86_64/yuhao-assess /tmp/yh
           (cd /tmp/yh && pnpm install --frozen-lockfile 2>&1 | tail -n 3)
           mkdir -p /tmp/assess-dir
-          cp /tmp/全码表.txt /tmp/assess-dir/
+          # 优化冒烟已产出 /tmp/tiny-out/完整码表.txt（简码置顶 + 全码段）
+          cp /tmp/tiny-out/完整码表.txt /tmp/assess-dir/
           ./target/release/code_genie -c config.ron assess \
             --dir /tmp/assess-dir \
+            --file-name 完整码表.txt \
             --scheme codegenie-s4.jsonc \
             --yuhao-dir /tmp/yh \
             --summary /tmp/测评.md

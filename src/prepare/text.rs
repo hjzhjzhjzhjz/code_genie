@@ -59,13 +59,12 @@ pub fn 是汉字(c: char) -> bool {
     )
 }
 
-/// 读取字根映射表（花括号名 → 显示字），`root_chart` / `roots_chart` 共用。
+/// 读取字根映射表（花括号名 → 显示字），供 `chart -d` 的完整分页页面使用。
 ///
 /// 兼容 tab 与任意空白分隔，跳过空行和 `#` 注释；同名只留最后一条（与 perl 版
 /// 一致）。映射表是可选的展示层数据，读不到时返回空表，不阻断主流程。
 ///
-/// 此前 `root_chart` 按 `split('\t')`、`roots_chart` 按 `split_whitespace()` 各写
-/// 了一份，连分隔符口径都不一样；统一后两者都能读同一份 tsv。
+/// 统一成兼容 tab 与任意空白分隔，供 `chart -d` 读同一份 tsv。
 pub fn 加载映射(path: &Path) -> HashMap<String, String> {
     let mut 表 = HashMap::new();
     let Ok(文本) = fs::read_to_string(path) else {

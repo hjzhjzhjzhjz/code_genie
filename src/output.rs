@@ -100,10 +100,14 @@ pub fn write_keymap_output(
     }
 }
 
-pub fn save_combined_code_output(ctx: &OptContext, assignment: &[u8], dir: &str) {
+/// 没有全量拆分表时的兜底：用优化字集出一份 `完整码表.txt`（纯全码段）。
+///
+/// 只在收尾判定「不生成全量码表」时调用，保证 `完整码表.txt` 始终存在，
+/// 后续 `shortcode::保存` 才能把三级简码段并进同一份文件。
+pub fn save_full_code_from_optimize_set(ctx: &OptContext, assignment: &[u8], dir: &str) {
     let mut out = String::new();
 
-    // 全码部分 - 所有字都输出全码（按槽位直取，与单字编码表同口径）
+    // 全码部分 - 所有字都输出全码（按槽位直取，与单字全码编码同口径）
     let 字根表 = 根键位串(ctx, assignment);
     let n_chars = ctx.char_infos.len();
     let mut sorted_chars: Vec<usize> = (0..n_chars).collect();
@@ -122,32 +126,11 @@ pub fn save_combined_code_output(ctx: &OptContext, assignment: &[u8], dir: &str)
         }
     }
 
-    crate::fsutil::write_output(format!("{}/合并码表.txt", dir), out);
-}
-
-/// 合并码表（覆盖全部字）：全量拆分表按星月 encoder 出的全码段。
-///
-/// 与 `完整码表.txt` 同口径（`rime_convert::单字码`），覆盖全量拆分表里的所有字。
-pub fn save_combined_from_full(
-    ctx: &OptContext,
-    assignment: &[u8],
-    全量: &[(String, Vec<String>, u64)],
-    dir: &str,
-) {
-    let mut out = String::new();
-    let 字根表 = 根键位串(ctx, assignment);
-    for (字, 根们, _) in 全量 {
-        if let Ok(code) = crate::rime_convert::单字码(根们, &字根表) {
-            if !code.is_empty() {
-                out.push_str(&format!("{}\t{}\n", 字, code));
-            }
-        }
-    }
-    crate::fsutil::write_output(format!("{}/合并码表.txt", dir), out);
+    crate::fsutil::write_output(format!("{}/完整码表.txt", dir), out);
 }
 
 /// 全码定稿后自动生成三级前缀简码（效率优先）：写 `简码表.txt`，并把简码段追加到
-/// 已有的 `合并码表.txt`。**不碰** `完整码表.txt`（字根图 / Rime / 句子解码按纯全码读它）。
+/// 已有的 `完整码表.txt`。所有码表只出这一份，不再另写 `合并码表.txt`。
 ///
 /// 只喂优化字集（`ctx.raw_splits`）：字频与退火评分同源，避免和全量拆分表的另一套
 /// 字频混用；只在全量表里出现的冷僻字不参与分配，也不会白占前缀位。
@@ -170,7 +153,13 @@ pub fn save_shortcode_outputs(
     }
     let 结果 = crate::shortcode::生成_按口径(&条目, 口径);
     let 统计 = 结果.统计.clone();
-    crate::shortcode::保存(dir, &结果, "files.splits（优化字集字频，与退火评分同源）");
+    let 字频: HashMap<char, u64> = 条目.iter().map(|(c, _, f)| (*c, *f)).collect();
+    crate::shortcode::保存(
+        dir,
+        &结果,
+        &字频,
+        "files.splits（优化字集字频，与退火评分同源）",
+    );
     统计
 }
 
@@ -263,7 +252,7 @@ pub fn save_thread_results(
 
     save_key_distribution_to_dir(ctx, assignment, &thread_dir);
     save_equiv_distribution_to_dir(ctx, assignment, &thread_dir);
-    save_combined_code_output(ctx, assignment, &thread_dir);
+    // 码表统一只出根目录那一份 `完整码表.txt`，各线程目录不再另写合并码表。
 }
 
 /// 保存键位分布到目录
@@ -401,12 +390,8 @@ pub fn save_results(
 
     save_key_distribution_to_dir(ctx, assignment, output_dir);
     save_equiv_distribution_to_dir(ctx, assignment, output_dir);
-    save_combined_code_output(ctx, assignment, output_dir);
 
-    println!(
-        "结果已保存至 {}/字根键位表.txt, 合并码表.txt 等",
-        output_dir
-    );
+    println!("结果已保存至 {}/字根键位表.txt 等", output_dir);
 }
 
 /// 缺根诊断里最多列出几个字根
@@ -436,14 +421,17 @@ pub(crate) fn 全量码表文本(
     全量拆分: &[(String, Vec<String>, u64)],
 ) -> (String, 全量码表统计) {
     let 字根表 = 根键位串(ctx, assignment);
-    let mut 全码段 = String::with_capacity(全量拆分.len() * 16);
+    // 先编码再按字频降序排序：宇浩测评「動態選重率（原始碼表）」按码表文件行序
+    // 取重码组首选字，高频字排前才能让该口径与「頻率降序」口径一致地吃到位。
+    // 同频时按码、字升序，保证输出确定可复现。
+    let mut 编码行: Vec<(&String, String, u64)> = Vec::with_capacity(全量拆分.len());
     let mut 全条 = 0usize;
     let mut 缺根 = 0usize;
     let mut 缺根计数: HashMap<&str, usize> = HashMap::new();
-    for (字, 根们, _) in 全量拆分 {
+    for (字, 根们, 频) in 全量拆分 {
         match crate::rime_convert::单字码(根们, &字根表) {
             Ok(code) if !code.is_empty() => {
-                全码段.push_str(&format!("{}\t{}\n", 字, code));
+                编码行.push((字, code, *频));
                 全条 += 1;
             }
             _ => {
@@ -454,6 +442,15 @@ pub(crate) fn 全量码表文本(
                 }
             }
         }
+    }
+    编码行.sort_by(|a, b| {
+        b.2.cmp(&a.2)
+            .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| a.0.cmp(b.0))
+    });
+    let mut 全码段 = String::with_capacity(全量拆分.len() * 16);
+    for (字, 码, _) in &编码行 {
+        全码段.push_str(&format!("{}\t{}\n", 字, 码));
     }
 
     let mut 缺失字根: Vec<(String, usize)> = 缺根计数

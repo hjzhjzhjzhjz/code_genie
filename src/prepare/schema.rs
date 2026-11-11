@@ -137,7 +137,7 @@ pub const 星陈: 方案 = 方案 {
     韵码: 韵码来源::无,
     混合字频权重: 0.1,
     最大码长: 4,
-    全部字根键位: "qwertyuiopasdfghjklxcvbnm",
+    全部字根键位: "qwertyuiopsdfghjklxcvbnm",
     声码键位: Some("weisdfjklmvnhgur"),
     小码恒有: true,
     优化键: &[],

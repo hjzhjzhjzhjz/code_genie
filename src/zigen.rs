@@ -5,7 +5,7 @@
 // 取代 `moling/generate-root-chart.sh` 里**纯数据**的那几步。脚本的 8 个产物中，
 // 已有 Rust 同口径实现的一律不搬：
 //
-//   roots.tsv      → `chart`（`root_chart::生成字根表`，同一套 keymap 解析与排序键）
+//   roots.tsv      → `chart -d`（`roots_chart::生成字根表文本`，同一套 keymap 解析）
 //   chaifen.tsv    → `拆分全表.txt` 去掉频次列，`loader` 直接读原表
 //   mabiao.tsv     → `export`（`export_table`，支持 `--schema` 三套取码规则，
 //                                并打印全码长 / 动重）

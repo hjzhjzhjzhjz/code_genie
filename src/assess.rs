@@ -989,8 +989,6 @@ fn 生成方案档案(
             if let Some(m) = 参.as_object_mut() {
                 m.entry("選重編碼化".to_string())
                     .or_insert_with(|| json!(false));
-                m.entry("出簡不出全".to_string())
-                    .or_insert_with(|| json!(false));
                 m.entry("最大碼長".to_string()).or_insert_with(|| json!(4));
             }
         }

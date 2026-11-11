@@ -24,19 +24,15 @@ cargo run --release -- -c config.ron optimize -d out
 # 固定随机种子（同配置 + 同种子 + 同线程数逐位复现；全局参数须放在子命令前）
 cargo run --release -- -c config.ron --rng-seed 42 optimize -d out
 
-# 断点续算 / 编码 / 评估
-cargo run --release -- resume -d out
-cargo run --release -- encode -k 字根键位表.txt -d 单字拆分.txt -o 单字编码表.txt
-cargo run --release -- evaluate -k 字根键位表.txt
+# 断点续算 / 编码（--resume 与 -c 拆分全表 是两种模式开关）
+cargo run --release -- optimize --resume -d out
 
-# 出码表 / Rime 方案 / 测评 / 诊断
-cargo run --release -- export -k 字根键位表.txt -c moling/拆分全表.txt -o 全码表.txt
+# Rime 方案 / 测评
 cargo run --release -- rime-convert --base <星月底包> --output <算码目录> --chaifen moling/拆分全表.txt
 cargo run --release -- assess --dir runs --yuhao-dir yuhao-assess
 cargo run --release -- sentence --full-dict pkg.full.dict.yaml --corpus 语料.txt
 cargo run --release -- pipeline --keymap 字根键位表.txt --chaifen moling/拆分全表.txt --top 5
-cargo run --release -- merge --keymap 字根键位表.txt --chaifen moling/拆分全表.txt --rules "还=人"
-cargo run --release -- diagnose --dir runs
+cargo run --release -- pipeline --keymap 字根键位表.txt --chaifen moling/拆分全表.txt --rules "还=人"
 
 # 聚类重码分析：哪一簇压成大码代价最高（聚类表内嵌于 assets/roots_cluster.ron）
 cargo run --release -- clusters --per-row --schema moling
@@ -59,7 +55,7 @@ python tools/对比码表.py 旧/output-keymap.txt 新/output-keymap.txt
 
 # 字形变体表（字根键位表 → zigen csv / 字根映射 / 背字根卡组）
 cargo run --release -- zigen --schema moling --keymap runs/s4-export/output-keymap.txt --source moling --out zigen-out
-cargo run --release -- chart --keymap 字根键位表.txt
+cargo run --release -- chart -d out
 
 # 从上游 yaml/lua/csv 数据重新生成优化器输入文件（原 moling/prepare-inputs.sh）
 cargo run --release -- prepare --dir moling
@@ -71,8 +67,8 @@ cargo test --release
 ```
 
 全局参数：`-c/--config`（默认 `config.ron`）。
-子命令共 16 个：`optimize`(默认) / `run` / `resume` / `prepare` / `clusters` / `zigen` / `encode` / `evaluate` /
-`export` / `chart` / `assess` / `rime-convert` / `sentence` / `pipeline` / `merge` / `diagnose`。
+子命令共 11 个：`optimize`(默认，含 `--resume`) / `run` / `prepare` / `clusters` / `zigen` /
+`chart` / `assess` / `rime-convert` / `sentence` / `pipeline`(含归并模式) / `shortcode`。
 
 ## 核心架构
 
@@ -97,18 +93,16 @@ cargo test --release
 | `config.rs` | TOML 配置解析（`Config` 及子结构体），权重校验，默认配置后备 |
 | `schedule.rs` | `TemperatureSchedule` 温度调度器，高斯舒适区自适应降温，预计算 LUT |
 | `calibrate.rs` | `calibrate_scales()` 根据初始指标自动校准各维度缩放因子 |
-| `output.rs` | 输出所有结果文件：字根键位表、合并码表、完整码表、键位分布、当量分布、汇总 |
+| `output.rs` | 输出所有结果文件：字根键位表、完整码表（简码置顶）、简码表、键位分布、当量分布、汇总 |
 | `bucket_store.rs` | 全码桶存储，按「Dense 绝对占用预算」+ `n_chars` 判定密集/稀疏后端（`choose_backend_for`） |
-| `export_table.rs` | 测评码表导出；`取码序列` 实现星月 encoder 状态机（`export`/`pipeline` 共用） |
+| `export_table.rs` | 取码内核；`取码序列` 实现星月 encoder 状态机（`pipeline` 共用） |
 | `rime_convert.rs` | 以星月方案包为底包，只重算 chaifen/full/words/quick/short/roots 六张表的码 |
 | `sentence.rs` | 整句准确率：逐单元首候选 + 连续码流解码；词典吃 dict.yaml 或纯 TSV；可调外部 librime 解码器 |
 | `pipeline.rs` | 逐字取码推导表（Markdown）与字根归并对比 |
 | `zigen.rs` | 字形变体表：`zigen-<方案>.csv`（`rime-convert` 写字根提示时读它）、`roots-mapping.tsv`（`chart -m` 用）、`zigen-trainer-<方案>.json`（背字根用）；取代已删的 `moling/generate-root-chart.sh` 里纯数据的三步，其余产物 Rust 侧已有同口径实现 |
 | `clusters.rs` | 聚类重码分析：复用 `prepare::inputs::展开` 得到码位序列，按五种取码法（去第 0~3 码、全码）统计动重/静重/组数；`--per-row` 逐行代入聚类表与基线做差 |
-| `diagnose.rs` | 批量诊断码表目录（重码、当量、分布、选重） |
 | `assess.rs` | 调 yuhao-assess 跑测评、出对比表、生成可导入网页版的方案档案；`--qualify` 按阈值（通用重码率 ≤0.00031、常用国字 ≤0.00028、动态选重 <0.0020、速度当量 <1.270）筛合格方案，取代已删的 `moling/compare-optimization-results.sh` |
 | `handfeel.rs` | 手感指标：速度当量、动态选重、同指连击率、换手率 |
-| `root_chart.rs` | 字根键位图（HTML）：`-k <键位表>` 简易模式，直接出单页字根图 |
 | `roots_chart.rs` | 字根表页面（`chart -d` 完整模式）：一口气产 `roots.tsv`/`chaifen.tsv`/`mabiao.tsv`/`<方案>.js`/`<方案>-<日期>.html`，取代已删的 `moling/generate-root-chart.sh` 后半段（typer 两个 perl 脚本的 .js/.html 生成，HTML 模板原样收进 `assets/roots_chart_page.html`） |
 | `checkpoint.rs` | 断点续算：线程检查点、元信息、原子写、历史归档 |
 | `fsutil.rs` | 文件读写，覆盖前自动按时间戳归档旧文件 |
@@ -228,8 +222,8 @@ cargo test --release
 
 优化完成后生成 `output-{YYYYMMDDHHMMSS}/` 目录：
 - `字根键位表.txt`: 字根 → 键位串 + 使用频次
-- `完整码表.txt`: `字/码`，覆盖**全量拆分表**（配置 `files.full_splits` 时生成）
-- `合并码表.txt`: `字/码`，覆盖**优化字集**（与 `完整码表.txt` 同 encoder）
+- `完整码表.txt`: `字/码`，开头为三级简码段（置顶、无注释），其后是覆盖**全量拆分表**的全码段（配置 `files.full_splits` 时；否则回退优化字集）。全码段按**字频降序**排列（同频按码、字升序）——宇浩测评「動態選重率（原始碼表）」按文件行序取重码组首选字，高频字排前才能吃到简码消解收益
+- `简码表.txt`: 三级前缀简码的详细报告（含字频、效率指标与动态重码率）。分配两轮分工：一/二级按字频省键贪心（降码长）；第一轮后仍消解不掉的全码重码组按组损失降序派代表拿三级位（消动态重码、允许等键）；`shortcode --freq` 可传北语字频对齐测评口径
 - `用指分布.txt` / `当量分布.txt`: 用指分布 / 当量分布统计
 - `汇总.txt`: 各线程结果排名汇总
 - `尺度.json`: 固化缩放因子（供 `--scale` 复用）

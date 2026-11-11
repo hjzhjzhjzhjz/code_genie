@@ -26,20 +26,16 @@ cargo build --release
 
 | 命令 | 用途 | 最简示例 |
 |------|------|----------|
-| `optimize`（默认） | 跑模拟退火优化 | `code_genie -c config.ron optimize -d out` |
-| `resume` | 从 checkpoint 断点续算 | `code_genie resume -d out` |
-| `encode` | 按 keymap 给拆分表编码 | `code_genie encode -k 字根键位表.txt -d 单字拆分.txt` |
-| `evaluate` | 评估现有方案指标 | `code_genie evaluate -k 字根键位表.txt` |
-| `export` | 导出测评码表（`字\t码`，每字一行） | `code_genie export -k 字根键位表.txt -c 拆分全表.txt -o 全码表.txt` |
-| `chart` | 生成字根键位图（HTML） | `code_genie chart --keymap 字根键位表.txt` |
+| `optimize`（默认） | 跑模拟退火优化；给 `--resume -d <dir>` 从 checkpoint 续算 | `code_genie -c config.ron optimize -d out` |
+| `run` | 一轮完整流程：备份输入 → prepare → optimize，写 `COMMENT.txt` 与日志 | `code_genie run --dir moling --comment "第一轮"` |
+| `chart` | 生成字根表页面（完整分页）：roots/chaifen/mabiao/js/html 全套 | `code_genie chart -d out` |
 | `assess` | 宇浩测评对比 + 方案档案；`--qualify` 只列达标方案 | `code_genie assess --dir runs --yuhao-dir yuhao-assess --qualify` |
 | `rime-convert` | 以星月方案包为底包只换码 | `code_genie rime-convert --base <星月底包> --output <算码目录> --chaifen 拆分全表.txt` |
 | `sentence` | 整句准确率（逐单元 + 连续码流）；词典吃 dict.yaml 或 TSV | `code_genie sentence --full-dict 完整码表.txt --corpus 语料.txt` |
-| `pipeline` | 逐字取码推导表（Markdown） | `code_genie pipeline --keymap 字根键位表.txt --chaifen 拆分全表.txt --top 5` |
-| `merge` | 字根归并对比 | `code_genie merge --keymap 字根键位表.txt --chaifen 拆分全表.txt --rules "还=人"` |
-| `diagnose` | 批量诊断码表目录 | `code_genie diagnose --dir runs` |
+| `pipeline` | 逐字取码推导表（Markdown）；给 `--rules` 切为字根归并对比 | `code_genie pipeline --keymap 字根键位表.txt --chaifen 拆分全表.txt --top 5` |
 | `clusters` | 聚类重码分析：把一簇压成一个大码要付出多少重码（聚类表内嵌于 `assets/roots_cluster.ron`） | `code_genie clusters --per-row` |
 | `zigen` | 字形变体表：`zigen-<方案>.csv` + `roots-mapping.tsv` + `zigen-trainer-<方案>.json` | `code_genie zigen --schema moling --source moling` |
+| `shortcode` | 给已算完的输出目录补生成三级前缀简码（不重跑优化） | `code_genie shortcode --dir out` |
 | `prepare` | 从上游 yaml/lua/csv 数据加工出优化器输入文件（13 步） | `code_genie prepare --dir moling` |
 
 ## 输入文件
@@ -117,8 +113,8 @@ cargo build --release
 | 文件 | 内容 |
 |------|------|
 | `字根键位表.txt` | 字根 → 键位串 + 使用频次 |
-| `完整码表.txt` | `字/码`，覆盖**全量拆分表**（配置 `full_splits` 时生成） |
-| `合并码表.txt` | `字/码`，覆盖**优化字集**（与 `完整码表.txt` 同 encoder） |
+| `完整码表.txt` | `字/码`，开头为三级简码段（置顶、无注释），其后是覆盖**全量拆分表**的全码段（无全量表时回退优化字集），可直接用于测评 |
+| `简码表.txt` | 三级前缀简码的详细报告（字频、各级条数、覆盖频率、效率指标、动态重码率） |
 | `用指分布.txt` / `当量分布.txt` | 用指分布 / 当量分布统计 |
 | `汇总.txt` | 各线程结果排名 |
 | `尺度.json` | 固化缩放因子（供 `--scale` 复用） |
@@ -140,17 +136,15 @@ src/
 ├── schedule.rs      # 温度调度（高斯舒适区 + LUT）
 ├── loader.rs        # 各类输入文件加载
 ├── output.rs        # 结果输出（含全量码表）
-├── export_table.rs  # 测评码表导出（星月 encoder 取码）
+├── export_table.rs  # 取码内核（pipeline 共用取码序列 / 生成表）
 ├── rime_convert.rs  # 星月方案包只换码
 ├── sentence.rs      # 整句准确率（内置 Viterbi / 外部 librime）
 ├── pipeline.rs      # 取码推导表 + 字根归并对比
 ├── clusters.rs      # 聚类重码分析（复用 prepare 的编码展开）
 ├── chart.rs         # 收敛曲线出图（日志采样行 → SVG/PNG，`chart` feature 下才画）
 ├── zigen.rs         # 字形变体表（zigen csv / 字根映射 / zigen-trainer 卡组）
-├── diagnose.rs      # 码表诊断
 ├── assess.rs        # 宇浩测评对比 + 方案档案
 ├── handfeel.rs      # 手感指标（速度当量、选重、同指连击）
-├── root_chart.rs    # 字根键位图（HTML）
 ├── checkpoint.rs    # 断点续算
 ├── fsutil.rs        # 文件读写（自动归档旧文件）
 ├── types.rs         # 核心类型
@@ -214,7 +208,7 @@ python tools/调参扫描.py salib --配置 dlrk/xxx.toml --样本数 2
 
 ```bash
 code_genie -c config.ron --rng-seed 42 optimize -d out
-code_genie -c config.ron --rng-seed 42 resume -d out   # 续算同样接受
+code_genie -c config.ron --rng-seed 42 optimize --resume -d out   # 续算同样接受
 ```
 
 种子按「线程号 × 用途」派生，多线程不会退化成同一条搜索轨迹；不给该参数时行为与旧版
@@ -256,6 +250,22 @@ python tools/检查红线.py --base HEAD   # 只看未提交改动
 | 2 根 | `A1 A2 S2 S1` |
 | 3 根 | `A1 A2 A3 S3` |
 | ≥4 根 | `A1 A2 A3 A_last` |
+
+### 简码分配（一二级降码长 + 三级消动态重码）
+
+全码定稿后自动生成三级前缀简码（也可用 `shortcode` 子命令对历史产物补生成），
+不参与退火。两轮分工（2026-11-10 定稿）：
+
+1. **一二级降码长**：按字频降序省键贪心，只试 1→2 级，取「最短且未被占用」的
+   全码前缀，优化字频加权上屏码长。
+2. **三级消动态重码**：第一轮后仍无成员拿到简码的全码重码组（同全码 ≥2 字），
+   按「组损失 = Σ组频 − 组内最大频」降序，派组内最高频成员抢三级前缀位；
+   补空格档下三级 + 空格与全码同为 4 键，**允许等键分配**——收益是该字退出
+   重码组、宇浩测评「動態選重率（簡碼）」里该组损失清零，且测评「簡碼效率」
+   纯码长口径（3 键 < 4 键）同样受益。3 码全码与三级等长等上屏串，不能拿三级。
+
+约束：简码唯一、是本人全码前缀、上屏串不与任何全码撞码。
+动态重码率按传入字频计算（`shortcode --freq` 可传北语字频对齐测评口径）。
 
 其中 A=键位串首字母（大码）、S=第 2 个字母（不足两位时回落大码）。词码：2 字 `AaAbBaBb`、3 字 `AaBaCaCb`、4+ 字 `AaBaCaZa`。
 

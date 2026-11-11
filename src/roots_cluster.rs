@@ -113,9 +113,9 @@ mod tests {
     #[test]
     fn 内嵌表簇数与字根数符合预期() {
         let 簇们 = 内嵌().unwrap();
-        assert_eq!(簇们.len(), 90, "当前 roots_cluster.ron 是 90 簇");
+        assert_eq!(簇们.len(), 104, "当前 roots_cluster.ron 是 104 簇");
         let 根数: usize = 簇们.iter().map(|c| c.roots.len()).sum();
-        assert_eq!(根数, 253, "当前文件共 253 个字根；改数据时同步这条断言");
+        assert_eq!(根数, 297, "当前文件共 297 个字根；改数据时同步这条断言");
         // 现表全部按字根频率分档取键，没有写死的键位；
         // 若将来特意把某簇钉到某个键上（`("一", "f")` 那种写法），把这条放宽即可。
         assert!(

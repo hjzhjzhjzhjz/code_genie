@@ -35,7 +35,6 @@ mod clusters;
 mod config;
 mod context;
 mod data_dir;
-mod diagnose;
 mod evaluator;
 mod export_table;
 mod fsutil;
@@ -45,7 +44,6 @@ mod output;
 mod pipeline;
 mod prepare;
 mod rime_convert;
-mod root_chart;
 mod roots_chart;
 mod roots_cluster;
 mod run;
@@ -63,7 +61,7 @@ use crate::config::{Config, TargetsConfig};
 use crate::context::OptContext;
 use crate::evaluator::Evaluator;
 use crate::output::{save_results, save_summary, save_thread_results};
-use crate::types::{key_to_char, KeyDistConfig, ScaleConfig, EQUIV_TABLE_SIZE};
+use crate::types::ScaleConfig;
 
 // =========================================================================
 // CLI 定义
@@ -106,9 +104,14 @@ enum Commands {
         /// 复用尺度文件（尺度.json）：跳过校准，保证跨运行口径一致
         #[arg(long = "scale")]
         scale: Option<String>,
+
+        /// 从既有 output 目录的 checkpoint 断点续算（必须配合 -d）
+        /// 该模式读 <dir>/inputs/ 里的备份配置，不加载 -c。
+        #[arg(long)]
+        resume: bool,
     },
 
-    /// 跑一轮完整优化：备份输入 → prepare → optimize/resume，写 COMMENT.txt 与日志
+    /// 跑一轮完整优化：备份输入 → prepare → optimize[--resume]，写 COMMENT.txt 与日志
     ///
     /// 原 `moling/optimize.sh` 的 Rust 实现（该脚本已删除，功能完全由本子命令取代）。
     #[command(name = "run")]
@@ -129,7 +132,7 @@ enum Commands {
         #[arg(short = 'd', long = "output-dir")]
         output_dir: Option<String>,
 
-        /// 断点续算：走 resume 而不是 optimize（必须配合 -d 指定既有目录）
+        /// 断点续算：走 optimize --resume（必须配合 -d 指定既有目录）
         #[arg(long)]
         resume: bool,
 
@@ -162,94 +165,19 @@ enum Commands {
         scale: Option<String>,
     },
 
-    /// 根据 keymap 为汉字编码
-    Encode {
-        /// 汉字拆分元素表
-        #[arg(short = 'd', long)]
-        division: Option<String>,
-
-        /// 逻辑字根映射文件（必需）
-        #[arg(short = 'k', long)]
-        keymap: String,
-
-        /// 编码输出文件
-        #[arg(short = 'o', long, default_value = "单字编码表.txt")]
-        output: String,
-    },
-
-    /// 全方位评估编码方案
-    Evaluate {
-        /// 汉字拆分元素表
-        #[arg(short = 'd', long)]
-        division: Option<String>,
-
-        /// 逻辑字根映射文件（必需）
-        #[arg(short = 'k', long)]
-        keymap: String,
-
-        /// 目标键位分布文件
-        #[arg(long)]
-        keydist: Option<String>,
-
-        /// 当量数据文件
-        #[arg(long)]
-        equiv: Option<String>,
-
-        /// 评估输出文件
-        #[arg(short = 'o', long, default_value = "output-evaluate.txt")]
-        output: String,
-    },
-
-    /// 从既有 output 目录的 checkpoint 断点续算
-    Resume {
-        /// 之前运行的 output 目录（含 inputs/ 与 checkpoint/）
-        #[arg(short = 'd', long)]
-        dir: String,
-    },
-
-    /// 导出测评用码表（字<TAB>码，每字一行全码），并统计全码长 / 动重
-    #[command(name = "export")]
-    ExportTable {
-        /// 键位映射文件（字根键位表.txt / output-keymap.txt）
-        #[arg(short = 'k', long)]
-        keymap: String,
-
-        /// 拆分表（拆分表.txt 或 拆分全表.txt：字<TAB>根 根 …<TAB>频次）
-        #[arg(short = 'c', long)]
-        chaifen: String,
-
-        /// 方案名：moling（魔靈）/ yuling（靈明）/ yustar（星陳），决定取码规则
-        #[arg(long, default_value = "moling")]
-        schema: String,
-
-        /// 覆盖方案自带的最大码长（默认取方案值，三套方案都是 4）
-        #[arg(long = "max-code-len")]
-        max_code_len: Option<usize>,
-
-        /// 输出文件
-        #[arg(short = 'o', long, default_value = "全码表.txt")]
-        output: String,
-    },
-    /// 生成字根图
+    /// 生成字根表页面（完整分页）：产 roots/chaifen/mabiao/.js/.html 全套
     #[command(name = "chart")]
     Chart {
-        /// 键位映射文件（简易模式：直接从 keymap 出单页字根图）
-        #[arg(short = 'k', long)]
-        keymap: Option<String>,
-
-        /// 字根映射表（可选，花括号名 → PUA 显示字）
-        #[arg(short = 'm', long)]
-        mapping: Option<String>,
-
-        /// 优化输出目录（完整模式：产 roots/chaifen/mabiao/.js/.html 全套，取代 generate-root-chart.sh）
+        /// 优化输出目录（需含 output-keymap.txt / 拆分全表.txt / 全字频表.txt；
+        /// 可由 prepare 产物拼齐，取代 generate-root-chart.sh）
         #[arg(short = 'd', long)]
-        dir: Option<String>,
+        dir: String,
 
-        /// 完整模式的方案名：moling（魔靈）/ yuling（靈明）/ yustar（星陳）
+        /// 方案名：moling（魔靈）/ yuling（靈明）/ yustar（星陳）
         #[arg(long, default_value = "moling")]
         schema: String,
 
-        /// 页面标题（完整模式，缺省「<方案>字根表 <日期>」）
+        /// 页面标题（缺省「<方案>字根表 <日期>」）
         #[arg(long)]
         title: Option<String>,
 
@@ -273,13 +201,9 @@ enum Commands {
         #[arg(long = "top-chars", default_value_t = 8000)]
         top_chars: usize,
 
-        /// 只出 .js，不出 .html
+        /// 只出 .js / .tsv，不出分页 .html
         #[arg(long = "no-page")]
         no_page: bool,
-
-        /// 简易模式的输出文件
-        #[arg(short = 'o', long, default_value = "字根图.html")]
-        output: String,
     },
     /// 跑宇浩测评并输出对比表（内部调 yuhao-assess 的 CLI）
     #[command(name = "assess")]
@@ -288,12 +212,12 @@ enum Commands {
         #[arg(long)]
         table: Option<String>,
 
-        /// 目录（递归找 全码表.txt）
+        /// 目录（递归找 完整码表.txt）
         #[arg(long)]
         dir: Option<String>,
 
         /// 目录里要匹配的文件名
-        #[arg(long = "file-name", default_value = "全码表.txt")]
+        #[arg(long = "file-name", default_value = "完整码表.txt")]
         file_name: String,
 
         /// 方案配置（jsonc）
@@ -399,7 +323,7 @@ enum Commands {
         verbose: bool,
     },
 
-    /// 摊开一个字的取码链路：拆分 → 码位 → 键位 → 编码
+    /// 取码链路推导 / 字根归并对比（给 --rules 走归并模式）
     #[command(name = "pipeline")]
     Pipeline {
         /// 字根键位表
@@ -410,63 +334,32 @@ enum Commands {
         #[arg(long)]
         chaifen: String,
 
-        /// 同键组表 字根约束.txt（可选），用来标出归并关系
+        /// 同键组表 字根约束.txt（推导模式可选），用来标出归并关系
         #[arg(long)]
         fixed: Option<String>,
 
-        /// 要查看的字，空格分隔
+        /// 要查看的字，空格分隔（推导模式）
         #[arg(long, default_value = "")]
         chars: String,
 
-        /// 不给 --chars 时，按频次取前 N 个字
+        /// 不给 --chars 时，按频次取前 N 个字（推导模式）
         #[arg(long, default_value = "0")]
         top: usize,
 
-        /// 写到该文件（Markdown）
+        /// 推导表写到该文件（Markdown，推导模式）
         #[arg(long)]
         output: Option<String>,
-    },
 
-    /// 按归并规则改键位，重新编码后对比结构指标
-    #[command(name = "merge")]
-    Merge {
-        /// 字根键位表
-        #[arg(long)]
-        keymap: String,
-
-        /// 纯拆分表
-        #[arg(long)]
-        chaifen: String,
-
-        /// 归并规则，可重复。写法：`还=人` 或 `你 1=人 2`，多条用分号分隔
+        /// 归并规则，可重复。写法：`还=人` 或 `你 1=人 2`，多条用分号分隔。
+        /// 给了任意一条就切换到归并模式。
         #[arg(long = "rules")]
         rules: Vec<String>,
 
-        /// 变体码表输出目录
+        /// 变体码表输出目录（归并模式）
         #[arg(long, default_value = "归并对比")]
         out: String,
 
-        /// 对比表写到该文件（Markdown）
-        #[arg(long)]
-        summary: Option<String>,
-    },
-
-    /// 按形码测评口径做诊断：手感七项、字频分段、词组测评、二码离散图
-    #[command(name = "diagnose")]
-    Diagnose {
-        /// 码表目录（递归找 全码表.txt）
-        #[arg(long)]
-        dir: String,
-
-        /// 测评数据目录（当量表／字频表／词表）
-        #[arg(long, default_value = "ceping-data")]
-        data: String,
-
-        /// 目录里要匹配的文件名
-        #[arg(long = "file-name", default_value = "全码表.txt")]
-        file_name: String,
-
-        /// 报告写到该文件（Markdown）
+        /// 对比表写到该文件（Markdown，归并模式）
         #[arg(long)]
         summary: Option<String>,
     },
@@ -558,7 +451,7 @@ enum Commands {
     /// 给已经算完的输出目录补生成三级前缀简码（不重跑优化）
     #[command(name = "shortcode")]
     ShortCode {
-        /// 输出目录（含 完整码表.txt / 合并码表.txt）
+        /// 输出目录（含 完整码表.txt；简码置顶、无注释）
         #[arg(short = 'd', long)]
         dir: String,
 
@@ -676,38 +569,6 @@ fn main() {
         return;
     }
 
-    // chart 的完整模式只读产物文件与上游素材，不依赖主配置
-    if let Some(Commands::Chart {
-        dir: Some(dir),
-        schema,
-        title,
-        unihan_dir,
-        font,
-        page_size,
-        max_examples,
-        top_chars,
-        no_page,
-        ..
-    }) = &cli.command
-    {
-        let 参 = roots_chart::参数 {
-            目录: dir.clone(),
-            方案: schema.clone(),
-            标题: title.clone(),
-            unihan目录: unihan_dir.clone(),
-            字体: font.clone(),
-            每页字数: *page_size,
-            例字数: *max_examples,
-            高频字数: *top_chars,
-            跳过页面: *no_page,
-        };
-        if let Err(e) = roots_chart::run(&参) {
-            eprintln!("❌ {e}");
-            std::process::exit(1);
-        }
-        return;
-    }
-
     // shortcode 只读产物文件与字频表，不依赖主配置（可对历史输出目录补生成）
     if let Some(Commands::ShortCode {
         dir,
@@ -771,8 +632,8 @@ fn main() {
     }
 
     // 配置**按需**加载（#1：解析失败直接报错退出，不再静默回退默认配置）。
-    // 只有 encode / evaluate / optimize 需要主配置的缺省值；resume 读 `<dir>/inputs/` 里
-    // 的备份配置，export-table / chart / assess 等只用命令行参数，若一律在分派前加载，
+    // 只有 optimize 的 fresh 模式需要主配置；optimize --resume
+    // 读 `<dir>/inputs/` 里的备份配置，其余命令只用命令行参数。若一律在分派前加载，
     // 在没放 config.ron 的目录里就会被一句「无法读取配置文件」直接拦掉。
     let 载入配置 = || -> Config {
         match Config::load_from_path(&cli.config) {
@@ -785,58 +646,7 @@ fn main() {
     };
 
     match cli.command {
-        Some(Commands::Encode {
-            division,
-            keymap,
-            output,
-        }) => {
-            let cfg = 载入配置();
-            let division_path = division.as_deref().unwrap_or(&cfg.files.splits);
-            run_encode(division_path, &keymap, &output);
-        }
-        Some(Commands::Evaluate {
-            division,
-            keymap,
-            keydist,
-            equiv,
-            output,
-        }) => {
-            let cfg = 载入配置();
-            let division_path = division.as_deref().unwrap_or(&cfg.files.splits);
-            let keydist_path = keydist.as_deref().unwrap_or(&cfg.files.key_dist);
-            let equiv_path = equiv.as_deref().unwrap_or(&cfg.files.pair_equiv);
-            run_evaluate(
-                &cfg,
-                division_path,
-                &keymap,
-                keydist_path,
-                equiv_path,
-                &output,
-            );
-        }
-        Some(Commands::Resume { dir }) => run_resume(&dir, cli.rng_seed),
-        Some(Commands::ExportTable {
-            keymap,
-            chaifen,
-            schema,
-            max_code_len,
-            output,
-        }) => {
-            let 参 = export_table::参数 {
-                键位: &keymap,
-                拆分: &chaifen,
-                输出: &output,
-                方案: &schema,
-                最大码长: max_code_len,
-            };
-            if let Err(e) = export_table::run(&参) {
-                eprintln!("❌ {}", e);
-                std::process::exit(1);
-            }
-        }
         Some(Commands::Chart {
-            keymap,
-            mapping,
             dir,
             schema,
             title,
@@ -846,29 +656,21 @@ fn main() {
             max_examples,
             top_chars,
             no_page,
-            output,
         }) => {
-            if let Some(d) = dir {
-                let 参 = roots_chart::参数 {
-                    目录: d.clone(),
-                    方案: schema.clone(),
-                    标题: title.clone(),
-                    unihan目录: unihan_dir.clone(),
-                    字体: font.clone(),
-                    每页字数: page_size,
-                    例字数: max_examples,
-                    高频字数: top_chars,
-                    跳过页面: no_page,
-                };
-                if let Err(e) = roots_chart::run(&参) {
-                    eprintln!("❌ {e}");
-                    std::process::exit(1);
-                }
-            } else if let Some(k) = keymap {
-                root_chart::run(&k, mapping.as_deref(), &output);
-            } else {
-                eprintln!("❌ chart 需要 `-k <键位表>`（简易图）或 `-d <输出目录>`（完整套件）");
-                std::process::exit(2);
+            let 参 = roots_chart::参数 {
+                目录: dir,
+                方案: schema,
+                标题: title,
+                unihan目录: unihan_dir,
+                字体: font,
+                每页字数: page_size,
+                例字数: max_examples,
+                高频字数: top_chars,
+                跳过页面: no_page,
+            };
+            if let Err(e) = roots_chart::run(&参) {
+                eprintln!("❌ {e}");
+                std::process::exit(1);
             }
         }
         Some(Commands::RimeConvert {
@@ -928,29 +730,23 @@ fn main() {
             chars,
             top,
             output,
-        }) => pipeline::流水线(
-            &keymap,
-            &chaifen,
-            fixed.as_deref(),
-            &chars,
-            top,
-            output.as_deref(),
-        ),
-
-        Some(Commands::Merge {
-            keymap,
-            chaifen,
             rules,
             out,
             summary,
-        }) => pipeline::归并(&keymap, &chaifen, &rules, &out, summary.as_deref()),
-
-        Some(Commands::Diagnose {
-            dir,
-            data,
-            file_name,
-            summary,
-        }) => diagnose::run(&dir, &data, &file_name, summary.as_deref()),
+        }) => {
+            if rules.is_empty() {
+                pipeline::流水线(
+                    &keymap,
+                    &chaifen,
+                    fixed.as_deref(),
+                    &chars,
+                    top,
+                    output.as_deref(),
+                )
+            } else {
+                pipeline::归并(&keymap, &chaifen, &rules, &out, summary.as_deref())
+            }
+        }
 
         Some(Commands::Assess {
             table,
@@ -982,18 +778,27 @@ fn main() {
             seed_dir,
             seed_keymap,
             scale,
+            resume,
         }) => {
-            let cfg = 载入配置();
-            run_optimize(
-                &cfg,
-                &cli.config,
-                output_dir,
-                seed_dir,
-                seed_keymap,
-                scale,
-                &停止标志(),
-                cli.rng_seed,
-            )
+            if resume {
+                let Some(dir) = output_dir.as_deref() else {
+                    eprintln!("❌ --resume 需要 `-d <既有输出目录>`");
+                    std::process::exit(2);
+                };
+                run_resume(dir, cli.rng_seed);
+            } else {
+                let cfg = 载入配置();
+                run_optimize(
+                    &cfg,
+                    &cli.config,
+                    output_dir,
+                    seed_dir,
+                    seed_keymap,
+                    scale,
+                    &停止标志(),
+                    cli.rng_seed,
+                )
+            }
         }
         // prepare 在加载配置之前就已返回，这里只是让 match 完备
         Some(Commands::Prepare { .. }) => unreachable!("prepare 已在加载配置前处理"),
@@ -1034,9 +839,9 @@ fn run_shortcode(dir: &str, freq: Option<&str>, 补空格: bool) -> Result<(), S
     let 口径 = shortcode::码长口径::由开关(补空格);
     let 结果 = shortcode::生成_按口径(&条目, 口径);
     shortcode::打印统计(&结果.统计);
-    shortcode::保存(dir, &结果, &来源);
+    shortcode::保存(dir, &结果, &字频, &来源);
     println!(
-        "已写入 {dir}/简码表.txt [{}]，简码段已并入 合并码表.txt（重复运行会替换旧段）",
+        "已写入 {dir}/简码表.txt [{}]，简码已置顶写入 完整码表.txt（无注释，重复运行幂等）",
         口径.名称()
     );
     Ok(())
@@ -1092,369 +897,6 @@ fn 探测字频(dir: &str, 指定: Option<&str>) -> Result<(HashMap<char, u64>, 
         表,
         "内嵌 assets/拆分全表.txt（兜底：字频口径与优化不同）".to_string(),
     ))
-}
-
-fn run_encode(division_path: &str, keymap_path: &str, output_path: &str) {
-    println!("=== CodeGenie 编码模式 ===");
-    println!("  拆分表: {}", division_path);
-    println!("  键位映射: {}", keymap_path);
-    println!("  输出文件: {}", output_path);
-
-    // 加载数据
-    let root_to_key = must(loader::load_keymap(keymap_path, division_path));
-    let splits = must(loader::load_splits(division_path));
-
-    println!("  已加载 {} 个字根映射", root_to_key.len());
-    println!("  已加载 {} 个汉字拆分", splits.len());
-
-    // 为每个汉字编码
-    let mut code_out = String::new();
-    let mut missing_roots: HashMap<String, usize> = HashMap::new();
-    let mut encoded_count = 0usize;
-    let mut failed_count = 0usize;
-
-    for (ch, roots, freq) in &splits {
-        let mut code_parts = Vec::new();
-        let mut all_found = true;
-
-        for root in roots {
-            if let Some(&key) = root_to_key.get(root) {
-                code_parts.push(key_to_char(key));
-            } else {
-                all_found = false;
-                *missing_roots.entry(root.clone()).or_default() += 1;
-            }
-        }
-
-        if all_found && !code_parts.is_empty() {
-            let code_str: String = code_parts.into_iter().collect();
-            code_out.push_str(&format!("{}\t{}\t{}\n", ch, code_str, freq));
-            encoded_count += 1;
-        } else {
-            // 即使有缺失字根，也输出已有部分（用 ? 标记缺失）
-            let mut partial_code = Vec::new();
-            for root in roots {
-                if let Some(&key) = root_to_key.get(root) {
-                    partial_code.push(key_to_char(key));
-                } else {
-                    partial_code.push('?');
-                }
-            }
-            let code_str: String = partial_code.into_iter().collect();
-            code_out.push_str(&format!("{}\t{}\t{}\n", ch, code_str, freq));
-            failed_count += 1;
-        }
-    }
-
-    // 写入文件
-    std::fs::write(output_path, &code_out).expect("无法写入编码输出文件");
-
-    println!("\n✅ 编码完成:");
-    println!("  成功编码: {} 字", encoded_count);
-    if failed_count > 0 {
-        println!("  ⚠️ 部分编码: {} 字（存在未映射字根）", failed_count);
-    }
-    if !missing_roots.is_empty() {
-        println!("  ⚠️ 未找到映射的字根 ({} 种):", missing_roots.len());
-        let mut sorted: Vec<_> = missing_roots.into_iter().collect();
-        sorted.sort_by_key(|x| std::cmp::Reverse(x.1));
-        for (root, count) in sorted.iter().take(20) {
-            println!("    {} (出现 {} 次)", root, count);
-        }
-        if sorted.len() > 20 {
-            println!("    ... 还有 {} 种", sorted.len() - 20);
-        }
-    }
-    println!("  结果已保存至 {}", output_path);
-}
-
-// =========================================================================
-// evaluate 子命令
-// =========================================================================
-
-fn run_evaluate(
-    cfg: &Config,
-    division_path: &str,
-    keymap_path: &str,
-    keydist_path: &str,
-    equiv_path: &str,
-    output_path: &str,
-) {
-    println!("=== CodeGenie 评估模式 ===");
-    println!("  拆分表: {}", division_path);
-    println!("  键位映射: {}", keymap_path);
-    println!("  键位分布: {}", keydist_path);
-    println!("  当量数据: {}", equiv_path);
-    println!("  输出文件: {}", output_path);
-
-    // 加载数据
-    let root_to_key = must(loader::load_keymap(keymap_path, division_path));
-    let splits = must(loader::load_splits(division_path));
-    let equiv_table = or_warn_default(loader::load_pair_equivalence(equiv_path));
-    let key_dist_config = or_warn_default(loader::load_key_distribution(keydist_path));
-
-    println!("  已加载 {} 个字根映射", root_to_key.len());
-    println!("  已加载 {} 个汉字拆分", splits.len());
-
-    // 将所有字根作为 fixed_roots，groups 为空
-    let fixed_roots: HashMap<String, u8> = root_to_key;
-    let groups: Vec<types::RootGroup> = vec![];
-    let assignment: Vec<u8> = vec![];
-
-    // 构建 OptContext
-    let scale_config = types::ScaleConfig::default();
-    let weights = cfg.get_weight_config();
-    let mut ctx = OptContext::new_with_termination(
-        &splits,
-        &fixed_roots,
-        &groups,
-        equiv_table,
-        key_dist_config,
-        scale_config,
-        weights,
-        TargetsConfig::default(),
-        &cfg.keys.termination_keys,
-        cfg.constraints.clone().unwrap_or_default(),
-    );
-    ctx.display_order = cfg.keys.display_order.clone();
-
-    println!("  编码基数: {}", ctx.code_base);
-    println!("  编码空间: {}", ctx.code_space);
-    println!("  最大码长: {}", ctx.max_parts);
-
-    // 运行评估
-    let evaluator = Evaluator::new(&ctx, &assignment);
-    let metrics = evaluator.get_metrics(&ctx);
-
-    // 打印评估结果
-    println!("\n📊 评估结果:");
-    println!("  ═══════════════════════════════════════");
-    println!("  「全码」重码数:          {}", metrics.collision_count);
-    println!(
-        "  「全码」重码率:          {:.6}%",
-        metrics.collision_rate * 100.0
-    );
-    println!("  「全码」加权键均当量:    {:.4}", metrics.equiv_mean);
-    println!("  「全码」当量变异系数(CV): {:.4}", metrics.equiv_cv);
-    println!("  「全码」用指分布偏差(L2): {:.4}", metrics.dist_deviation);
-
-    println!("  ═══════════════════════════════════════");
-
-    // 生成详细评估报告
-    let report = build_evaluate_report(
-        cfg,
-        &ctx,
-        &assignment,
-        &evaluator,
-        &metrics,
-        &key_dist_config,
-    );
-
-    std::fs::write(output_path, &report).expect("无法写入评估输出文件");
-    println!("\n✅ 详细评估报告已保存至 {}", output_path);
-}
-
-/// 构建详细评估报告
-fn build_evaluate_report(
-    cfg: &Config,
-    ctx: &OptContext,
-    assignment: &[u8],
-    evaluator: &Evaluator,
-    metrics: &types::Metrics,
-    key_dist_config: &[KeyDistConfig; EQUIV_TABLE_SIZE],
-) -> String {
-    let mut out = String::new();
-
-    // ===== 总览 =====
-    out.push_str("# CodeGenie 编码方案评估报告\n");
-    out.push_str("#\n");
-    out.push_str(&format!("# 汉字数量: {}\n", ctx.char_infos.len()));
-    out.push_str(&format!("# 总字频: {}\n", ctx.total_frequency));
-    out.push_str(&format!("# 编码基数: {}\n", ctx.code_base));
-    out.push_str(&format!("# 最大码长: {}\n", ctx.max_parts));
-    out.push_str("#\n");
-
-    // ===== 全码指标 =====
-    out.push_str("# ═══════════════════════════════════════\n");
-    out.push_str("# 全码指标\n");
-    out.push_str("# ═══════════════════════════════════════\n");
-    out.push_str(&format!("# 重码数: {}\n", metrics.collision_count));
-    out.push_str(&format!(
-        "# 重码率: {:.6}%\n",
-        metrics.collision_rate * 100.0
-    ));
-    out.push_str(&format!("# 加权键均当量: {:.4}\n", metrics.equiv_mean));
-    out.push_str(&format!("# 当量变异系数(CV): {:.4}\n", metrics.equiv_cv));
-    out.push_str(&format!(
-        "# 用指分布偏差(L2): {:.4}\n",
-        metrics.dist_deviation
-    ));
-    out.push_str("#\n");
-
-    // ===== 用指分布 =====
-    out.push_str("\n# ═══════════════════════════════════════\n");
-    out.push_str("# 用指分布\n");
-    out.push_str("# ═══════════════════════════════════════\n");
-    out.push_str("# 键位\t实际%\t目标%\t偏差\t偏差²\n");
-
-    let inv_tkp = evaluator.inv_total_key_presses;
-    for kc in cfg.keys.display_order.chars() {
-        if let Some(ki) = types::char_to_key_index(kc) {
-            if ki >= 31 {
-                continue;
-            }
-            let actual = evaluator.key_weighted_usage[ki] * 100.0 * inv_tkp;
-            let target = key_dist_config[ki].target_rate;
-            let diff = actual - target;
-            out.push_str(&format!(
-                "{}\t{:.4}\t{:.4}\t{:+.4}\t{:.4}\n",
-                kc,
-                actual,
-                target,
-                diff,
-                diff * diff
-            ));
-        }
-    }
-
-    // 特殊键位
-    let order_set: std::collections::HashSet<char> = cfg.keys.display_order.chars().collect();
-    let special_keys = [('_', 26usize), (';', 27), (',', 28), ('.', 29), ('/', 30)];
-    for (kc, ki) in &special_keys {
-        if !order_set.contains(kc) && *ki < 31 {
-            let usage = evaluator.key_weighted_usage[*ki];
-            if usage > 0.0 {
-                let actual = usage * 100.0 * inv_tkp;
-                let target = key_dist_config[*ki].target_rate;
-                let diff = actual - target;
-                out.push_str(&format!(
-                    "{}\t{:.4}\t{:.4}\t{:+.4}\t{:.4}\n",
-                    kc,
-                    actual,
-                    target,
-                    diff,
-                    diff * diff
-                ));
-            }
-        }
-    }
-
-    // ===== 当量分布 =====
-    out.push_str("\n# ═══════════════════════════════════════\n");
-    out.push_str("# 当量分布\n");
-    out.push_str("# ═══════════════════════════════════════\n");
-    out.push_str(&format!("# 平均当量: {:.4}\n", metrics.equiv_mean));
-    out.push_str(&format!("# 变异系数(CV): {:.4}\n", metrics.equiv_cv));
-    out.push_str(&format!(
-        "# 标准差: {:.4}\n",
-        metrics.equiv_cv * metrics.equiv_mean
-    ));
-
-    // 计算每个汉字的当量
-    let mut char_equivs: Vec<(char, f64, u64)> = Vec::new();
-    for (i, (ch, _, _)) in ctx.raw_splits.iter().enumerate() {
-        if let Some(equiv) = ctx.calc_equiv_from_parts(i, assignment) {
-            char_equivs.push((*ch, equiv, ctx.char_infos[i].frequency));
-        }
-    }
-    char_equivs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-
-    out.push_str("#\n# 当量最高的20个高频字 (字频>1000000):\n# 汉字\t当量\t字频\n");
-    let mut count = 0;
-    for (ch, eq, freq) in &char_equivs {
-        if *freq > 1_000_000 && count < 20 {
-            out.push_str(&format!("{}\t{:.4}\t{}\n", ch, eq, freq));
-            count += 1;
-        }
-    }
-
-    out.push_str("#\n# 当量最低的20个高频字 (字频>1000000):\n");
-    let high: Vec<_> = char_equivs
-        .iter()
-        .filter(|(_, _, f)| *f > 1_000_000)
-        .collect();
-    let start = high.len().saturating_sub(20);
-    for (ch, eq, freq) in high.iter().skip(start) {
-        out.push_str(&format!("{}\t{:.4}\t{}\n", ch, eq, freq));
-    }
-
-    // ===== 重码详情 =====
-    out.push_str("\n# ═══════════════════════════════════════\n");
-    out.push_str("# 重码详情\n");
-    out.push_str("# ═══════════════════════════════════════\n");
-
-    // 构建编码到汉字的映射
-    let n = ctx.char_infos.len();
-    let mut code_to_chars: HashMap<usize, Vec<usize>> = HashMap::new();
-    for ci in 0..n {
-        let code = ctx.calc_code_only(ci, assignment);
-        code_to_chars.entry(code).or_default().push(ci);
-    }
-
-    // 收集重码组
-    let mut collision_groups: Vec<(usize, Vec<(char, u64)>)> = Vec::new();
-    for (code, chars) in &code_to_chars {
-        if chars.len() >= 2 {
-            let mut group: Vec<(char, u64)> = chars
-                .iter()
-                .map(|&ci| (ctx.raw_splits[ci].0, ctx.char_infos[ci].frequency))
-                .collect();
-            group.sort_by_key(|x| std::cmp::Reverse(x.1));
-            collision_groups.push((*code, group));
-        }
-    }
-
-    // 按组内最高频率降序排序
-    collision_groups.sort_by(|a, b| {
-        let max_a = a.1.first().map(|x| x.1).unwrap_or(0);
-        let max_b = b.1.first().map(|x| x.1).unwrap_or(0);
-        max_b.cmp(&max_a)
-    });
-
-    out.push_str(&format!(
-        "# 共 {} 组重码 (按最高频率降序)\n",
-        collision_groups.len()
-    ));
-    out.push_str("# 编码\t重码字\t字频列表\n");
-
-    for (_, group) in collision_groups.iter().take(200) {
-        let chars_str: String = group.iter().map(|(ch, _)| *ch).collect();
-        let freqs_str: String = group
-            .iter()
-            .map(|(_, f)| f.to_string())
-            .collect::<Vec<_>>()
-            .join(",");
-
-        // 获取编码字符串
-        let first_ci = code_to_chars
-            .values()
-            .find(|v| v.len() >= 2 && ctx.raw_splits[v[0]].0 == group[0].0)
-            .and_then(|v| v.first())
-            .copied();
-
-        let code_str = if let Some(ci) = first_ci {
-            let info = &ctx.char_infos[ci];
-            let keys: String = info
-                .parts
-                .iter()
-                .map(|&p| key_to_char(ctx.resolve_key(p, assignment)))
-                .collect();
-            keys
-        } else {
-            "?".to_string()
-        };
-
-        out.push_str(&format!("{}\t{}\t{}\n", code_str, chars_str, freqs_str));
-    }
-
-    if collision_groups.len() > 200 {
-        out.push_str(&format!(
-            "# ... 还有 {} 组重码未列出\n",
-            collision_groups.len() - 200
-        ));
-    }
-
-    out
 }
 
 // =========================================================================
@@ -1875,7 +1317,7 @@ fn run_optimize(
     // Ctrl-C 停止标志由调用方创建并只安装一次处理器：
     // `ctrlc::set_handler` 每个进程只能成功安装一次，重复调用会返回 Err 且新标志永不置位。
     println!(
-        "💡 提示: 按 Ctrl-C 可暂停并保存检查点，之后用 `resume -d {}` 继续",
+        "💡 提示: 按 Ctrl-C 可暂停并保存检查点，之后用 `optimize --resume -d {}` 继续",
         output_dir
     );
 
@@ -2089,8 +1531,6 @@ fn finalize_and_save(
         Some((全量, 来源)) => {
             if 全量.len() > ctx.raw_splits.len() {
                 let 统计 = output::save_full_code_table(ctx, &best_assignment, &全量, output_dir);
-                // 合并码表 = 全量全码段（与完整码表同 encoder、同覆盖范围）
-                output::save_combined_from_full(ctx, &best_assignment, &全量, output_dir);
                 println!(
                     "\n📄 完整码表: {} 条（缺字根 {}），来源 {}",
                     统计.全码条数, 统计.缺根条数, 来源
@@ -2136,6 +1576,14 @@ fn finalize_and_save(
         }
         None => false,
     };
+    if !出了完整码表 {
+        // 没有全量码表时也要有一份纯全码的 完整码表.txt，供简码段并入。
+        output::save_full_code_from_optimize_set(ctx, &best_assignment, output_dir);
+        println!(
+            "\n📄 完整码表: 无全量拆分表，回退为优化字集 {} 字",
+            ctx.raw_splits.len()
+        );
+    }
 
     save_summary(cfg, &all_results, best_thread, output_dir, elapsed);
 
@@ -2156,19 +1604,20 @@ fn finalize_and_save(
     println!("\n所有结果已保存至 {}/", output_dir);
     println!("  - 汇总.txt              汇总排名");
     println!("  - output-*.txt             全局最优结果");
-    if 出了完整码表 {
-        println!("  - 完整码表.txt           覆盖全部字的码表");
-    }
+    println!("  - 完整码表.txt           三级简码置顶 + 全码段（整份无注释行）");
     if 简码统计.is_some() {
         println!(
-            "  - 简码表.txt             三级前缀简码 [{}]（已并入合并码表）",
+            "  - 简码表.txt             三级前缀简码 [{}]（已置顶并入完整码表）",
             cfg.shortcode.码长口径().名称()
         );
     }
     println!("  - thread-XX/               各线程结果");
     if interrupted {
         println!("\n⏸️  已暂停。继续续算：");
-        println!("   cargo run --release -- resume -d {}", output_dir);
+        println!(
+            "   cargo run --release -- optimize --resume -d {}",
+            output_dir
+        );
     }
 }
 
@@ -2972,6 +2421,78 @@ mod scale_proptest {
             prop_assert_eq!(来源, "自动校准");
             prop_assert!(近似(got.collision_count, 校准[0]));
             prop_assert!(近似(got.distribution, 校准[4]));
+        }
+    }
+}
+
+// =========================================================================
+// 命令归并后的 CLI 契约测试
+// =========================================================================
+#[cfg(test)]
+mod 命令归并测试 {
+    use super::{Cli, Commands};
+    use clap::Parser;
+
+    /// resume 并入 optimize：--resume + -d 必须能解析，且缺省仍是 fresh。
+    #[test]
+    fn 续算并入_optimize() {
+        let cli = Cli::try_parse_from(["code_genie", "optimize", "--resume", "-d", "out"]).unwrap();
+        match cli.command {
+            Some(Commands::Optimize {
+                resume, output_dir, ..
+            }) => {
+                assert!(resume);
+                assert_eq!(output_dir.as_deref(), Some("out"));
+            }
+            _ => panic!("应解析为 optimize"),
+        }
+        let cli = Cli::try_parse_from(["code_genie", "optimize", "-d", "out"]).unwrap();
+        match cli.command {
+            Some(Commands::Optimize { resume, .. }) => assert!(!resume),
+            _ => panic!("应解析为 optimize"),
+        }
+    }
+
+    /// merge 并入 pipeline：给 --rules 走归并模式，不给走推导模式。
+    #[test]
+    fn 归并并入_pipeline() {
+        let cli = Cli::try_parse_from([
+            "code_genie",
+            "pipeline",
+            "--keymap",
+            "k",
+            "--chaifen",
+            "c",
+            "--rules",
+            "还=人",
+            "--out",
+            "归并对比",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::Pipeline { rules, out, .. }) => {
+                assert_eq!(rules, vec!["还=人".to_string()]);
+                assert_eq!(out, "归并对比");
+            }
+            _ => panic!("应解析为 pipeline"),
+        }
+        let cli = Cli::try_parse_from([
+            "code_genie",
+            "pipeline",
+            "--keymap",
+            "k",
+            "--chaifen",
+            "c",
+            "--top",
+            "5",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::Pipeline { rules, top, .. }) => {
+                assert!(rules.is_empty(), "不给 --rules 走推导模式");
+                assert_eq!(top, 5);
+            }
+            _ => panic!("应解析为 pipeline"),
         }
     }
 }

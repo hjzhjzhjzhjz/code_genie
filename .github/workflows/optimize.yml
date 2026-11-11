@@ -315,59 +315,27 @@ jobs:
           echo "ACTUAL_ROUNDS=$k" >> "$GITHUB_ENV"
           echo "=== 重复运行结束：共 $k 轮 ==="
 
-      - name: 导出全码表
-        if: always()
-        run: |
-          if [ ! -f "$OUT_DIR/字根键位表.txt" ]; then
-            echo "::warning::没有 字根键位表.txt，跳过导出"
-            exit 0
-          fi
-          SIMPLE_ARG=""
-          if [ -f "$OUT_DIR/简码表.txt" ]; then
-            SIMPLE_ARG="--simple $OUT_DIR/简码表.txt"
-          fi
-          ./target/release/code_genie export \
-            --keymap "$OUT_DIR/字根键位表.txt" \
-            --chaifen moling/拆分全表.txt \
-            $SIMPLE_ARG \
-            --output "$OUT_DIR/全码表.txt"
-          echo "--- 前 4 行 ---"
-          head -n 4 "$OUT_DIR/全码表.txt"
-          echo "--- 行数 ---"
-          wc -l < "$OUT_DIR/全码表.txt"
-
-          # 每个线程各出一份
-          for d in "$OUT_DIR"/thread-*; do
-            [ -d "$d" ] || continue
-            [ -f "$d/字根键位表.txt" ] || continue
-            THREAD_ARG=""
-            if [ -f "$d/简码表.txt" ]; then
-              THREAD_ARG="--simple $d/简码表.txt"
-            fi
-            ./target/release/code_genie export \
-              --keymap "$d/字根键位表.txt" \
-              --chaifen moling/拆分全表.txt \
-              $THREAD_ARG \
-              --output "$d/全码表.txt"
-            echo "  $(basename "$d"): $(wc -l < "$d/全码表.txt") 行"
-          done
-
-      - name: 生成字根图
+      - name: 生成字根表页面（完整分页）
         if: always()
         env:
           KEYMAP: ${{ inputs.out_dir }}/字根键位表.txt
           MAPPING: ${{ inputs.mapping }}
         run: |
+          set -euo pipefail
           if [ ! -f "$KEYMAP" ]; then
-            echo "::warning::没有 keymap，跳过字根图"
+            echo "::warning::没有 keymap，跳过字根表页面"
             exit 0
           fi
-          if [ -z "$MAPPING" ]; then
-            ./target/release/code_genie chart --keymap "$KEYMAP" --output "$OUT_DIR/字根图.html"
-          else
-            ./target/release/code_genie chart --keymap "$KEYMAP" --mapping "$MAPPING" --output "$OUT_DIR/字根图.html"
+          # 产物直接落在 $OUT_DIR，上传清单已包含整个目录。
+          # chart -d 要求齐备 output-keymap.txt / 拆分全表.txt / 全字频表.txt。
+          cp "$KEYMAP" "$OUT_DIR/output-keymap.txt"
+          cp moling/拆分全表.txt "$OUT_DIR/拆分全表.txt"
+          cp moling/全字频表.txt "$OUT_DIR/全字频表.txt"
+          if [ -n "$MAPPING" ] && [ -f "$MAPPING" ]; then
+            cp "$MAPPING" "$OUT_DIR/roots-mapping.tsv"
           fi
-          ls -l "$OUT_DIR/字根图.html"
+          ./target/release/code_genie chart -d "$OUT_DIR"
+          ls -l "$OUT_DIR"/*.html
 
       - name: 写入 Job Summary
         if: always()
@@ -400,10 +368,10 @@ jobs:
       - name: 清理中间产物
         if: always()
         run: |
-          rm -f "$OUT_DIR/单字编码表.txt" "$OUT_DIR/汇总.txt" "$OUT_DIR/简码表.txt" "$OUT_DIR/合并码表.txt"
+          rm -f "$OUT_DIR/汇总.txt" "$OUT_DIR/简码表.txt" "$OUT_DIR/合并码表.txt"
           for d in "$OUT_DIR"/thread-*; do
             [ -d "$d" ] || continue
-            rm -f "$d/单字编码表.txt" "$d/简码表.txt" "$d/合并码表.txt"
+            rm -f "$d/简码表.txt" "$d/合并码表.txt"
           done
           rm -rf 历史 seed
           rm -f 尺度-来源.json

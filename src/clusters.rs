@@ -483,7 +483,7 @@ mod tests {
     #[test]
     fn 空参数回落内嵌聚类表() {
         let 行表 = 解析聚类("  ").unwrap();
-        assert_eq!(行表.len(), 90);
+        assert_eq!(行表.len(), 104);
         assert_eq!(行表[0].roots, ["ス", "マ", "癶"]);
     }
 
