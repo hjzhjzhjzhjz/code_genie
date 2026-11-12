@@ -124,7 +124,7 @@ impl OptContext {
 
         for (ci, (_, roots, freq)) in splits.iter().enumerate() {
             let mut info = CharInfo {
-                parts: Vec::with_capacity(roots.len()),
+                parts: crate::types::Parts::new(),
                 frequency: *freq,
             };
 

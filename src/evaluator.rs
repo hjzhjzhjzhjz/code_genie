@@ -138,16 +138,28 @@ pub(crate) fn backend_log_line(
 }
 
 /// 主评估器 - 评估整个编码方案
+/// 每个字的可变热状态，合并原先并行的 `current_codes` / `current_equiv_val` / `char_bucket_pos`
+/// 三个数组。
+///
+/// 这三者在 `update_char` 中对同一个 `ci` 连续读写，合并后共用一条缓存行，把「3 次随机
+/// 缓存缺失」压成「1 次」。真实退火是稀疏桶（~12k 非空桶、随机组轮转）、内存延迟主导，
+/// 这类随机访问的 L3 未命中正是 `update_char` 的主要成本。
+#[derive(Clone, Copy)]
+struct 字状态 {
+    /// 当前全码。`code_space ≤ u32::MAX`，故 u32 足够。
+    code: u32,
+    /// 该字在其全码桶中的位置（供 O(1) swap_remove）。
+    pos: u32,
+    /// 当前等价值；`None` 表示该字没有有效按键对。
+    equiv: Option<f64>,
+}
+
 pub struct Evaluator {
-    /// 当前编码列表
-    current_codes: Vec<usize>,
-    /// 当前等价值列表；`None` 表示该字没有有效按键对。
-    current_equiv_val: Vec<Option<f64>>,
+    /// 每字热状态（编码 / 桶内位置 / 等价值），合并自原三数组以提升缓存局部性。
+    状态: Vec<字状态>,
     /// 全码桶存储（取代基线的 code_to_chars/bucket_freq_sum/bucket_max_freq/bucket_first
     /// 四个 code_space 大小数组）。密集/稀疏后端按 code_space 阈值自适应（需求 1/5）。
     full_buckets: BucketStore<FullBucket>,
-    /// 每个汉字在其桶中的位置（用于 O(1) swap_remove）
-    char_bucket_pos: Vec<usize>,
     /// 总重码数
     total_collisions: usize,
     /// 重码频率
@@ -197,9 +209,7 @@ impl Evaluator {
         let mut full_buckets: BucketStore<FullBucket> = BucketStore::new(cs, n);
         // 稀疏后端预留 n_chars 容量：避免退火期 rehash、降低负载因子（缩短探测、减少缓存缺失）。
         full_buckets.reserve_nonempty(n);
-        let mut char_bucket_pos = vec![0usize; n];
-        let mut current_codes = Vec::with_capacity(n);
-        let mut current_equiv_val = Vec::with_capacity(n);
+        let mut 状态: Vec<字状态> = Vec::with_capacity(n);
 
         let mut total_equiv_weighted = 0.0f64;
         let mut total_equiv_sq_weighted = 0.0f64;
@@ -214,13 +224,14 @@ impl Evaluator {
             let code = ctx.calc_code_only(ci, assignment);
             let equiv = ctx.calc_equiv_from_parts(ci, assignment);
 
-            current_codes.push(code);
-            current_equiv_val.push(equiv);
-
             let b = full_buckets.get_mut_or_insert(code as u32);
             let pos = b.members.len();
             b.members.push(ci as u32);
-            char_bucket_pos[ci] = pos;
+            状态.push(字状态 {
+                code: code as u32,
+                pos: pos as u32,
+                equiv,
+            });
             b.freq_sum += info.frequency;
             if info.frequency > b.max_freq {
                 b.max_freq = info.frequency;
@@ -262,10 +273,8 @@ impl Evaluator {
         };
 
         let mut e = Self {
-            current_codes,
-            current_equiv_val,
+            状态,
             full_buckets,
-            char_bucket_pos,
             total_collisions,
             collision_frequency,
             total_equiv_weighted,
@@ -309,7 +318,7 @@ impl Evaluator {
     /// 更新单个汉字的编码（增量更新碰撞计数）
     #[inline]
     pub fn update_char(&mut self, ctx: &OptContext, assignment: &[u8], ci: usize) {
-        let old_code = self.current_codes[ci];
+        let old_code = self.状态[ci].code as usize;
         let new_code = ctx.calc_code_only(ci, assignment);
         if old_code == new_code {
             return;
@@ -319,7 +328,7 @@ impl Evaluator {
         let freq_f = freq as f64;
 
         // 更新等价值，并同步有效当量字频分母。
-        let old_eq = self.current_equiv_val[ci];
+        let old_eq = self.状态[ci].equiv;
         let new_eq = ctx.calc_equiv_from_parts(ci, assignment);
         match (old_eq, new_eq) {
             (Some(old), Some(new)) => {
@@ -338,16 +347,41 @@ impl Evaluator {
             }
             (None, None) => {}
         }
-        self.current_equiv_val[ci] = new_eq;
+        self.状态[ci].equiv = new_eq;
 
+        // === 桶迁移（移除旧桶 + 插入新桶 + 全局碰撞计数）===
+        self.migrate_char_bucket(ctx, old_code, new_code, ci, freq);
+
+        // 全码聚合已变化：标记全码分量缓存为脏（需求 10.1）。
+        // `update_char` 是全码聚合的唯一变更入口（正向移动与回滚反向重放都经此），
+        // 在此单点置脏可保证 `full_score_component` 永远基于最新聚合重算，
+        // 无需在 `try_move`/`try_swap` 的多个分支重复维护。
+        self.full_score_dirty = true;
+    }
+
+    /// 仅做桶迁移：从 `old_code` 桶移除 `ci`、插入 `new_code` 桶，并更新全局碰撞计数器
+    /// 与 `current_codes[ci]`。
+    ///
+    /// 调用方（`update_char`）须保证 `old_code != new_code`，且已同步当量聚合与
+    /// `current_equiv_val`。这是退火热路径的核心：稀疏后端下每个字 2 次 `FxHashMap`
+    /// 查找（旧桶移除 + 新桶插入）。
+    #[inline]
+    pub fn migrate_char_bucket(
+        &mut self,
+        ctx: &OptContext,
+        old_code: usize,
+        new_code: usize,
+        ci: usize,
+        freq: u64,
+    ) {
         let old_code_u = old_code as u32;
         let new_code_u = new_code as u32;
 
         // === 从旧桶移除 ===
-        let pos = self.char_bucket_pos[ci];
-        // 旧桶一定非空：访问 + 移除（空时）在稀疏后端单次哈希查找内完成，省去额外的 remove 查找。
-        // 预借用 char_bucket_pos（与 full_buckets 为不相交字段），供闭包内重链 swap_remove 的尾元素。
-        let char_bucket_pos = &mut self.char_bucket_pos;
+        // O(1) swap_remove：`状态[ci].pos` 直接给出 ci 在旧桶中的下标，无需线扫。
+        // 预借用 状态（与 full_buckets 为不相交字段），供闭包内重链 swap_remove 的尾元素。
+        let pos = self.状态[ci].pos as usize;
+        let 状态 = &mut self.状态;
         let (old_bucket_cc, old_bucket_cf, new_old_cc, new_old_cf) = self
             .full_buckets
             .modify_existing_remove_if_empty(old_code_u, |ob| {
@@ -365,7 +399,7 @@ impl Evaluator {
                 if pos != last_idx {
                     let moved_ci = ob.members[last_idx];
                     ob.members[pos] = moved_ci;
-                    char_bucket_pos[moved_ci as usize] = pos;
+                    状态[moved_ci as usize].pos = pos as u32;
                 }
                 ob.members.pop();
 
@@ -403,7 +437,7 @@ impl Evaluator {
 
             let new_pos = new_len;
             nb.members.push(ci as u32);
-            self.char_bucket_pos[ci] = new_pos;
+            self.状态[ci].pos = new_pos as u32;
             nb.freq_sum += freq;
             if freq > nb.max_freq {
                 nb.max_freq = freq;
@@ -424,13 +458,7 @@ impl Evaluator {
             (self.total_collisions + new_old_cc + after_new_cc) - (old_bucket_cc + new_bucket_cc);
         self.collision_frequency = (self.collision_frequency + new_old_cf + after_new_cf)
             - (old_bucket_cf + new_bucket_cf);
-        self.current_codes[ci] = new_code;
-
-        // 全码聚合已变化：标记全码分量缓存为脏（需求 10.1）。
-        // `update_char` 是全码聚合的唯一变更入口（正向移动与回滚反向重放都经此），
-        // 在此单点置脏可保证 `full_score_component` 永远基于最新聚合重算，
-        // 无需在 `try_move`/`try_swap` 的多个分支重复维护。
-        self.full_score_dirty = true;
+        self.状态[ci].code = new_code as u32;
     }
 
     /// 执行全码 _max 硬约束检查

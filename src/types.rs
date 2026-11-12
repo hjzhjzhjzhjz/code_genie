@@ -3,6 +3,15 @@
 // =========================================================================
 
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
+
+/// 汉字拆分的字根列表内联容量。
+///
+/// `code_base = 32` 时 `max_parts ≤ 6`（`32^7 > u32::MAX`），故 6 足以覆盖所有合法规模；
+/// 更小的 `code_base` 若出现更长的拆分，`SmallVec` 会自动溢出到堆（行为正确）。
+/// 内联后 `parts` 与 `frequency` 同处 `CharInfo` 一条缓存行，`calc_code_only` /
+/// `calc_equiv_from_parts` 的字根遍历不再额外解引用一次堆指针——退火热路径每字省一次缓存缺失。
+pub type Parts = SmallVec<[u16; 6]>;
 
 /// 空格键的键位索引（`_`）。注意它只是**一个键的索引**，不是键位数组的长度。
 pub const KEY_SPACE: usize = 26;
@@ -125,8 +134,8 @@ pub struct KeyDistConfig {
 /// 汉字拆分信息
 #[derive(Clone)]
 pub struct CharInfo {
-    /// 拆分后的字根列表（键位索引或分组标记）
-    pub parts: Vec<u16>,
+    /// 拆分后的字根列表（键位索引或分组标记）。内联小向量，热路径免一次堆解引用。
+    pub parts: Parts,
     /// 使用频率
     pub frequency: u64,
 }
