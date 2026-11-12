@@ -328,9 +328,21 @@ jobs:
           fi
           # 产物直接落在 $OUT_DIR，上传清单已包含整个目录。
           # chart -d 要求齐备 output-keymap.txt / 拆分全表.txt / 全字频表.txt。
+          # 拆分全表/全字频表按优先级取：moling/（prepare 产物）→ files_dir（随数据集入库）；
+          # 都没有就跳过页面（不把整次 run 判为 failure）。
           cp "$KEYMAP" "$OUT_DIR/output-keymap.txt"
-          cp moling/拆分全表.txt "$OUT_DIR/拆分全表.txt"
-          cp moling/全字频表.txt "$OUT_DIR/全字频表.txt"
+          CHART_SRC=""
+          if [ -f "moling/拆分全表.txt" ] && [ -f "moling/全字频表.txt" ]; then
+            CHART_SRC="moling"
+          elif [ -f "$FILES_DIR/拆分全表.txt" ] && [ -f "$FILES_DIR/全字频表.txt" ]; then
+            CHART_SRC="$FILES_DIR"
+          fi
+          if [ -z "$CHART_SRC" ]; then
+            echo "::warning::缺 拆分全表.txt/全字频表.txt（moling/ 与 $FILES_DIR 均无），跳过字根表页面"
+            exit 0
+          fi
+          cp "$CHART_SRC/拆分全表.txt" "$OUT_DIR/拆分全表.txt"
+          cp "$CHART_SRC/全字频表.txt" "$OUT_DIR/全字频表.txt"
           if [ -n "$MAPPING" ] && [ -f "$MAPPING" ]; then
             cp "$MAPPING" "$OUT_DIR/roots-mapping.tsv"
           fi

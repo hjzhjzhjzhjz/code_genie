@@ -96,7 +96,7 @@
         ),
     )),
     constraints: Some((
-        max_encodings: 200,        // 字根键位组合去重种数上限 200
+        max_encodings: 195,        // 字根键位组合去重种数上限 195
         encoding_penalty: 0.002,
     )),
 )
