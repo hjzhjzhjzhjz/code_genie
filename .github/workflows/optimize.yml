@@ -343,10 +343,31 @@ jobs:
           fi
           cp "$CHART_SRC/拆分全表.txt" "$OUT_DIR/拆分全表.txt"
           cp "$CHART_SRC/全字频表.txt" "$OUT_DIR/全字频表.txt"
+          # 字根映射：优先用显式 inputs.mapping，否则取数据集目录里的 roots-mapping.tsv。
+          MAP_SRC=""
           if [ -n "$MAPPING" ] && [ -f "$MAPPING" ]; then
-            cp "$MAPPING" "$OUT_DIR/roots-mapping.tsv"
+            MAP_SRC="$MAPPING"
+          elif [ -f "$FILES_DIR/roots-mapping.tsv" ]; then
+            MAP_SRC="$FILES_DIR/roots-mapping.tsv"
           fi
-          ./target/release/code_genie chart -d "$OUT_DIR"
+          if [ -n "$MAP_SRC" ]; then
+            cp "$MAP_SRC" "$OUT_DIR/roots-mapping.tsv"
+            echo "字根映射：$MAP_SRC"
+          fi
+          # PUA 字根字形需专用字体；assets/字根显示字体.ttf 存在则 base64 内嵌进页面。
+          # --schema 仅对星陈数据集显式指定（其余数据集保留 chart 默认 moling）。
+          CHART_ARGS=()
+          if [ -f "assets/字根显示字体.ttf" ]; then
+            CHART_ARGS+=(--font "assets/字根显示字体.ttf")
+          fi
+          if [ "$FILES_DIR" = "inputs-104簇" ]; then
+            CHART_ARGS+=(--schema yustar)
+          fi
+          if [ ${#CHART_ARGS[@]} -gt 0 ]; then
+            ./target/release/code_genie chart -d "$OUT_DIR" "${CHART_ARGS[@]}"
+          else
+            ./target/release/code_genie chart -d "$OUT_DIR"
+          fi
           ls -l "$OUT_DIR"/*.html
 
       - name: 写入 Job Summary
