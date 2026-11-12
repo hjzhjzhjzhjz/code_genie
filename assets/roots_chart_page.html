@@ -8,9 +8,19 @@
   <title>__TITLE__</title>
   <style type="text/css">
 __FONT_FACE__
-  body {
-    //font-family: __EXTRA_FONT__ "Alibaba PuHuiTi 3.0", "MiSans", "MiSans L3", "Plangothic P1", "Plangothic P2", "Monu Hani", "Monu Han2", "Monu Han3", sans-serif;
-    font-family: __EXTRA_FONT__ "TH-Tshyn-P0", "TH-Tshyn-P1", "TH-Tshyn-P2",
+  :root {
+    --bg: #f2f5f4;
+    --card: #ffffff;
+    --ink: #1f2a30;
+    --muted: #64748b;
+    --accent: #14735f;
+    --accent-soft: #e3f1ec;
+    --line: #dfe5e3;
+    --key-shadow: #d3dbd8;
+    --overlay: rgba(16, 28, 26, 0.45);
+    --toolbar-bg: rgba(255, 255, 255, 0.9);
+    --radius: 14px;
+    --root-font: __EXTRA_FONT__ "TH-Tshyn-P0", "TH-Tshyn-P1", "TH-Tshyn-P2",
                  "KaiXinSongA", "KaiXinSongB",
                  "SimSun", "SimSun-ExtB", "SimSun-ExtG",
                  "WenJin Mincho Plane 0", "WenJin Mincho Plane 2", "WenJin Mincho Plane 3",
@@ -19,31 +29,58 @@ __FONT_FACE__
                  "Jigmo", "Jigmo2", "Jigmo3", serif;
   }
 
-  table {
-    margin: 20px auto;
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1518;
+      --card: #1a2327;
+      --ink: #e8eef0;
+      --muted: #8fa3ad;
+      --accent: #3aa58c;
+      --accent-soft: #16302a;
+      --line: #2a373d;
+      --key-shadow: #0a0f11;
+      --overlay: rgba(4, 10, 12, 0.62);
+      --toolbar-bg: rgba(26, 35, 39, 0.9);
+    }
   }
 
-  table, th, td {
-    border: 1px solid black;
-    border-collapse: collapse;
-    padding: 10px;
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    line-height: 1.5;
   }
 
-  caption {
-    margin-bottom: 10px;
+  ::selection { background: var(--accent); color: #fff; }
+
+  a { color: var(--accent); }
+
+  #page_header {
+    text-align: center;
+    margin: 26px 16px 4px;
+  }
+
+  #page_header h1 {
+    margin: 0;
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
   }
 
   .traditional {
-    background-color: lightgrey;
+    color: var(--muted);
   }
 
   /* 繁体根 / 罕用根：清单来自 繁体字根.txt / 罕用字根.txt，显式标注 */
   .trad_root {
-    background-color: #ffe6c7;
+    background-color: #ffe9c8;
   }
 
   .rare_root {
-    background-color: #e8d5f7;
+    background-color: #f0e6fb;
   }
 
   .mark {
@@ -59,118 +96,276 @@ __FONT_FACE__
   }
 
   .mark.rare {
-    color: #8e24aa;
+    color: #a855f7;
   }
 
   #legend {
     display: none;
     justify-content: center;
-    gap: 18px;
-    margin: 0 0 12px 0;
-    font-size: medium;
+    flex-wrap: wrap;
+    gap: 8px 22px;
+    margin: 4px auto 12px;
+    font-size: 14px;
+    color: var(--muted);
     align-items: center;
   }
 
   #legend .swatch {
     display: inline-block;
-    padding: 0 5px;
-    border: 1px solid #aaa;
+    padding: 1px 9px;
+    border-radius: 7px;
+    color: var(--ink);
   }
 
-  #listing table {
-    font-size: x-large;
+  /* ── 键盘字根图 ─────────────────────────────────────────── */
+  #keyboard {
+    max-width: 1500px;
+    margin: 16px auto 34px;
+    padding: 0 20px;
     overflow-x: auto;
   }
 
-  #listing .freq,
-  #listing .rank {
-    text-align: right;
+  #keyboard table {
+    border-collapse: separate;
+    border-spacing: 12px;
+    margin: 0 auto;
   }
 
-  #listing .seq,
-  #listing .letter,
-  #listing .code,
-  #listing .root {
-    text-align: center;
+  #keyboard table, #keyboard th, #keyboard td {
+    border: none;
+    padding: 0;
   }
 
   .row_key th {
-    font-family: sans-serif;
-    font-size: large;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
     text-align: left;
-    color: red;
-    border-bottom: none;
-    padding-bottom: 0px;
+    padding: 0 2px 2px;
+  }
+
+  .row_key .letter {
+    display: inline-block;
+    background: var(--accent);
+    color: #fff;
+    font-size: 19px;
+    font-weight: 700;
+    border-radius: 9px;
+    padding: 3px 14px;
+    letter-spacing: 0.05em;
   }
 
   .row_root td {
-    width: 140px;
-    height: 120px;
-    border-top: none;
+    width: 152px;
+    height: 128px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: 0 3px 0 var(--key-shadow), 0 8px 18px rgba(15, 30, 26, 0.07);
+    padding: 12px 14px;
     word-break: __WORD_BREAK__;
     vertical-align: top;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+
+  .row_root td:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+
+  .row_root td:empty {
+    opacity: 0.4;
+    border-style: dashed;
+    box-shadow: none;
   }
 
   .row_root .root {
+    font-family: var(--root-font);
+    font-size: 25px;
     cursor: pointer;
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 8px;
+  }
+
+  .row_root .root:hover {
+    background: var(--accent-soft);
   }
 
   .row_root .code {
-    font-family: sans-serif;
-    color: blue;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 11px;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: 6px;
+    padding: 1px 6px;
+    margin-left: 3px;
+    vertical-align: 2px;
+    font-weight: 600;
   }
 
-  .hot_root {
-    color: red;
-  }
-
+  /* ── 工具栏 ─────────────────────────────────────────────── */
   #toolbar {
+    position: sticky;
+    top: 10px;
+    z-index: 20;
     display: flex;
     justify-content: center;
     align-items: center;
-    margin-top: 20px;
-    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 8px 26px;
+    margin: 12px auto 6px;
+    padding: 10px 26px;
+    max-width: 1500px;
+    background: var(--toolbar-bg);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: 0 4px 16px rgba(15, 30, 26, 0.06);
   }
 
   #toolbar > div {
-    margin-left: 20px;
-    margin-right: 20px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
   }
 
-  #help_msg {
-    display: none;
-    justify-content: center;
-    align-items: center;
+  #toolbar label {
+    color: var(--muted);
+    font-size: 14px;
   }
 
-  #detail {
+  #toolbar select, #toolbar input[type="text"] {
+    font: inherit;
+    color: var(--ink);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    padding: 7px 12px;
+    outline: none;
+  }
+
+  #toolbar select:focus, #toolbar input[type="text"]:focus {
+    border-color: var(--accent);
+  }
+
+  #toolbar input[type="checkbox"] {
+    accent-color: var(--accent);
+    width: 15px;
+    height: 15px;
+  }
+
+  button {
+    font: inherit;
+    color: var(--ink);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    padding: 7px 16px;
+    cursor: pointer;
+  }
+
+  button:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* ── 弹层：帮助 / 字根详情 ──────────────────────────────── */
+  #help_msg, #detail {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
     display: none;
+    flex-direction: column;
     justify-content: center;
     align-items: center;
+    gap: 14px;
+    background: var(--overlay);
+    backdrop-filter: blur(3px);
+    padding: 24px;
+  }
+
+  #help_msg ol {
+    background: var(--card);
+    color: var(--ink);
+    border-radius: var(--radius);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25);
+    padding: 20px 34px 20px 44px;
+    max-width: 560px;
+    font-size: 15px;
+  }
+
+  #detail_content {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25);
+    padding: 16px 26px;
+    max-width: 780px;
+    max-height: 72vh;
+    overflow: auto;
   }
 
   #detail table {
-    font-size: x-large;
+    font-size: 17px;
     text-align: center;
+    border-collapse: collapse;
   }
 
+  #detail th, #detail td {
+    border: none;
+    border-bottom: 1px solid var(--line);
+    padding: 8px 14px;
+  }
+
+  #detail th {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  #detail td.letter {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+
+  #detail td.code {
+    font-family: ui-monospace, Consolas, monospace;
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  #detail td.root, #detail td.examples {
+    font-family: var(--root-font);
+  }
+
+  #detail .rank, #detail .freq {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── 拆分查询结果 ───────────────────────────────────────── */
   #chaifen_result {
     display: none;
     justify-content: center;
-    align-items: center;
+    align-items: stretch;
     flex-wrap: wrap;
+    gap: 14px;
+    max-width: 1500px;
+    margin: 0 auto;
+    padding: 6px 20px 14px;
   }
 
   #chaifen_result > div {
-    border: 1px solid black;
-    border-radius: 10px;
-    margin: 10px;
-    padding: 10px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: 0 4px 14px rgba(15, 30, 26, 0.06);
+    margin: 0;
+    padding: 14px 20px;
   }
 
   #chaifen_result > div > div {
     display: flex;
     justify-content: center;
+    align-items: center;
   }
 
   #chaifen_result a {
@@ -180,25 +375,64 @@ __FONT_FACE__
   }
 
   .chaifen .char {
-    font-size: xxx-large;
+    font-size: 56px;
+    font-family: var(--root-font);
+    line-height: 1.2;
   }
 
   .chaifen .unicode {
-    margin: 10px;
+    margin: 6px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .chaifen .unicode a {
+    color: var(--muted);
   }
 
   .chaifen .code {
-    font-size: large;
-    font-family: monospace;
+    font-size: 15px;
+    font-family: ui-monospace, Consolas, monospace;
+    color: var(--accent);
+    font-weight: 600;
+    letter-spacing: 0.08em;
   }
 
   .chaifen .root {
-    font-size: x-large;
-    margin: 10px;
+    font-size: 22px;
+    margin: 4px 8px;
+    font-family: var(--root-font);
+  }
+
+  ruby rt {
+    color: var(--muted);
+    font-size: 11px;
+    font-family: sans-serif;
+  }
+
+  @media (max-width: 1100px) {
+    .row_root td { width: 124px; height: 110px; }
+    .row_root .root { font-size: 21px; }
+  }
+
+  @media (max-width: 720px) {
+    #page_header h1 { font-size: 20px; }
+    #toolbar { gap: 6px 12px; padding: 10px 12px; }
+    #keyboard table { border-spacing: 6px; }
+    .row_root td { width: 96px; height: 96px; padding: 8px; }
+    .row_root .root { font-size: 18px; }
+  }
+
+  @media print {
+    #toolbar, #legend, button { display: none !important; }
+    body { background: #fff; }
+    #detail, #help_msg { display: none !important; }
   }
   </style>
 </head>
 <body>
+
+<header id="page_header"><h1>__TITLE__</h1></header>
 
 <!--[if lt IE 8]>
   <p class="browserupgrade">
@@ -256,8 +490,6 @@ Please enable JavaScript to experience the full functionality of our site.
 
 <div id="keyboard"></div>
 
-<div id="listing"></div>
-
 <script type="text/javascript">
 //<![CDATA[
 "use strict";
@@ -275,7 +507,6 @@ __CHART_JS__
 
 var page = 0;
 var rootsRank = new Map();
-var hotRootLastRank = 0;
 var clickedRoot = null;
 var enableFont = roots_mapping ? true : false;
 var isSingleCharRoot = __IS_SINGLE__;
@@ -346,8 +577,7 @@ function createFreqSelectBox() {
 
 function onChangeFreq(p) {
     page = parseInt(p);
-    updateHotRoots();
-    document.getElementById("listing").innerHTML = createTable();
+    computeRootsRank();
     document.getElementById("keyboard").innerHTML = createKeyboard();
 }
 
@@ -405,9 +635,9 @@ function onUpdateFont(checked) {
   }
 }
 
-function updateHotRoots() {
+// 按当前字频档位给字根排名（详情弹窗展示用）
+function computeRootsRank() {
   rootsRank.clear();
-  hotRootLastRank = 0;
 
   let freqs = new Map();
 
@@ -420,7 +650,6 @@ function updateHotRoots() {
   }
 
   let roots = [...freqs.keys()].sort((a, b) => freqs.get(b) - freqs.get(a));
-  let n = Math.round(roots.length / 4);
   let lastFreq = freqs.get(roots[0]);
   let lastRank = 1;
 
@@ -431,15 +660,7 @@ function updateHotRoots() {
       }
       lastFreq = freqs.get(r);
       rootsRank.set(r, lastRank);
-
-      if (i < n) {
-        hotRootLastRank = lastRank;
-      }
   }
-}
-
-function isHotRoot(r) {
-  return rootsRank.get(r) <= hotRootLastRank;
 }
 
 function showDetail(tag) {
@@ -451,7 +672,6 @@ function showDetail(tag) {
   let d = chart_json[l][c][r];
 
   let type = d.rare_root ? "(罕用根)" : d.trad_root ? "(繁体根)" : (d.traditional ? "(繁)" : "");
-  let hot = isHotRoot(r) ? "(前25%)" : "";
 
   let table = `<table><thead><tr>
     <th>编码</th><th>字根</th><th>拼音</th><th>排名</th><th>字频</th><th>例字</th><th>备注</th>
@@ -459,7 +679,7 @@ function showDetail(tag) {
     <td>${c}</td>
     <td>${mr(r)} ${type}</td>
     <td>${d.pinyin}</td>
-    <td>${rootsRank.get(r)} ${hot}</td>
+    <td>${rootsRank.get(r)}</td>
     <td>${d.freq[page]} (${d.char_freq})</td>
     <td>${d.examples.join("")}</td>
     <td>${d.comment}</td>
@@ -511,7 +731,6 @@ function createKeyboard() {
             let d = chart_json[l][c][r];
             let clz = "root";
             if (d.traditional) clz += " traditional";
-            if (isHotRoot(r)) clz += " hot_root";
             clz += rootClass(d);
             keyboard +=`<span class="${clz}" data-letter="${l}" data-code="${c}" data-root="${r}" onclick="showDetail(this)">${mr(r)}</span>${mk(d)}`;
           }
@@ -534,66 +753,7 @@ function createKeyboard() {
   return keyboard;
 }
 
-function createTable() {
-  let table = `
-  <table>
-  <caption>__TITLE__</caption>
-  <thead>
-    <tr><th>序号</th>${isSingleCharRoot ? "" : "<th>键名</th>"}<th>编码</th><th>字根</th><th>排名</th><th>字频</th><th>例字</th><th>备注</th></tr>
-  </thead>
-  <tbody>`;
-
-  let i = 0;
-  let letters = Object.keys(chart_json).sort();
-
-  for (let l of letters) {
-    let codes = Object.keys(chart_json[l]).sort();
-    let letter_rowspan = 0;
-    for (let c of codes) {
-        letter_rowspan += Object.keys(chart_json[l][c]).filter(r => chart_json[l][c][r].freq[page] > 0 && visible(l, c, r)).length;
-    }
-    let td_l = `<td rowspan="${letter_rowspan}" class="letter">${l}</td>`;
-
-    for (let c of codes) {
-      let roots = Object.keys(chart_json[l][c]).filter(r => chart_json[l][c][r].freq[page] > 0 && visible(l, c, r)).sort(
-                   (a, b) => chart_json[l][c][b].freq[page] - chart_json[l][c][a].freq[page]);
-
-      let code_rowspan = roots.length;
-      let td_c = `<td rowspan="${code_rowspan}" class="code">${c}</td>`;
-
-      for (let r of roots) {
-        ++i;
-
-        let d = chart_json[l][c][r];
-        let clz = d.traditional ? "traditional" : "simplified";
-        let clz2 = "";
-        if (isHotRoot(r)) clz2 = "hot_root";
-        let clz3 = rootClass(d);
-
-        table += `
-    <tr>
-      <td class="seq ${clz} ${clz2}">${i}</td>
-      ${isSingleCharRoot ? "" : td_l}
-      ${td_c}
-      <td class="root ${clz} ${clz2}${clz3}"><ruby>${mr(r)}<rp>(</rp><rt>${d.pinyin}</rt><rp>)</rp></ruby>${mk(d)}</td>
-      <td class="rank ${clz} ${clz2}">${rootsRank.get(r)}</td>
-      <td class="freq ${clz} ${clz2}">${d.freq[page]} (${d.char_freq})</td>
-      <td class="examples ${clz}">${d.examples.join("")}</td>
-      <td class="comment ${clz}">${d.comment}</td>
-    </tr>`;
-
-        td_l = "";
-        td_c = "";
-      }
-    }
-  }
-
-  table += `
-  </tbody>
-  </table>`;
-
-  return table;
-}
+// 字根清单表已下线：页面只保留键盘字根图，单根详情仍由 showDetail() 弹窗呈现。
 
 window.onload = function() {
   if (!roots_mapping) {

@@ -20,9 +20,10 @@
 // 2. **不联网下载字体**。脚本 `curl` 拉 `Yuniversus.woff`；这里改成 `--font`
 //    指向本地字体文件，缺省则不内嵌（`body` 字体栈里也没有它）。
 // 3. **Unihan 不自动下载**。脚本会 `HTTP::Tiny->mirror` 拉 Unihan.zip（十兆级、
-//    还要解压）。这里只在 `--unihan-dir`（或缺省探测目录）里找现成的
-//    `Unihan_Readings.txt` / `Unihan_Variants.txt`；找不到就退化：拼音留空、
-//    简繁标记全部为「简」，其余功能不受影响。
+//    还要解压）。这里只在 `--unihan-dir`（或缺省探测目录：输出目录 + 仓库内
+//    `unihan/`）里找现成的 `Unihan_Readings.txt` / `Unihan_Variants.txt`；
+//    找不到就退化：拼音留空、简繁标记全部为「简」，其余功能不受影响。
+//    繁体/罕用字根清单同样会探测仓库内 `dlrk/`。
 // 4. 脚本的 `NO_HTML`、`PAGE_SIZE`、`MAX_EXAMPLES` 环境变量改成命令行参数。
 //
 // ## 两处 perl 语义要当心
@@ -590,12 +591,43 @@ pub(crate) struct Unihan {
     拼音: HashMap<char, String>,
 }
 
+/// 可选数据（Unihan、繁体/罕用字根清单）随仓库放在 `unihan/` / `dlrk/`，
+/// 而 `chart -d` 的输出目录常在别处。从当前工作目录向上找几层，把这些
+/// 目录补进探测列表；找不到就退回原来的「只查输出目录」行为。
+fn 仓库数据目录() -> Vec<PathBuf> {
+    let mut 结果: Vec<PathBuf> = Vec::new();
+    let Ok(mut 层) = std::env::current_dir() else {
+        return 结果;
+    };
+    for _ in 0..=4 {
+        for 子 in ["", "unihan", "dlrk"] {
+            let d = if 子.is_empty() {
+                层.clone()
+            } else {
+                层.join(子)
+            };
+            if d.is_dir() && !结果.contains(&d) {
+                结果.push(d);
+            }
+        }
+        if !层.pop() {
+            break;
+        }
+    }
+    结果
+}
+
 fn 载入字形数据(参: &参数, 源: &Path, 目录: &Path) -> Option<Unihan> {
-    let 目录候选: Vec<PathBuf> = 参
-        .unihan目录
-        .as_ref()
-        .map(|d| vec![PathBuf::from(d)])
-        .unwrap_or_else(|| vec![源.to_path_buf(), 目录.to_path_buf()]);
+    // 显式 --unihan-dir 优先且只认这一个目录；否则按 源/输出目录 →
+    // 仓库内 unihan/（含当前目录向上几层）依次探测。
+    let 目录候选: Vec<PathBuf> = match 参.unihan目录.as_ref() {
+        Some(d) => vec![PathBuf::from(d.as_str())],
+        None => {
+            let mut v = vec![源.to_path_buf(), 目录.to_path_buf()];
+            v.extend(仓库数据目录());
+            v
+        }
+    };
 
     let mut 变体 = None;
     let mut 读音 = None;
@@ -729,9 +761,15 @@ fn 生成页面(
     let chaifen = 读取带行号(chaifen_tsv)?;
     let 字频表 = 读取带行号(全字频文件)?;
 
-    // 繁体根 / 罕用字根清单：显式标注用（文件缺失就不标，不影响其他方案）
-    let 繁体根集 = 读根清单(&[目录.to_path_buf(), 源.to_path_buf()], "繁体字根.txt");
-    let 罕用根集 = 读根清单(&[目录.to_path_buf(), 源.to_path_buf()], "罕用字根.txt");
+    // 繁体根 / 罕用字根清单：显式标注用（文件缺失就不标，不影响其他方案）。
+    // 除输出目录/源目录外，也探测仓库里 dlrk/ 等随仓库分发的位置。
+    let 清单目录 = {
+        let mut v = vec![目录.to_path_buf(), 源.to_path_buf()];
+        v.extend(仓库数据目录());
+        v
+    };
+    let 繁体根集 = 读根清单(&清单目录, "繁体字根.txt");
+    let 罕用根集 = 读根清单(&清单目录, "罕用字根.txt");
     if !繁体根集.is_empty() || !罕用根集.is_empty() {
         println!(
             "  ⑥ 繁体根 {} 个 / 罕用根 {} 个（{:?}）",
