@@ -8,16 +8,6 @@ on:
         required: true
         default: runs/s4-export/output-keymap.txt
         type: string
-      chaifen:
-        description: 纯拆分表（仓库内路径）
-        required: true
-        default: moling/拆分全表.txt
-        type: string
-      mapping:
-        description: 字根映射表（仓库内路径，留空表示不用）
-        required: false
-        default: runs/s4-export/mapping.tsv
-        type: string
       out_name:
         description: 输出文件名
         required: true
@@ -51,12 +41,6 @@ jobs:
           set -o pipefail
           cargo build --release 2>&1 | tee build.log
 
-      # 拆分全表.txt / 字根约束.txt 等是 `code_genie prepare` 的产物，不入库，用前必须先重建。
-      - name: 生成码灵输入文件（code_genie prepare）
-        run: |
-          set -euo pipefail
-          ./target/release/code_genie prepare --dir moling
-
       - name: 提取完整码表（optimize 已产出，无需再导）
         env:
           KEYMAP: ${{ inputs.keymap }}
@@ -69,25 +53,7 @@ jobs:
           echo "--- 行数 ---"
           wc -l < "$OUT_NAME"
 
-      - name: 生成字根表页面（完整分页）
-        if: always()
-        env:
-          KEYMAP: ${{ inputs.keymap }}
-          CHAIFEN: ${{ inputs.chaifen }}
-          MAPPING: ${{ inputs.mapping }}
-        run: |
-          set -euo pipefail
-          # chart -d 要求目录内齐备 output-keymap.txt / 拆分全表.txt / 全字频表.txt；
-          # 后两者由上面的 prepare 步骤产出，故这里只做拼装。
-          mkdir -p 字根图
-          cp "$KEYMAP" 字根图/output-keymap.txt
-          cp "$CHAIFEN" 字根图/拆分全表.txt
-          cp moling/全字频表.txt 字根图/全字频表.txt
-          if [ -n "$MAPPING" ] && [ -f "$MAPPING" ]; then
-            cp "$MAPPING" 字根图/roots-mapping.tsv
-          fi
-          ./target/release/code_genie chart -d 字根图
-          ls -l 字根图/
+      # 字根表页面（chart）已下线：本 workflow 只导出测评码表，不再附带生成 HTML 页面。
 
       - name: 上传码表
         if: always()
@@ -97,6 +63,5 @@ jobs:
           path: |
             ${{ inputs.out_name }}
             build.log
-            字根图/
           if-no-files-found: warn
           retention-days: 14

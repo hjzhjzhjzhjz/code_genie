@@ -39,11 +39,6 @@ on:
         required: true
         default: "[1]"
         type: string
-      mapping:
-        description: 字根映射表（仓库内路径，留空则不套 PUA 显示字）
-        required: false
-        default: ""
-        type: string
       out_dir:
         description: 输出目录名（同时作为 artifact 名的一部分）
         required: true
@@ -315,60 +310,9 @@ jobs:
           echo "ACTUAL_ROUNDS=$k" >> "$GITHUB_ENV"
           echo "=== 重复运行结束：共 $k 轮 ==="
 
-      - name: 生成字根表页面（完整分页）
-        if: always()
-        env:
-          KEYMAP: ${{ inputs.out_dir }}/字根键位表.txt
-          MAPPING: ${{ inputs.mapping }}
-        run: |
-          set -euo pipefail
-          if [ ! -f "$KEYMAP" ]; then
-            echo "::warning::没有 keymap，跳过字根表页面"
-            exit 0
-          fi
-          # 产物直接落在 $OUT_DIR，上传清单已包含整个目录。
-          # chart -d 要求齐备 output-keymap.txt / 拆分全表.txt / 全字频表.txt。
-          # 拆分全表/全字频表按优先级取：moling/（prepare 产物）→ files_dir（随数据集入库）；
-          # 都没有就跳过页面（不把整次 run 判为 failure）。
-          cp "$KEYMAP" "$OUT_DIR/output-keymap.txt"
-          CHART_SRC=""
-          if [ -f "moling/拆分全表.txt" ] && [ -f "moling/全字频表.txt" ]; then
-            CHART_SRC="moling"
-          elif [ -f "$FILES_DIR/拆分全表.txt" ] && [ -f "$FILES_DIR/全字频表.txt" ]; then
-            CHART_SRC="$FILES_DIR"
-          fi
-          if [ -z "$CHART_SRC" ]; then
-            echo "::warning::缺 拆分全表.txt/全字频表.txt（moling/ 与 $FILES_DIR 均无），跳过字根表页面"
-            exit 0
-          fi
-          cp "$CHART_SRC/拆分全表.txt" "$OUT_DIR/拆分全表.txt"
-          cp "$CHART_SRC/全字频表.txt" "$OUT_DIR/全字频表.txt"
-          # 字根映射：优先用显式 inputs.mapping，否则取数据集目录里的 roots-mapping.tsv。
-          MAP_SRC=""
-          if [ -n "$MAPPING" ] && [ -f "$MAPPING" ]; then
-            MAP_SRC="$MAPPING"
-          elif [ -f "$FILES_DIR/roots-mapping.tsv" ]; then
-            MAP_SRC="$FILES_DIR/roots-mapping.tsv"
-          fi
-          if [ -n "$MAP_SRC" ]; then
-            cp "$MAP_SRC" "$OUT_DIR/roots-mapping.tsv"
-            echo "字根映射：$MAP_SRC"
-          fi
-          # PUA 字根字形需专用字体；assets/字根显示字体.ttf 存在则 base64 内嵌进页面。
-          # --schema 仅对星陈数据集显式指定（其余数据集保留 chart 默认 moling）。
-          CHART_ARGS=()
-          if [ -f "assets/字根显示字体.ttf" ]; then
-            CHART_ARGS+=(--font "assets/字根显示字体.ttf")
-          fi
-          if [ "$FILES_DIR" = "inputs-104簇" ]; then
-            CHART_ARGS+=(--schema yustar)
-          fi
-          if [ ${#CHART_ARGS[@]} -gt 0 ]; then
-            ./target/release/code_genie chart -d "$OUT_DIR" "${CHART_ARGS[@]}"
-          else
-            ./target/release/code_genie chart -d "$OUT_DIR"
-          fi
-          ls -l "$OUT_DIR"/*.html
+      # 字根表页面（chart）已按需求下线：优化结束后不再生成 HTML 页面，
+      # 也不再往产物目录拷 拆分全表/全字频表/字根映射/显示字体。
+      # 需要时仍可在本地手动跑：code_genie chart -d <out_dir> [--schema yustar] [--font ...]
 
       - name: 写入 Job Summary
         if: always()
