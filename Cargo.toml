@@ -2,6 +2,8 @@
 name = "code_genie"
 version = "0.1.0"
 edition = "2021"
+# benches/ 由下面的 [[bench]] 显式声明，避免自动发现把同一文件再编一遍。
+autobenches = false
 
 [features]
 default = ["mimalloc"]
@@ -29,6 +31,7 @@ ron = "0.8"
 toml = "0.8"
 
 [dev-dependencies]
+divan = "0.1.21"
 proptest = { version = "1", default-features = false, features = ["std"] }
 
 [profile.release]
@@ -47,3 +50,10 @@ panic = "unwind"
 [[bin]]
 name = "code_genie"
 path = "src/main.rs"
+
+# 退火热点微基准（divan，自带 harness）。
+# 用 #[path] 在 bench crate 内重建模块树，无需 lib target、无需改动 src/main.rs。
+[[bench]]
+name = "annealing_hotspots"
+path = "benches/退火热点.rs"
+harness = false
