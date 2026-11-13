@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::fs;
 
-use rand::RngExt;
+use rand::seq::IndexedRandom;
 
 use crate::types::{char_to_key_index, KeyDistConfig, RootGroup, EQUIV_TABLE_SIZE};
 
@@ -352,7 +352,7 @@ pub fn keymap_to_assignment(
             None => {
                 let allowed = &ctx.groups[gi].allowed_keys;
                 // allowed 恒非空（由 load_fixed 保证）
-                assignment[gi] = allowed[rng.random_range(0..allowed.len())];
+                assignment[gi] = allowed.choose(&mut *rng).copied().unwrap();
                 filled += 1;
             }
         }
@@ -509,7 +509,7 @@ mod keymap_assignment_tests {
             let mut chosen = vec![0u8; group_allowed.len()];
             for gi in 0..group_allowed.len() {
                 let allowed = &group_allowed[gi];
-                let k = allowed[rng.random_range(0..allowed.len())];
+                let k = allowed.choose(&mut rng).copied().unwrap();
                 chosen[gi] = k;
                 root_to_key.insert(format!("g{gi}"), k);
             }
@@ -544,7 +544,7 @@ mod keymap_assignment_tests {
             for gi in 0..n {
                 if (mask >> gi) & 1 == 1 {
                     let allowed = &group_allowed[gi];
-                    let k = allowed[rng.random_range(0..allowed.len())];
+                    let k = allowed.choose(&mut rng).copied().unwrap();
                     root_to_key.insert(format!("g{gi}"), k);
                     covered += 1;
                 }

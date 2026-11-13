@@ -83,7 +83,7 @@ fn greedy_balance_init(ctx: &OptContext, cfg: &Config, rng: &mut impl Rng) -> Ve
         let best = if candidates.is_empty() {
             allowed[0]
         } else {
-            candidates[rng.random_range(0..candidates.len())]
+            candidates.choose(&mut *rng).copied().unwrap()
         };
 
         assignment[gi] = best;
@@ -169,7 +169,7 @@ fn random_valid_init(ctx: &OptContext, rng: &mut impl Rng) -> Vec<u8> {
     let mut assignment = vec![0u8; n];
     for gi in 0..n {
         let allowed = &ctx.groups[gi].allowed_keys;
-        assignment[gi] = allowed[rng.random_range(0..allowed.len())];
+        assignment[gi] = allowed.choose(&mut *rng).copied().unwrap();
     }
     assignment
 }
@@ -645,7 +645,7 @@ fn pick_key_by_headroom(
         if m == 0 {
             return None;
         }
-        return Some(others[rng.random_range(0..m)]);
+        return Some(others[..m].choose(&mut *rng).copied().unwrap());
     }
 
     let mut r = rng.random::<f64>() * total;
@@ -747,7 +747,7 @@ fn try_resolve_conflict(
             if other_keys.is_empty() {
                 continue;
             }
-            other_keys[rng.random_range(0..other_keys.len())]
+            other_keys.choose(&mut *rng).copied().unwrap()
         };
 
         if evaluator.try_move(ctx, assignment, gi, new_key, temp, rng) {
@@ -771,14 +771,14 @@ fn try_key_reorganization(
         return false;
     }
 
-    let k1 = assignment[rng.random_range(0..n)];
+    let k1 = assignment.choose(&mut *rng).copied().unwrap();
     let groups_on_k1 = find_groups_on_key(ctx, assignment, k1);
 
     if groups_on_k1.is_empty() {
         return false;
     }
 
-    let gi = groups_on_k1[rng.random_range(0..groups_on_k1.len())];
+    let gi = groups_on_k1.choose(&mut *rng).copied().unwrap();
     let allowed = &ctx.groups[gi].allowed_keys;
 
     // 同上：栈上内联，随机序列与 collect 顺序完全不变。
@@ -789,7 +789,7 @@ fn try_key_reorganization(
         return false;
     }
 
-    let new_key = other_keys[rng.random_range(0..other_keys.len())];
+    let new_key = other_keys.choose(&mut *rng).copied().unwrap();
     evaluator.try_move(ctx, assignment, gi, new_key, temp, rng)
 }
 
@@ -1093,7 +1093,7 @@ fn enhanced_hill_climb(
             _ => {
                 let r = rng.random_range(0..n);
                 let allowed = &ctx.groups[r].allowed_keys;
-                let new_k = allowed[rng.random_range(0..allowed.len())];
+                let new_k = allowed.choose(&mut *rng).copied().unwrap();
                 evaluator.try_move(ctx, &mut assignment, r, new_k, zero_temp, rng)
             }
         };
@@ -1705,14 +1705,14 @@ pub fn simulated_annealing_resumable(
                 } else {
                     let r = r1;
                     let allowed = &ctx.groups[r].allowed_keys;
-                    let new_k = allowed[rng.random_range(0..allowed.len())];
+                    let new_k = allowed.choose(&mut rng).copied().unwrap();
                     proposal_accepted =
                         evaluator.try_move(ctx, &mut assignment, r, new_k, temp, &mut rng);
                 }
             } else {
                 let r = rng.random_range(0..n_groups);
                 let allowed = &ctx.groups[r].allowed_keys;
-                let new_k = allowed[rng.random_range(0..allowed.len())];
+                let new_k = allowed.choose(&mut rng).copied().unwrap();
                 proposal_accepted =
                     evaluator.try_move(ctx, &mut assignment, r, new_k, temp, &mut rng);
             }
@@ -2373,7 +2373,7 @@ mod conflict_tests {
         for _ in 0..60 {
             let gi = rng.random_range(0..freqs.len());
             let allowed = &ctx.groups[gi].allowed_keys;
-            a[gi] = allowed[rng.random_range(0..allowed.len())];
+            a[gi] = allowed.choose(&mut rng).copied().unwrap();
             cache.sync(&ctx, &a);
         }
 
