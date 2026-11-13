@@ -108,7 +108,7 @@ pub fn run(参: &参数) -> Result<(), String> {
     // `拆分全表.txt` 是补齐四码后的串（中：口 丨 丨 口），按它取码会得出 ckkc；
     // 真实输入编码必须按真根走方案规则（星陈 2 根 → A1 A2 S2 S1），中即 cksl。
     // 所以拆分查询与 mabiao.tsv 都要用真根；找不到原始表才退回补齐串。
-    let 真实拆分 = match 找原始拆分表(&目录, &源) {
+    let 真实拆分 = match 找原始拆分表(&目录, &源, &参.方案) {
         Some(路径) => {
             let 表 = 读真实拆分(&路径)?;
             println!("  ② 真实拆分        {} 字（{}）", 表.len(), 路径.display());
@@ -154,6 +154,7 @@ pub fn run(参: &参数) -> Result<(), String> {
         &js,
         &高频文件,
         unihan.as_ref(),
+        全码数,
     )?;
 
     Ok(())
@@ -188,17 +189,51 @@ fn 找文件(目录们: &[PathBuf], 名: &str) -> Option<PathBuf> {
     None
 }
 
-/// 找带 `.0/.1` 后缀的原始拆分表（如 `单字拆分-星陈-全字集-内置字频.txt`）。
-/// 优先输出目录的 inputs/，再退到 source/、输出目录、仓库数据目录。
-fn 找原始拆分表(目录: &Path, 源: &Path) -> Option<PathBuf> {
-    let mut 候选: Vec<PathBuf> = vec![目录.join("inputs"), 源.to_path_buf(), 目录.to_path_buf()];
-    for d in 仓库数据目录() {
-        候选.push(d.join("inputs"));
-        候选.push(d.join("inputs-104簇"));
-        候选.push(d);
+/// 方案名在原始拆分表文件名里的常见写法（简体 / 繁体 / 拉丁名）。
+/// 文件名如 `单字拆分-星陈-全字集-内置字频.txt`，而 schema 里是繁体「星陳」，故都认。
+fn 方案别名(方案: &str) -> &'static [&'static str] {
+    match 方案 {
+        "yustar" => &["星陈", "星陳", "yustar"],
+        "moling" => &["魔灵", "魔靈", "moling"],
+        "yuling" => &["灵明", "靈明", "yuling"],
+        _ => &[],
     }
-    for d in 候选 {
-        let Ok(项) = fs::read_dir(&d) else { continue };
+}
+
+/// 从按优先级排好的候选里挑一个：先找文件名含方案名的，找不到退回第一个。
+/// 返回 (索引, 是否命中方案名)；未知方案不做匹配，也不告警。
+fn 选拆分表(全部: &[PathBuf], 方案: &str) -> (usize, bool) {
+    let 别名 = 方案别名(方案);
+    if 别名.is_empty() {
+        return (0, true);
+    }
+    let 命中方案 = |p: &PathBuf| {
+        let n = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        别名.iter().any(|a| n.contains(a))
+    };
+    match 全部.iter().position(命中方案) {
+        Some(i) => (i, true),
+        None => (0, false),
+    }
+}
+
+/// 找带 `.0/.1` 后缀的原始拆分表（如 `单字拆分-星陈-全字集-内置字频.txt`）。
+/// 候选目录按优先级：输出目录的 inputs/ → 源目录 → 输出目录 → 仓库数据目录；
+/// 同一个目录内按文件名排序。
+/// 原来「第一个有候选的目录里取字典序第一个」在多数据集共存时会选错，
+/// 现在跨目录优先取文件名含当前方案名的表；候选多于一个或名称不符时告警。
+fn 找原始拆分表(目录: &Path, 源: &Path, 方案: &str) -> Option<PathBuf> {
+    let mut 候选目录: Vec<PathBuf> =
+        vec![目录.join("inputs"), 源.to_path_buf(), 目录.to_path_buf()];
+    for d in 仓库数据目录() {
+        候选目录.push(d.join("inputs"));
+        候选目录.push(d.join("inputs-104簇"));
+        候选目录.push(d);
+    }
+
+    let mut 全部: Vec<PathBuf> = Vec::new();
+    for d in &候选目录 {
+        let Ok(项) = fs::read_dir(d) else { continue };
         let mut 文件: Vec<PathBuf> = 项
             .filter_map(|e| e.ok())
             .map(|e| e.path())
@@ -211,11 +246,40 @@ fn 找原始拆分表(目录: &Path, 源: &Path) -> Option<PathBuf> {
             })
             .collect();
         文件.sort();
-        if let Some(p) = 文件.first() {
-            return Some(p.clone());
-        }
+        全部.extend(文件);
     }
-    None
+    if 全部.is_empty() {
+        return None;
+    }
+
+    let 名 = |p: &PathBuf| {
+        p.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    // 全部 已按「目录优先级 → 目录内文件名」排好；先找方案匹配，找不到再退回第一个
+    let (序号, 命中) = 选拆分表(&全部, 方案);
+    let 选中 = &全部[序号];
+
+    if 全部.len() > 1 || !命中 {
+        let mut 列表: Vec<String> = 全部.iter().take(6).map(名).collect();
+        if 全部.len() > 6 {
+            列表.push(format!("…（共 {} 个）", 全部.len()));
+        }
+        println!(
+            "  ⚠ 原始拆分表候选 {} 个：{}；{} → {}",
+            全部.len(),
+            列表.join("、"),
+            if 命中 {
+                "按方案名匹配"
+            } else {
+                "方案名未命中，按目录优先级"
+            },
+            选中.display()
+        );
+    }
+    Some(选中.clone())
 }
 
 /// 读原始拆分表：第二列按空白切根，丢弃 `.1` 补码根、去掉 `.0` 后缀，
@@ -380,13 +444,24 @@ fn 生成码表(
     // 再走同一套方案取码规则（星陈 2 根 A1 A2 S2 S1：中 → 口c 丨k 丨s 口l = cksl）。
     if let Some(表) = 真实拆分 {
         let mut 命中 = 0usize;
+        let mut 未命中例 = Vec::new();
         for (字, 根, _) in &mut 拆分 {
             if let Some(真根) = 表.get(字) {
                 *根 = 真根.clone();
                 命中 += 1;
+            } else if 未命中例.len() < 8 {
+                未命中例.push(字.clone());
             }
         }
         println!("  ③ 按真实拆分取码  {} / {} 字", 命中, 拆分.len());
+        let 缺 = 拆分.len() - 命中;
+        if 缺 > 0 {
+            println!(
+                "    ⚠ {} 字未在原始拆分表命中，全码退回补齐四码串（示例：{}）",
+                缺,
+                未命中例.join(" ")
+            );
+        }
     }
 
     let (文本, 全码数, _缺根, _统计) =
@@ -847,6 +922,7 @@ fn 生成页面(
     js: &str,
     全字频文件: &Path,
     unihan: Option<&Unihan>,
+    覆盖字数: usize,
 ) -> Result<(), String> {
     let roots = 读取带行号(roots_tsv)?;
     let chaifen = 读取带行号(chaifen_tsv)?;
@@ -1093,7 +1169,9 @@ fn 生成页面(
         )
         .replace("__CHARINFO_JS__", js)
         .replace("__CHART_JS__", &脚本)
-        .replace("__IS_SINGLE__", if 全单字根 { "true" } else { "false" });
+        .replace("__IS_SINGLE__", if 全单字根 { "true" } else { "false" })
+        // 页面里「本图码表覆盖 N 字」由实际 mabiao.tsv 条数注入，换字集不会说错
+        .replace("__COVERED_CHARS__", &覆盖字数.to_string());
 
     let 输出 = 目录.join(format!("{}-{日期}.html", 参.方案));
     fs::write(&输出, &页面).map_err(|e| format!("写 {} 失败：{e}", 输出.display()))?;
@@ -1276,6 +1354,30 @@ pub(crate) fn 转base64(数据: &[u8]) -> String {
 mod 测试 {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn 选拆分表_按方案名优先() {
+        let 全部 = vec![
+            PathBuf::from("inputs/单字拆分-魔灵-全字集.txt"),
+            PathBuf::from("inputs/单字拆分-星陈-全字集-内置字频.txt"),
+            PathBuf::from("inputs/单字拆分-星陈-简版.txt"),
+        ];
+        // 不能因为字典序先出现「魔灵」就选错数据集；星陈有两份时取优先级靠前的
+        assert_eq!(选拆分表(&全部, "yustar"), (1, true));
+        assert_eq!(选拆分表(&全部, "moling"), (0, true));
+    }
+
+    #[test]
+    fn 选拆分表_繁体别名与未命中() {
+        let 全部 = vec![
+            PathBuf::from("单字拆分-魔灵-x.txt"),
+            PathBuf::from("单字拆分-星陳-繁体.txt"),
+        ];
+        assert_eq!(选拆分表(&全部, "yustar"), (1, true));
+        let 无 = vec![PathBuf::from("单字拆分-魔灵-x.txt")];
+        assert_eq!(选拆分表(&无, "yustar"), (0, false));
+        assert_eq!(选拆分表(&无, "未知方案"), (0, true));
+    }
 
     /// 写一个临时文件，返回路径；测试结束自动删除由 Drop 处理不了，用固定子目录
     fn 写临时(名: &str, 内容: &str) -> PathBuf {

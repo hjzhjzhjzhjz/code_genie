@@ -643,7 +643,7 @@ function onChangeChaifen(text) {
   }
 
   if (未收录.length > 0) {
-    html += `<div class="notice">未收录：${未收录.map(esc).join(" ")}<br><small>本图码表覆盖 15479 字，扩展区生僻字、字母、标点无拆分</small></div>`;
+    html += `<div class="notice">未收录：${未收录.map(esc).join(" ")}<br><small>本图码表覆盖 __COVERED_CHARS__ 字，扩展区生僻字、字母、标点无拆分</small></div>`;
   }
   html += '<button class="chaifen-hide" onclick="hideChaifen()">隐藏</button>';
   容器.innerHTML = html;

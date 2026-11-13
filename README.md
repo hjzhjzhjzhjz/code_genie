@@ -28,7 +28,7 @@ cargo build --release
 |------|------|----------|
 | `optimize`（默认） | 跑模拟退火优化；给 `--resume -d <dir>` 从 checkpoint 续算 | `code_genie -c config.ron optimize -d out` |
 | `run` | 一轮完整流程：备份输入 → prepare → optimize，写 `COMMENT.txt` 与日志 | `code_genie run --dir moling --comment "第一轮"` |
-| `chart` | 生成字根表页面（完整分页）：roots/chaifen/mabiao/js/html 全套 | `code_genie chart -d out` |
+| `chart` | 生成字根键位图（单页 HTML）：roots/chaifen/mabiao/js/html 全套，需手动执行 | `code_genie chart -d out` |
 | `assess` | 宇浩测评对比 + 方案档案；`--qualify` 只列达标方案 | `code_genie assess --dir runs --yuhao-dir yuhao-assess --qualify` |
 | `rime-convert` | 以星月方案包为底包只换码 | `code_genie rime-convert --base <星月底包> --output <算码目录> --chaifen 拆分全表.txt` |
 | `sentence` | 整句准确率（逐单元 + 连续码流）；词典吃 dict.yaml 或 TSV | `code_genie sentence --full-dict 完整码表.txt --corpus 语料.txt` |

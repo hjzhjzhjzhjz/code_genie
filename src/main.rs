@@ -165,7 +165,7 @@ enum Commands {
         scale: Option<String>,
     },
 
-    /// 生成字根表页面（完整分页）：产 roots/chaifen/mabiao/.js/.html 全套
+    /// 生成字根键位图（单页 HTML）：产 roots/chaifen/mabiao/.js/.html 全套
     #[command(name = "chart")]
     Chart {
         /// 优化输出目录（需含 output-keymap.txt / 拆分全表.txt / 全字频表.txt；
@@ -201,7 +201,7 @@ enum Commands {
         #[arg(long = "top-chars", default_value_t = 8000)]
         top_chars: usize,
 
-        /// 只出 .js / .tsv，不出分页 .html
+        /// 只出 .js / .tsv，不出 .html
         #[arg(long = "no-page")]
         no_page: bool,
     },

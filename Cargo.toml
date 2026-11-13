@@ -2,8 +2,16 @@
 name = "code_genie"
 version = "0.1.0"
 edition = "2024"
+# 源码用了 edition 2024 的 let chains（稳定于 1.88），MSRV 以它为下限而非 edition 的 1.85。
+rust-version = "1.88"
 # benches/ 由下面的 [[bench]] 显式声明，避免自动发现把同一文件再编一遍。
 autobenches = false
+
+# Cargo 1.100 起自带 lint 系统：把「未用依赖」从默认 warn 提升为 deny，
+# 防止再出现 hashbrown 0.14 那种源码无引用却长期挂着的 crate。
+# 注意只对 [dependencies] 生效，dev-dependencies 不受检查。
+[lints.cargo]
+unused_dependencies = "deny"
 
 [features]
 default = ["mimalloc"]
