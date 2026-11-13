@@ -32,8 +32,7 @@ pub fn 读行(path: &Path) -> Result<Vec<String>, String> {
 pub fn 写文本(path: &Path, 内容: &str) -> Result<(), String> {
     if let Some(父) = path.parent() {
         if !父.as_os_str().is_empty() {
-            fs::create_dir_all(父)
-                .map_err(|e| format!("创建目录 {} 失败：{}", 父.display(), e))?;
+            fs::create_dir_all(父).map_err(|e| format!("创建目录 {} 失败：{}", 父.display(), e))?;
         }
     }
     fs::write(path, 内容).map_err(|e| format!("写入 {} 失败：{}", path.display(), e))
@@ -46,8 +45,7 @@ pub fn 写文本(path: &Path, 内容: &str) -> Result<(), String> {
 pub fn 追加文本(path: &Path, 内容: &str) -> Result<(), String> {
     if let Some(父) = path.parent() {
         if !父.as_os_str().is_empty() {
-            fs::create_dir_all(父)
-                .map_err(|e| format!("创建目录 {} 失败：{}", 父.display(), e))?;
+            fs::create_dir_all(父).map_err(|e| format!("创建目录 {} 失败：{}", 父.display(), e))?;
         }
     }
     let mut 文件 = fs::OpenOptions::new()
