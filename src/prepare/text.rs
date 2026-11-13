@@ -30,10 +30,8 @@ pub fn 读行(path: &Path) -> Result<Vec<String>, String> {
 /// 写前先确保父目录存在：prepare 的产物目录（如 `moling/`）不入库、常需由调用方
 /// 在 CI 里自建，若缺失裸 `fs::write` 会报 ENOENT，故这里兜底 `create_dir_all`。
 pub fn 写文本(path: &Path, 内容: &str) -> Result<(), String> {
-    if let Some(父) = path.parent() {
-        if !父.as_os_str().is_empty() {
-            fs::create_dir_all(父).map_err(|e| format!("创建目录 {} 失败：{}", 父.display(), e))?;
-        }
+    if let Some(父) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(父).map_err(|e| format!("创建目录 {} 失败：{}", 父.display(), e))?;
     }
     fs::write(path, 内容).map_err(|e| format!("写入 {} 失败：{}", path.display(), e))
 }
@@ -43,10 +41,8 @@ pub fn 写文本(path: &Path, 内容: &str) -> Result<(), String> {
 /// 与 `写文本` 同理：写前确保父目录存在，避免 prepare 产物目录（如 `moling/`）缺失时
 /// `OpenOptions::create` 因父目录不存在而 ENOENT。
 pub fn 追加文本(path: &Path, 内容: &str) -> Result<(), String> {
-    if let Some(父) = path.parent() {
-        if !父.as_os_str().is_empty() {
-            fs::create_dir_all(父).map_err(|e| format!("创建目录 {} 失败：{}", 父.display(), e))?;
-        }
+    if let Some(父) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(父).map_err(|e| format!("创建目录 {} 失败：{}", 父.display(), e))?;
     }
     let mut 文件 = fs::OpenOptions::new()
         .create(true)
