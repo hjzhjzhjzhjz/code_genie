@@ -83,22 +83,6 @@ __FONT_FACE__
     background-color: #f0e6fb;
   }
 
-  .mark {
-    font-size: 0.5em;
-    font-family: sans-serif;
-    vertical-align: super;
-    margin-left: 1px;
-    font-weight: bold;
-  }
-
-  .mark.trad {
-    color: #d2691e;
-  }
-
-  .mark.rare {
-    color: #a855f7;
-  }
-
   #legend {
     display: none;
     justify-content: center;
@@ -345,7 +329,7 @@ __FONT_FACE__
   #chaifen_result {
     display: none;
     justify-content: center;
-    align-items: stretch;
+    align-items: flex-start;
     flex-wrap: wrap;
     gap: 14px;
     max-width: 1500px;
@@ -366,6 +350,32 @@ __FONT_FACE__
     display: flex;
     justify-content: center;
     align-items: center;
+  }
+
+  #chaifen_result > button.chaifen-hide {
+    align-self: center;
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  #chaifen_result .notice {
+    align-self: center;
+    max-width: 320px;
+    padding: 12px 16px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--muted);
+  }
+
+  #chaifen_result .notice small {
+    color: var(--muted);
+    opacity: 0.8;
+  }
+
+  .chaifen .rootnames {
+    margin: 2px 8px 6px;
+    font-size: 12px;
+    color: var(--muted);
   }
 
   #chaifen_result a {
@@ -396,6 +406,14 @@ __FONT_FACE__
     color: var(--accent);
     font-weight: 600;
     letter-spacing: 0.08em;
+  }
+
+  .chaifen .code .buma {
+    color: var(--muted);
+    font-weight: 400;
+    font-size: 0.9em;
+    letter-spacing: 0;
+    opacity: 0.85;
   }
 
   .chaifen .root {
@@ -453,15 +471,15 @@ Please enable JavaScript to experience the full functionality of our site.
   <!--div><label for="practice">练习： </label><input type="text" id="practice"/></div>
   <div><label for="progress">进度： </label><progress id="progress" value="10" max="100"></progress></div-->
   <div id="d_trad"><input type="checkbox" id="show_trad" onchange="onToggleTrad(this.checked)"/><label for="show_trad">显示繁体/罕用字根</label></div>
-  <div id="d_font"><input type="checkbox" id="enable_font" checked onchange="onUpdateFont(this.checked)"/><label for="enable_font">启用字根字体</label></div>
   <div><button onclick="showHelp()">帮助</button></div>
 </div>
 
 
 <div id="help_msg">
   <ol>
-    <li>Safari 浏览器<a href="https://dev.to/masakudamatsu/don-t-locally-host-google-fonts-for-the-sake-of-safari-bkg">不支持用户本地安装的字体</a>，所以只支持 Chrome 和 Firefox 浏览器。</li>
-    <li>需要本地安装以下任意一款大字集字体：</li>
+    <li>拆分卡片的「全码」中，括号前的字母依次对应上方字根；括号内的字母是补码（小码），不对应字根。</li>
+    <li>字根显示字体已内嵌在页面中，无需本地安装，打开即可显示 PUA 字根字形。</li>
+    <li>少数超出内嵌字体覆盖范围的生僻字形，建议安装以下任意一款大字集字体兜底：</li>
     <ul>
       <li><a href="http://cheonhyeong.com/Simplified/download.html">天珩全字库(TH-Tshyn)</a></li>
       <li><a href="http://soongsky.com/sky/download.php">超集宋体</a></li>
@@ -508,25 +526,14 @@ __CHART_JS__
 var page = 0;
 var rootsRank = new Map();
 var clickedRoot = null;
-var enableFont = roots_mapping ? true : false;
 var isSingleCharRoot = __IS_SINGLE__;
 
-function mr(r) {    // map root
-  if (enableFont && r in roots_mapping) {
+function mr(r) {    // map root：字根字体恒启用，有映射就用 PUA 显示字
+  if (roots_mapping && r in roots_mapping) {
     return roots_mapping[r];
   } else {
     return r;
   }
-}
-
-function mk(d) {    // 繁体根 / 罕用根角标（清单标注，优先显示「罕」）
-  if (d.rare_root) {
-    return ' <sup class="mark rare">罕</sup>';
-  }
-  if (d.trad_root) {
-    return ' <sup class="mark trad">繁</sup>';
-  }
-  return "";
 }
 
 function rootClass(d) {   // 繁体根 / 罕用根底色
@@ -577,65 +584,83 @@ function createFreqSelectBox() {
 
 function onChangeFreq(p) {
     page = parseInt(p);
-    computeRootsRank();
+    // 排名按全局字频算，不随档位变，只在 onload 里算一次即可。
     document.getElementById("keyboard").innerHTML = createKeyboard();
 }
 
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
 function onChangeChaifen(text) {
-  let infos = charinfo(text).filter(i => i.info != null);
-  if (infos.length > 0) {
-    let html = "";
-
-    for (let info of infos) {
-      let unicode = info.char.codePointAt(0).toString(16).toUpperCase();
-      let fmt_chaifen = (cf) => cf.map(f => `<ruby>${mr(f.root)}<rt>${f.code}</rt></ruby>`).join("");
-
-      html += `
-        <div class="chaifen">
-          <div class="char">${info.char}</div>
-          <div class="unicode"><a href="https://www.unicode.org/cgi-bin/GetUnihanData.pl?codepoint=${info.char}" target="_blank" rel="noreferer" title="Unihan Database">U+${unicode}</a></div>
-          <div class="code">${info.info.codes.join(" ")}</div>
-          <div class="root">${info.info.chaifens.map(fmt_chaifen).join("·")}</div>
-          <div class="links">
-            <a href="https://zi.tools/zi/${info.char}" target="_blank" rel="noreferrer" title="字统网查询">字</a>
-            <a href="http://www.yedict.com/zscontent.asp?uni=${unicode}" target="_blank" rel="noreferrer" title="叶典网查询">叶</a>
-            <a href="https://www.zdic.net/hans/${info.char}" target="_blank" rel="noreferrer" title="汉典查询">汉</a>
-            <a href="https://ctext.org/dictionary.pl?if=gb&amp;char=${info.char}" target="_blank" rel="noreferrer" title="中國哲學書電子化計劃查询">哲</a>
-            <a href="https://hanyu.baidu.com/zici/s?wd=${info.char}" target="_blank" rel="noreferrer" title="百度汉语">百</a>
-          </div>
-        </div>`;
-    }
-
-    html += '<button style="margin-left: 10px" onclick="hideChaifen()">隐藏</button>';
-    document.getElementById("chaifen_result").innerHTML = html;
-    document.getElementById("chaifen_result").style.display = "flex";
-  } else {
-    document.getElementById("chaifen_result").style.display = "none";
-    document.getElementById("chaifen_result").innerHTML = "";
+  let 命中 = [], 未收录 = [];
+  for (let x of charinfo(text)) {
+    if (Array.isArray(x)) { 未收录.push(x[0]); continue; }
+    if (x.info) 命中.push(x); else 未收录.push(x.char);
   }
+
+  let 容器 = document.getElementById("chaifen_result");
+  if (!text || (命中.length === 0 && 未收录.length === 0)) {
+    容器.style.display = "none";
+    容器.innerHTML = "";
+    return;
+  }
+
+  let html = "";
+  for (let info of 命中) {
+    let unicode = info.char.codePointAt(0).toString(16).toUpperCase();
+    // 字根上方只标键位字母，与全码逐位一致；两字母根码放 tooltip。
+    let fmt_chaifen = (cf, idx) => {
+      let 码 = info.info.codes[idx] || info.info.codes[0] || "";
+      return cf.map((f, l) => {
+        let 键 = (码[l] || (f.code || "").charAt(0)).toLowerCase();
+        let 原名 = f.root.replace(/[{}]/g, "");
+        return `<ruby title="${esc(原名)}｜${esc(f.code)}">${mr(f.root)}<rt>${键}</rt></ruby>`;
+      }).join("");
+    };
+    // 全码前 N 位依次对应上方字根，其余是补码（小码）：用括号包起来并淡化。
+    let fmt_code = (码, idx) => {
+      let 串 = info.info.chaifens[idx] || info.info.chaifens[0] || [];
+      let n = Math.min(Math.max(串.length, 1), 码.length);
+      let 补码 = 码.slice(n);
+      return esc(码.slice(0, n)) + (补码
+        ? `<span class="buma" title="括号内为补码（小码），不对应字根">(${esc(补码)})</span>`
+        : "");
+    };
+    // PUA 字形看起来像别的字时，补一行原名方便核对。
+    let 原名们 = [...new Set(info.info.chaifens.flatMap(
+      cf => cf.filter(f => mr(f.root) !== f.root).map(f => f.root.replace(/[{}]/g, ""))
+    ))];
+
+    html += `
+        <div class="chaifen">
+          <div class="char">${esc(info.char)}</div>
+          <div class="unicode"><a href="https://www.unicode.org/cgi-bin/GetUnihanData.pl?codepoint=${info.char}" target="_blank" rel="noreferer" title="Unihan Database">U+${unicode}</a></div>
+          <div class="code">全码 ${info.info.codes.map(fmt_code).join(" ")}</div>
+          <div class="root">${info.info.chaifens.map(fmt_chaifen).join("·")}</div>
+          ${原名们.length ? `<div class="rootnames">字根名：${原名们.map(esc).join(" · ")}</div>` : ""}
+        </div>`;
+  }
+
+  if (未收录.length > 0) {
+    html += `<div class="notice">未收录：${未收录.map(esc).join(" ")}<br><small>本图码表覆盖 15479 字，扩展区生僻字、字母、标点无拆分</small></div>`;
+  }
+  html += '<button class="chaifen-hide" onclick="hideChaifen()">隐藏</button>';
+  容器.innerHTML = html;
+  容器.style.display = "flex";
 }
 
 function hideChaifen() {
     document.getElementById("chaifen_result").style.display = "none";
 }
 
-function onUpdateFont(checked) {
-  enableFont = checked;
-  onChangeFreq(page);
-
-  let chaifen_result = document.getElementById("chaifen_result");
-  if (chaifen_result.style.display != "none") {
-    let chaifen = document.getElementById("chaifen");
-    onChangeChaifen(chaifen.value);
-  }
-
-  let detail = document.getElementById("detail");
-  if (detail.style.display != "none" && clickedRoot) {
-    showDetail(clickedRoot);
-  }
+// 字根组排名：按覆盖字频权重（char_freq）降序，与字集档位无关。
+// 原来用 freq[page]（当前档位覆盖字数），切档位排名会变，且「木」这类
+// 出现次数多但字频低的根会被排到前面；改用字频才符合「按字频排名」。
+function rootFreq(d) {
+  return parseFloat(d.char_freq) || 0;
 }
 
-// 按当前字频档位给字根排名（详情弹窗展示用）
 function computeRootsRank() {
   rootsRank.clear();
 
@@ -644,7 +669,7 @@ function computeRootsRank() {
   for (let l in chart_json) {
     for (let c in chart_json[l]) {
       for (let r in chart_json[l][c]) {
-        freqs.set(r, chart_json[l][c][r].freq[page]);
+        freqs.set(r, rootFreq(chart_json[l][c][r]));
       }
     }
   }
@@ -674,7 +699,7 @@ function showDetail(tag) {
   let type = d.rare_root ? "(罕用根)" : d.trad_root ? "(繁体根)" : (d.traditional ? "(繁)" : "");
 
   let table = `<table><thead><tr>
-    <th>编码</th><th>字根</th><th>拼音</th><th>排名</th><th>字频</th><th>例字</th><th>备注</th>
+    <th>编码</th><th>字根</th><th>拼音</th><th>字频排名</th><th>字频</th><th>例字</th><th>备注</th>
     </tr></thead><tbody><tr>
     <td>${c}</td>
     <td>${mr(r)} ${type}</td>
@@ -719,27 +744,29 @@ function createKeyboard() {
       keyboard += "<td>";
 
       if (chart_json[l]) {
-        let codes = Object.keys(chart_json[l]).sort();
-
-        for (let c of codes) {
-          let roots = Object.keys(chart_json[l][c]).filter(r => chart_json[l][c][r].freq[page] > 0 && visible(l, c, r)).sort(
-                          (a, b) => chart_json[l][c][b].freq[page] - chart_json[l][c][a].freq[page]);
-
-          keyboard += `<span id="code_${c}">`;
-
-          for (let r of roots) {
+        // 键帽内字根跨编码组按覆盖字频率（char_freq）全局降序，与详情弹窗
+        // 「字频排名」同口径、全局固定；freq[page] > 0 && visible(...) 只用于
+        // 过滤当前字集档位下是否有字，不参与排序。
+        let roots = [];
+        for (let c of Object.keys(chart_json[l])) {
+          for (let r of Object.keys(chart_json[l][c])) {
             let d = chart_json[l][c][r];
-            let clz = "root";
-            if (d.traditional) clz += " traditional";
-            clz += rootClass(d);
-            keyboard +=`<span class="${clz}" data-letter="${l}" data-code="${c}" data-root="${r}" onclick="showDetail(this)">${mr(r)}</span>${mk(d)}`;
+            if (d.freq[page] > 0 && visible(l, c, r)) roots.push({ r, c, d });
           }
-          keyboard += '</span>';
+        }
+        roots.sort((a, b) => rootFreq(b.d) - rootFreq(a.d) ||
+                             a.r.localeCompare(b.r, "zh"));
 
-          if (c.length > 1 && roots.length > 0) {
-            keyboard += `<span class="code">${c.substring(1)}</span>`;
+        for (let it of roots) {
+          let d = it.d;
+          let clz = "root";
+          if (d.traditional) clz += " traditional";
+          clz += rootClass(d);
+          keyboard += `<span class="${clz}" data-letter="${l}" data-code="${it.c}" data-root="${it.r}" onclick="showDetail(this)">${mr(it.r)}</span>`;
+          // 编码组被打散后，小徽章改为每个字根自带（第二位键位字母）
+          if (it.c.length > 1) {
+            keyboard += `<span class="code">${it.c.substring(1)}</span>`;
           }
-
           keyboard += " ";
         }
       }
@@ -756,14 +783,12 @@ function createKeyboard() {
 // 字根清单表已下线：页面只保留键盘字根图，单根详情仍由 showDetail() 弹窗呈现。
 
 window.onload = function() {
-  if (!roots_mapping) {
-    document.getElementById("d_font").style.display = "none";
-  }
   // 默认不显示繁体/罕用字根：有清单才给开关，图例等勾选后再出
   if (!hasMarkedRoots()) {
     document.getElementById("d_trad").style.display = "none";
   }
   document.getElementById("s_freq").innerHTML = createFreqSelectBox();
+  computeRootsRank();
   onChangeFreq(0);
 }
 

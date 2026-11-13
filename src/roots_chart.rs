@@ -103,14 +103,31 @@ pub fn run(参: &参数) -> Result<(), String> {
     let 拆分数 = 拆分数.map_err(|e| format!("写 chaifen.tsv 失败：{e}"))?;
     println!("  ② chaifen.tsv      {} 个字", 拆分数);
 
-    // 3. mabiao.tsv -------------------------------------------------------
+    // 3. 真实拆分 ---------------------------------------------------------
+    // 带 `.0/.1` 后缀的原始拆分表里，`.0` 是真根、`.1` 是补码重复。
+    // `拆分全表.txt` 是补齐四码后的串（中：口 丨 丨 口），按它取码会得出 ckkc；
+    // 真实输入编码必须按真根走方案规则（星陈 2 根 → A1 A2 S2 S1），中即 cksl。
+    // 所以拆分查询与 mabiao.tsv 都要用真根；找不到原始表才退回补齐串。
+    let 真实拆分 = match 找原始拆分表(&目录, &源) {
+        Some(路径) => {
+            let 表 = 读真实拆分(&路径)?;
+            println!("  ② 真实拆分        {} 字（{}）", 表.len(), 路径.display());
+            Some(表)
+        }
+        None => {
+            println!("  ② 真实拆分        未找到 单字拆分-*.txt，退回补齐四码串");
+            None
+        }
+    };
+
+    // 4. mabiao.tsv -------------------------------------------------------
     let mabiao_tsv = 目录.join("mabiao.tsv");
-    let (码表, 全码数) = 生成码表(&键位文件, &拆分全表, &参.方案)?;
+    let (码表, 全码数) = 生成码表(&键位文件, &拆分全表, &参.方案, 真实拆分.as_ref())?;
     fs::write(&mabiao_tsv, &码表).map_err(|e| format!("写 mabiao.tsv 失败：{e}"))?;
     println!("  ③ mabiao.tsv       全码 {全码数} 条");
 
-    // 4. <方案>.js --------------------------------------------------------
-    let js = 生成js(&roots_tsv, &chaifen_tsv, &mabiao_tsv)?;
+    // 5. <方案>.js --------------------------------------------------------
+    let js = 生成js(&roots_tsv, &chaifen_tsv, &mabiao_tsv, 真实拆分.as_ref())?;
     let js路径 = 目录.join(format!("{}.js", 参.方案));
     fs::write(&js路径, &js).map_err(|e| format!("写 {} 失败：{e}", js路径.display()))?;
     println!(
@@ -124,7 +141,7 @@ pub fn run(参: &参数) -> Result<(), String> {
         return Ok(());
     }
 
-    // 5. <方案>-<日期>.html -----------------------------------------------
+    // 6. <方案>-<日期>.html -----------------------------------------------
     let 高频文件 = 找文件(&[源.clone(), 目录.clone()], "全字频表.txt")
         .ok_or_else(|| "找不到 全字频表.txt（先跑 prepare）".to_string())?;
     let unihan = 载入字形数据(参, &源, &目录);
@@ -169,6 +186,62 @@ fn 找文件(目录们: &[PathBuf], 名: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// 找带 `.0/.1` 后缀的原始拆分表（如 `单字拆分-星陈-全字集-内置字频.txt`）。
+/// 优先输出目录的 inputs/，再退到 source/、输出目录、仓库数据目录。
+fn 找原始拆分表(目录: &Path, 源: &Path) -> Option<PathBuf> {
+    let mut 候选: Vec<PathBuf> = vec![目录.join("inputs"), 源.to_path_buf(), 目录.to_path_buf()];
+    for d in 仓库数据目录() {
+        候选.push(d.join("inputs"));
+        候选.push(d.join("inputs-104簇"));
+        候选.push(d);
+    }
+    for d in 候选 {
+        let Ok(项) = fs::read_dir(&d) else { continue };
+        let mut 文件: Vec<PathBuf> = 项
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.is_file()
+                    && p.file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| n.starts_with("单字拆分-") && n.ends_with(".txt"))
+                        .unwrap_or(false)
+            })
+            .collect();
+        文件.sort();
+        if let Some(p) = 文件.first() {
+            return Some(p.clone());
+        }
+    }
+    None
+}
+
+/// 读原始拆分表：第二列按空白切根，丢弃 `.1` 补码根、去掉 `.0` 后缀，
+/// 保留真实字根的顺序（花括号名如 `{京上}.0` 整体保留花括号）。
+fn 读真实拆分(路径: &Path) -> Result<BTreeMap<String, Vec<String>>, String> {
+    let 文本 = fs::read_to_string(路径).map_err(|e| format!("读 {} 失败：{e}", 路径.display()))?;
+    let mut 表 = BTreeMap::new();
+    for 行 in 文本.lines() {
+        let 列: Vec<&str> = 行.split('\t').collect();
+        if 列.len() < 2 || 列[0].starts_with('#') {
+            continue;
+        }
+        let 字 = 列[0].trim();
+        if 字.is_empty() {
+            continue;
+        }
+        let 真实: Vec<String> = 列[1]
+            .split_whitespace()
+            .filter(|t| !t.ends_with(".1"))
+            .map(|t| t.strip_suffix(".0").unwrap_or(t).to_string())
+            .collect();
+        if !真实.is_empty() {
+            表.insert(字.to_string(), 真实);
+        }
+    }
+    Ok(表)
 }
 
 // =========================================================================
@@ -291,13 +364,30 @@ pub(crate) fn 生成拆分表文本(拆分全表: &Path) -> Result<String, Strin
 
 /// 复用 `export` 的取码规则，产 `<字>\t<码>`（每字一行全码）
 fn 生成码表(
-    keymap: &Path, 拆分全表: &Path, 方案: &str
+    keymap: &Path,
+    拆分全表: &Path,
+    方案: &str,
+    真实拆分: Option<&BTreeMap<String, Vec<String>>>,
 ) -> Result<(String, usize), String> {
     let 方案 = crate::prepare::schema::取(方案)?;
     let 规则 = 方案.编码规则;
     let 最大码长 = 方案.最大码长;
     let 键位 = export_table::加载键位表(&keymap.to_string_lossy());
-    let 拆分 = export_table::加载拆分表(&拆分全表.to_string_lossy());
+    let mut 拆分 = export_table::加载拆分表(&拆分全表.to_string_lossy());
+
+    // `拆分全表.txt` 里的根序列已补齐到四根（含 `.1` 补码重复），只适合优化评估；
+    // 页面要展示的是真实输入编码，故有原始拆分表时按 `.0` 真根替换，
+    // 再走同一套方案取码规则（星陈 2 根 A1 A2 S2 S1：中 → 口c 丨k 丨s 口l = cksl）。
+    if let Some(表) = 真实拆分 {
+        let mut 命中 = 0usize;
+        for (字, 根, _) in &mut 拆分 {
+            if let Some(真根) = 表.get(字) {
+                *根 = 真根.clone();
+                命中 += 1;
+            }
+        }
+        println!("  ③ 按真实拆分取码  {} / {} 字", 命中, 拆分.len());
+    }
 
     let (文本, 全码数, _缺根, _统计) =
         export_table::生成表按方案(&键位, &拆分, 规则, 最大码长);
@@ -379,6 +469,7 @@ pub(crate) fn 生成js(
     roots_tsv: &Path,
     chaifen_tsv: &Path,
     mabiao_tsv: &Path,
+    真实拆分: Option<&BTreeMap<String, Vec<String>>>,
 ) -> Result<String, String> {
     let roots = 读列集合(roots_tsv)?;
     let mut chaifen = 读列集合(chaifen_tsv)?;
@@ -402,13 +493,13 @@ pub(crate) fn 生成js(
     let mut 根频: HashMap<String, usize> = HashMap::new();
     let mut 拆分号: HashMap<String, Vec<Vec<String>>> = HashMap::new();
     for (字, 根串们) in &chaifen {
-        let mut 各串 = Vec::with_capacity(根串们.len());
-        for 串 in 根串们 {
-            let 根 = 取四(&切根(串));
-            for r in &根 {
-                *根频.entry(r.clone()).or_insert(0) += 1;
-            }
-            各串.push(根);
+        // 有原始拆分表时只显示 `.0` 真实字根；没有才退回补齐四码后的串。
+        let 各串: Vec<Vec<String>> = match 真实拆分.and_then(|m| m.get(字)) {
+            Some(真实) => vec![取四(真实)],
+            None => 根串们.iter().map(|串| 取四(&切根(串))).collect(),
+        };
+        for 根 in 各串.iter().flatten() {
+            *根频.entry(根.clone()).or_insert(0) += 1;
         }
         拆分号.insert(字.clone(), 各串);
     }
@@ -1194,6 +1285,54 @@ mod 测试 {
         let mut f = std::fs::File::create(&路径).unwrap();
         f.write_all(内容.as_bytes()).unwrap();
         路径
+    }
+
+    /// 全码必须按 `.0` 真根取码：补齐四根会得出 ckkc，真根走星陈 2 根规则是 cksl。
+    #[test]
+    fn 生成码表_按真实拆分取全码() {
+        let keymap = 写临时(
+            "全码键位表.txt",
+            "口\tCl\t110621414\n丨\tKs\t29605237\n氵\tUd\t24096287\n又\tEk\t26134736\n",
+        );
+        let 拆分全表 = 写临时(
+            "全码拆分全表.txt",
+            "中\t口 丨 丨 口\t4046130\n汉\t氵 又 又 氵\t255154\n",
+        );
+        let 原始 = 写临时(
+            "全码原始拆分.txt",
+            "中\t口.0 丨.0 丨.1 口.1\t4046130\n汉\t氵.0 又.0 又.1 氵.1\t255154\n",
+        );
+        let 真实 = 读真实拆分(&原始).unwrap();
+
+        let (旧, _) = 生成码表(&keymap, &拆分全表, "yustar", None).unwrap();
+        assert!(旧.contains("中\tckkc\n"), "补齐四根应得 ckkc：{旧}");
+
+        let (新, 条数) = 生成码表(&keymap, &拆分全表, "yustar", Some(&真实)).unwrap();
+        assert_eq!(条数, 2);
+        assert!(新.contains("中\tcksl\n"), "真根应得 cksl：{新}");
+        assert!(新.contains("汉\tuekd\n"), "真根应得 uekd：{新}");
+    }
+
+    #[test]
+    fn 读真实拆分_去补码保留花括号名() {
+        let p = 写临时(
+            "真实拆分.txt",
+            "汉\t氵.0 又.0 又.1 氵.1\t255154\n\
+             一\t一.0 一.1 一.1\t18584230\n\
+             就\t{京上}.0 小.0 尤.0 尤.1\t5955620\n\
+             # 注释\t忽略.0\n",
+        );
+        let m = 读真实拆分(&p).unwrap();
+        assert_eq!(
+            m.get("汉").unwrap(),
+            &vec!["氵".to_string(), "又".to_string()]
+        );
+        assert_eq!(m.get("一").unwrap(), &vec!["一".to_string()]);
+        assert_eq!(
+            m.get("就").unwrap(),
+            &vec!["{京上}".to_string(), "小".to_string(), "尤".to_string()]
+        );
+        assert!(!m.contains_key("# 注释"));
     }
 
     #[test]
