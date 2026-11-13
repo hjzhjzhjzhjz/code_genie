@@ -150,16 +150,14 @@ pub fn load_pair_equivalence(
         let parts: Vec<&str> = line.split('\t').collect();
         if parts.len() >= 2 {
             let chars: Vec<char> = parts[0].chars().collect();
-            if chars.len() == 2 {
-                if let (Some(k1), Some(k2)) =
+            if chars.len() == 2
+                && let (Some(k1), Some(k2)) =
                     (char_to_key_index(chars[0]), char_to_key_index(chars[1]))
-                {
-                    if let Ok(equiv) = parts[1].trim().parse::<f64>() {
-                        if k1 < EQUIV_TABLE_SIZE && k2 < EQUIV_TABLE_SIZE {
-                            table[k1][k2] = equiv;
-                        }
-                    }
-                }
+                && let Ok(equiv) = parts[1].trim().parse::<f64>()
+                && k1 < EQUIV_TABLE_SIZE
+                && k2 < EQUIV_TABLE_SIZE
+            {
+                table[k1][k2] = equiv;
             }
         }
     }
@@ -392,16 +390,15 @@ pub fn load_key_distribution(path: &str) -> Result<[KeyDistConfig; EQUIV_TABLE_S
             continue;
         }
         let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() >= 4 {
-            if let Some(ki) = parts[0].chars().next().and_then(char_to_key_index) {
-                if ki < EQUIV_TABLE_SIZE {
-                    cfg[ki] = KeyDistConfig {
-                        target_rate: parts[1].trim().parse().unwrap_or(0.0),
-                        low_penalty: parts[2].trim().parse().unwrap_or(0.0),
-                        high_penalty: parts[3].trim().parse().unwrap_or(0.0),
-                    };
-                }
-            }
+        if parts.len() >= 4
+            && let Some(ki) = parts[0].chars().next().and_then(char_to_key_index)
+            && ki < EQUIV_TABLE_SIZE
+        {
+            cfg[ki] = KeyDistConfig {
+                target_rate: parts[1].trim().parse().unwrap_or(0.0),
+                low_penalty: parts[2].trim().parse().unwrap_or(0.0),
+                high_penalty: parts[3].trim().parse().unwrap_or(0.0),
+            };
         }
     }
     Ok(cfg)

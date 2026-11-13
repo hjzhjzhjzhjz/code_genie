@@ -43,10 +43,10 @@ pub fn 步骤5_字根读音(上: &上下文) -> Result<(), String> {
 
         let mut 拼音集: BTreeSet<String> = BTreeSet::new();
         for 字段 in &列[1..] {
-            if let Some(拼音) = 拼音前缀(字段) {
-                if 拼音 != "无" {
-                    拼音集.insert(拼音);
-                }
+            if let Some(拼音) = 拼音前缀(字段)
+                && 拼音 != "无"
+            {
+                拼音集.insert(拼音);
             }
         }
 

@@ -515,13 +515,13 @@ pub fn run(
         return;
     }
 
-    if let Some(目录) = 保留 {
-        if let Err(e) = std::fs::create_dir_all(目录) {
-            eprintln!(
-                "⚠️ 无法创建保留目录 {}：{}（测评结果 JSON 将留在临时目录）",
-                目录, e
-            );
-        }
+    if let Some(目录) = 保留
+        && let Err(e) = std::fs::create_dir_all(目录)
+    {
+        eprintln!(
+            "⚠️ 无法创建保留目录 {}：{}（测评结果 JSON 将留在临时目录）",
+            目录, e
+        );
     }
 
     // 宇浩自己用的 CJK 区段，选重统计要和它一致

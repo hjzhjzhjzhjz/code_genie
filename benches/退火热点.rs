@@ -17,6 +17,8 @@
 
 #![allow(dead_code)]
 #![allow(unused_imports)]
+// bench crate 用 #[path] 重建了整套 src 模块树，避免和 bin crate 重复报同一批 lint
+#![allow(clippy::needless_range_loop, clippy::doc_overindented_list_items)]
 
 #[cfg(feature = "mimalloc")]
 #[global_allocator]

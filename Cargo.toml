@@ -1,7 +1,7 @@
 [package]
 name = "code_genie"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 # benches/ 由下面的 [[bench]] 显式声明，避免自动发现把同一文件再编一遍。
 autobenches = false
 
@@ -16,7 +16,6 @@ clap = { version = "4", features = ["derive"] }
 ctrlc = "3.4"
 rand = "0.9"
 rayon = "1.10"
-hashbrown = "0.14"
 rustc-hash = "1.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["float_roundtrip"] }

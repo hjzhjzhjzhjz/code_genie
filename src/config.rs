@@ -454,10 +454,10 @@ impl Config {
                 a.comfort_slowdown
             ));
         }
-        if let Some(ct) = a.comfort_temp {
-            if !ct.is_finite() {
-                problems.push(format!("comfort_temp 不是有限数（当前: {}）", ct));
-            }
+        if let Some(ct) = a.comfort_temp
+            && !ct.is_finite()
+        {
+            problems.push(format!("comfort_temp 不是有限数（当前: {}）", ct));
         }
 
         if problems.is_empty() {

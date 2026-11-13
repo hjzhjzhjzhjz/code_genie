@@ -1,0 +1,3 @@
+# Rust edition 已升到 2024，但排版沿用 2021 风格，避免全项目格式噪声。
+# rustfmt 的 style edition 可独立于 Rust edition 设置（Rust 1.85+）。
+style_edition = "2021"

@@ -134,16 +134,17 @@ pub(crate) fn 解析字根码(行们: &[String]) -> Result<Vec<(String, String)>
         if let Some((基, 尾)) = 名.rsplit_once('.') {
             // 只对 A/S/Y 建槽：`.0`/`.1` 这类后缀不是槽位，过去先 `or_default()` 再判尾，
             // 会留下一个空槽，最后统一报「字根「X」只有小码没有 `.A` 大码」，把整张表判失败。
-            if 尾.chars().count() == 1 && matches!(尾, "A" | "S" | "Y") {
-                if let Some(码字) = 码字 {
-                    let 槽 = 槽表.entry(基.to_string()).or_default();
-                    match 尾 {
-                        "A" => 槽.a = Some(码字),
-                        "S" => 槽.s = Some(码字),
-                        _ => 槽.y = Some(码字),
-                    }
-                    continue;
+            if 尾.chars().count() == 1
+                && matches!(尾, "A" | "S" | "Y")
+                && let Some(码字) = 码字
+            {
+                let 槽 = 槽表.entry(基.to_string()).or_default();
+                match 尾 {
+                    "A" => 槽.a = Some(码字),
+                    "S" => 槽.s = Some(码字),
+                    _ => 槽.y = Some(码字),
                 }
+                continue;
             }
             // 后缀不是槽位（如 `.0`）→ 当朴素行，不能动已收集的槽位
         }

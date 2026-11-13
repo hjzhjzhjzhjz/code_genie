@@ -308,14 +308,13 @@ fn 提取字根(s: &str) -> Vec<String> {
             i += 1;
             continue;
         }
-        if 字[i] == '{' {
-            if let Some(偏移) = 字[i + 1..].iter().position(|c| *c == '}') {
-                if 偏移 > 0 {
-                    结果.push(字[i..=i + 1 + 偏移].iter().collect());
-                    i += 偏移 + 2;
-                    continue;
-                }
-            }
+        if 字[i] == '{'
+            && let Some(偏移) = 字[i + 1..].iter().position(|c| *c == '}')
+            && 偏移 > 0
+        {
+            结果.push(字[i..=i + 1 + 偏移].iter().collect());
+            i += 偏移 + 2;
+            continue;
         }
         结果.push(字[i].to_string());
         i += 1;

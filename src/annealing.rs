@@ -1316,10 +1316,11 @@ pub fn smart_init(ctx: &OptContext, cfg: &Config) -> Vec<u8> {
 ///   随评分尺度变（由配置显式给出），而「减速带落在曲线的第几成」是尺度无关、且能直接调的量。
 pub(crate) fn 舒适区温度(cfg: &Config) -> f64 {
     // 绝对温度优先：显式配置时不参与任何曲线换算。
-    if let Some(t) = cfg.annealing.comfort_temp {
-        if t.is_finite() && t > 0.0 {
-            return t;
-        }
+    if let Some(t) = cfg.annealing.comfort_temp
+        && t.is_finite()
+        && t > 0.0
+    {
+        return t;
     }
     let ts = cfg.annealing.temp_start;
     let te = cfg.annealing.temp_end;

@@ -515,10 +515,10 @@ fn 加载笔画表(上: &上下文) -> Result<HashMap<String, String>, String> {
         if 笔 == "6" && 上.方案.笔画6并入5 {
             笔 = "5".to_string();
         }
-        if let Some(旧) = 表.get(根) {
-            if 旧 != &笔 {
-                return Err(format!("Conflict strokes: {行} vs. previously {旧}"));
-            }
+        if let Some(旧) = 表.get(根)
+            && 旧 != &笔
+        {
+            return Err(format!("Conflict strokes: {行} vs. previously {旧}"));
         }
         if !表.contains_key(根) && !修正.iter().any(|(k, _)| k == &根) {
             表.insert(根.to_string(), 笔);

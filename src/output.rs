@@ -119,10 +119,10 @@ pub fn save_full_code_from_optimize_set(ctx: &OptContext, assignment: &[u8], dir
     for &ci in &sorted_chars {
         let ch = ctx.raw_splits[ci].0;
         let (_, roots, _) = &ctx.raw_splits[ci];
-        if let Ok(code) = 按槽位取码(roots, &字根表) {
-            if !code.is_empty() {
-                out.push_str(&format!("{}\t{}\n", ch, code));
-            }
+        if let Ok(code) = 按槽位取码(roots, &字根表)
+            && !code.is_empty()
+        {
+            out.push_str(&format!("{}\t{}\n", ch, code));
         }
     }
 
@@ -145,10 +145,10 @@ pub fn save_shortcode_outputs(
     let 字根表 = 根键位串(ctx, assignment);
     let mut 条目 = Vec::with_capacity(ctx.raw_splits.len());
     for (i, (ch, roots, _)) in ctx.raw_splits.iter().enumerate() {
-        if let Ok(code) = 按槽位取码(roots, &字根表) {
-            if !code.is_empty() {
-                条目.push((*ch, code, ctx.char_infos[i].frequency));
-            }
+        if let Ok(code) = 按槽位取码(roots, &字根表)
+            && !code.is_empty()
+        {
+            条目.push((*ch, code, ctx.char_infos[i].frequency));
         }
     }
     let 结果 = crate::shortcode::生成_按口径(&条目, 口径);

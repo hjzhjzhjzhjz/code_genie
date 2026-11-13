@@ -152,11 +152,12 @@ pub fn 从热力(热: &Value, 模式: &str) -> Option<指位分布> {
             continue;
         }
         let mut 字 = k.chars();
-        if let (Some(c), None) = (字.next(), 字.next()) {
-            if let Some((指, 行)) = 指位(c) {
-                各指[指 as usize] += 值;
-                各行[行 as usize] += 值;
-            }
+        // 2024 edition 的 let chains：两个条件一次成型，省掉一层嵌套
+        if let (Some(c), None) = (字.next(), 字.next())
+            && let Some((指, 行)) = 指位(c)
+        {
+            各指[指 as usize] += 值;
+            各行[行 as usize] += 值;
         }
     }
 

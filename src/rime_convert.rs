@@ -266,10 +266,10 @@ fn 写完整码表(
             if 词.is_empty() || 词.contains('\t') || 词.starts_with('#') {
                 continue;
             }
-            if let Some(码) = 词码(词, 字码) {
-                if 收一条(&mut 文, &mut 已见, 词, &码) {
-                    裸数 += 1;
-                }
+            if let Some(码) = 词码(词, 字码)
+                && 收一条(&mut 文, &mut 已见, 词, &码)
+            {
+                裸数 += 1;
             }
         }
     }
@@ -491,16 +491,17 @@ fn 读字根键位(路径: &Path) -> Result<字根表, String> {
             continue;
         }
         // 槽位写法：<根>.A / .S / .Y
-        if let Some((名, 位)) = 根.rsplit_once('.') {
-            if !名.is_empty() && 位.chars().count() == 1 {
-                let c = 位.chars().next().unwrap().to_ascii_uppercase();
-                if matches!(c, 'A' | 'S' | 'Y') {
-                    位表
-                        .entry(名.to_string())
-                        .or_default()
-                        .insert(c, 键.to_string());
-                    continue;
-                }
+        if let Some((名, 位)) = 根.rsplit_once('.')
+            && !名.is_empty()
+            && 位.chars().count() == 1
+        {
+            let c = 位.chars().next().unwrap().to_ascii_uppercase();
+            if matches!(c, 'A' | 'S' | 'Y') {
+                位表
+                    .entry(名.to_string())
+                    .or_default()
+                    .insert(c, 键.to_string());
+                continue;
             }
         }
         平表.insert(根.to_string(), 键.to_string());
@@ -679,10 +680,10 @@ fn 重写全码表(
     let mut 频次: HashMap<String, u64> = HashMap::new();
     for 行 in 读行(路径)? {
         let 列: Vec<&str> = 行.split('\t').collect();
-        if 列.len() >= 3 {
-            if let Ok(频) = 列[2].trim().parse::<u64>() {
-                频次.insert(列[0].to_string(), 频);
-            }
+        if 列.len() >= 3
+            && let Ok(频) = 列[2].trim().parse::<u64>()
+        {
+            频次.insert(列[0].to_string(), 频);
         }
     }
 

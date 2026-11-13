@@ -983,14 +983,14 @@ fn 生成页面(
         let 备注 = 列.iter().skip(4).cloned().collect::<Vec<_>>().join(" ");
 
         // 非花括号字根、且拼音是空或纯小写字母时，用 Unihan 的 kMandarin 覆盖
-        if !根.contains('{') && (拼音.is_empty() || !拼音.chars().any(|c| !c.is_ascii_lowercase()))
+        if !根.contains('{')
+            && (拼音.is_empty() || !拼音.chars().any(|c| !c.is_ascii_lowercase()))
+            && let Some(u) = unihan
         {
-            if let Some(u) = unihan {
-                if let Some(p) = 根.chars().next().and_then(|c| u.拼音.get(&c)) {
-                    拼音 = p.clone();
-                } else {
-                    拼音.clear();
-                }
+            if let Some(p) = 根.chars().next().and_then(|c| u.拼音.get(&c)) {
+                拼音 = p.clone();
+            } else {
+                拼音.clear();
             }
         }
 

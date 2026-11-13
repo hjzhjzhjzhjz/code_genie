@@ -560,10 +560,10 @@ pub fn 剥离简码段(文本: &str) -> String {
         if 行.is_empty() || 行.starts_with('#') {
             continue;
         }
-        if let Some((字, 长)) = 解析(行) {
-            if 长 < 最长.get(&字).copied().unwrap_or(0) {
-                continue; // 同字短码 = 简码
-            }
+        if let Some((字, 长)) = 解析(行)
+            && 长 < 最长.get(&字).copied().unwrap_or(0)
+        {
+            continue; // 同字短码 = 简码
         }
         出.push_str(行);
         出.push('\n');
