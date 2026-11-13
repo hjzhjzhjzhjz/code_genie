@@ -98,9 +98,12 @@ jobs:
           fi
 
       # 拆分全表.txt / 字根约束.txt 等是 `code_genie prepare` 的产物，不入库，用前必须先重建。
+      # 注意：prepare 的产物目录 moling/ 同样不入库，本步需先自建，否则二进制里裸 fs::write
+      # 会因父目录不存在而 ENOENT（优化流水线里该步有 files_dir=='moling' 守卫、默认 '.' 故被跳过，不受影响）。
       - name: 生成码灵输入文件（code_genie prepare）
         run: |
           set -euo pipefail
+          mkdir -p moling
           ./target/release/code_genie prepare --dir moling
 
       # assess 内部要加载 config.ron（取 keys.allowed 等参数）。按 config.ron.example
