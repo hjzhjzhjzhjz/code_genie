@@ -2,8 +2,10 @@
 name = "code_genie"
 version = "0.1.0"
 edition = "2024"
-# 源码用了 edition 2024 的 let chains（稳定于 1.88），MSRV 以它为下限而非 edition 的 1.85。
-rust-version = "1.88"
+# MSRV 跟随最新 stable：1.100.0（2026-11-12）。let chains 自 1.88 稳定、edition 2024 需 1.85，
+# 均已不构成下限。抬高后 Cargo 的 MSRV 感知解析器不再把依赖压回旧版；
+# 且下面的 [lints.cargo] unused_dependencies 需要 Cargo 1.100+ 才生效。
+rust-version = "1.100"
 # benches/ 由下面的 [[bench]] 显式声明，避免自动发现把同一文件再编一遍。
 autobenches = false
 

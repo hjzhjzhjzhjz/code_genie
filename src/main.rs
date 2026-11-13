@@ -54,6 +54,9 @@ mod types;
 mod validate;
 mod zigen;
 
+#[cfg(test)]
+mod test_util;
+
 use crate::annealing::{simulated_annealing_resumable, SaResult};
 use crate::calibrate::calibrate_scales;
 use crate::checkpoint::ThreadCheckpoint;

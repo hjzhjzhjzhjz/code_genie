@@ -8,6 +8,14 @@
 
 use std::path::{Path, PathBuf};
 
+/// 毫秒级时间戳字符串（如 "20260618-093015.123"）。
+/// 原定义位于 `checkpoint`，为打破 `checkpoint ↔ fsutil` 双向引用环而下沉至此：
+/// 本模块归档命名与测试临时目录都需要它，而 `checkpoint` 又依赖本模块的归档函数，
+/// 把时间戳生成留在本模块即可让 `fsutil` 不再反向依赖 `checkpoint`。
+pub fn now_timestamp_ms() -> String {
+    chrono::Local::now().format("%Y%m%d-%H%M%S%.3f").to_string()
+}
+
 /// 在原路径后追加 `.{ts}` 形成归档名：`a/foo.txt` → `a/foo.txt.{ts}`。
 fn with_timestamp_suffix(path: &Path, ts: &str) -> PathBuf {
     let mut s = path.as_os_str().to_os_string();
@@ -23,7 +31,7 @@ fn with_timestamp_suffix(path: &Path, ts: &str) -> PathBuf {
 /// 刷出一行与真实原因无关的告警，随后又跟着一行 os error 3。
 pub fn archive_if_exists(path: &Path) {
     if path.is_file() {
-        let ts = crate::checkpoint::now_timestamp_ms();
+        let ts = now_timestamp_ms();
         let archived = with_timestamp_suffix(path, &ts);
         match std::fs::rename(path, &archived) {
             Ok(()) => eprintln!(
@@ -86,20 +94,9 @@ pub fn write_output<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) {
 mod tests {
     use super::*;
 
-    fn tmp_dir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!(
-            "cg_fsutil_{}_{}_{}",
-            tag,
-            std::process::id(),
-            crate::checkpoint::now_timestamp_ms().replace('.', "")
-        ));
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
     #[test]
     fn write_with_backup_archives_existing_and_writes_new() {
-        let dir = tmp_dir("w");
+        let dir = crate::test_util::unique_temp_dir("w");
         let path = dir.join("output-keymap.txt");
         // 首次写：无归档，内容为 v1
         write_with_backup(&path, b"v1").unwrap();
@@ -128,7 +125,7 @@ mod tests {
 
     #[test]
     fn copy_with_backup_archives_existing_target() {
-        let dir = tmp_dir("c");
+        let dir = crate::test_util::unique_temp_dir("c");
         let src = dir.join("src.txt");
         let dst = dir.join("dst.txt");
         std::fs::write(&src, b"new").unwrap();
@@ -147,7 +144,7 @@ mod tests {
 
     #[test]
     fn write_with_backup_no_archive_when_absent() {
-        let dir = tmp_dir("a");
+        let dir = crate::test_util::unique_temp_dir("a");
         let path = dir.join("fresh.txt");
         write_with_backup(&path, b"x").unwrap();
         // 仅有规范文件，无归档
@@ -158,7 +155,7 @@ mod tests {
     /// 目录不能被当作「已存在的旧文件」去归档/改名。
     #[test]
     fn archive_if_exists_ignores_directory() {
-        let dir = tmp_dir("dir");
+        let dir = crate::test_util::unique_temp_dir("dir");
         let inputs = dir.join("inputs");
         std::fs::create_dir_all(&inputs).unwrap();
 
@@ -176,7 +173,7 @@ mod tests {
     /// 目标为目录时，错误应直接点名「目录」，而不是模糊的 os error 3。
     #[test]
     fn copy_with_backup_reports_directory_target() {
-        let dir = tmp_dir("dircopy");
+        let dir = crate::test_util::unique_temp_dir("dircopy");
         let src = dir.join("a.txt");
         let dst = dir.join("inputs");
         std::fs::write(&src, b"x").unwrap();

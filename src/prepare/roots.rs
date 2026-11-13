@@ -121,6 +121,20 @@ pub fn 步骤6_字根声韵码(上: &上下文) -> Result<(), String> {
         return 初始化灵明字根(上, &路径);
     }
 
+    let 出 = 生成字根声韵表(上, true, false)?;
+    上.写(names::字根声韵, &出)
+}
+
+/// 由「字根读音 + 字根频率」确定性推导 `字根声韵.txt` 的内容字符串。
+///
+/// 魔灵/灵明（`削声母 = true`）与星陈（`削声母 = false`）共用同一套推导，
+/// 唯一差别是前者对「非常用字根」多一步「删掉第一个非韵母字符」的削声母，
+/// 后者不削（星陈口径：只要查得到读音就有小码）。`打印单字符` 仅星陈侧需要。
+pub(crate) fn 生成字根声韵表(
+    上: &上下文,
+    削声母: bool,
+    打印单字符: bool,
+) -> Result<String, String> {
     let mut 声韵码: HashMap<String, String> = HashMap::new();
     let mut 读音: HashMap<String, String> = HashMap::new();
     for 行 in 上.读(names::字根读音)? {
@@ -142,9 +156,14 @@ pub fn 步骤6_字根声韵码(上: &上下文) -> Result<(), String> {
         声韵码.insert(列[0].to_string(), format!("{声母}{韵腹}"));
     }
 
-    // 常用字集（注意是 算码字集.txt，不是算码字集）
-    let mut 常用: HashSet<String> = 上.读(names::算码字集)?.into_iter().collect();
-    常用.insert("戸".to_string()); // 特殊处理，保持 hu 音
+    // 常用字集（注意是 算码字集.txt，不是算码字集）；仅削声母口径需要
+    let 常用: Option<HashSet<String>> = if 削声母 {
+        let mut s: HashSet<String> = 上.读(names::算码字集)?.into_iter().collect();
+        s.insert("戸".to_string()); // 特殊处理，保持 hu 音
+        Some(s)
+    } else {
+        None
+    };
 
     let mut 出 = String::with_capacity(声韵码.len() * 16);
     let mut 表: Vec<(String, String, String)> = Vec::new();
@@ -159,11 +178,12 @@ pub fn 步骤6_字根声韵码(上: &上下文) -> Result<(), String> {
             None => 声韵码.get(根).cloned().unwrap_or_else(|| "o".to_string()),
         };
 
-        // 非常用字根不取声母：只删掉第一个非韵母字符
-        let 码 = if 常用.contains(根) {
-            码
-        } else {
-            删首个非韵母(&码)
+        // 非常用字根不取声母：只删掉第一个非韵母字符（仅削声母口径）。
+        // `常用` 为 Some 时即削声母口径，None 时（星陈）原样保留，无需再判开关。
+        let 码 = match 常用.as_ref() {
+            Some(常用集) if 常用集.contains(根) => 码,
+            Some(_) => 删首个非韵母(&码),
+            None => 码,
         };
 
         // `OPTIMIZE_KEY_<声母>` 重映射（`OPTIMIZE_KEYS` 为空时条件恒成立）
@@ -180,10 +200,18 @@ pub fn 步骤6_字根声韵码(上: &上下文) -> Result<(), String> {
 
     // 对应 `LC_ALL=C sort -k2,2 -k1,1`：先按声韵码、再按字根（均为字节序）
     表.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+    if 打印单字符 {
+        let 单字符 = 表.iter().filter(|(_, c, _)| c.chars().count() == 1).count();
+        println!(
+            "    {} 个根，其中单字符声码 {} 个（无小码）",
+            表.len(),
+            单字符
+        );
+    }
     for (根, 码, 拼音) in &表 {
         出.push_str(&format!("{根}\t{码}\t{拼音}\n"));
     }
-    上.写(names::字根声韵, &出)
+    Ok(出)
 }
 
 /// `s/[^aeuio]//`：删掉第一个非韵母字符

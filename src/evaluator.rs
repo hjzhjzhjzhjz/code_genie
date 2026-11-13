@@ -805,6 +805,30 @@ impl Evaluator {
         }
     }
 
+    /// 回滚被拒绝/超限的移动：对受影响的组增量刷新汉字编码，并恢复得分缓存与编码种数。
+    ///
+    /// `try_move` / `try_swap` 的两条回滚尾部（被 `_max` 硬约束拦下、或 SA 概率拒绝）逻辑
+    /// 完全一致，只是「受影响的组」数量不同（单组 vs 双组），抽到这里避免四处漂移。
+    /// 不触碰随机数，故不会改变确定性随机流。
+    #[inline(always)]
+    fn 回滚编码状态(
+        &mut self,
+        ctx: &OptContext,
+        assignment: &mut [u8],
+        组: &[usize],
+        旧种数: usize,
+        旧分: f64,
+    ) {
+        for &r in 组 {
+            for &ci in &ctx.group_to_chars[r] {
+                self.update_char(ctx, assignment, ci);
+            }
+        }
+        self.cached_score = 旧分;
+        self.score_dirty = false;
+        self.恢复编码种数(旧种数);
+    }
+
     #[inline(always)]
     pub fn try_move(
         &mut self,
@@ -839,12 +863,7 @@ impl Evaluator {
             self.key_weighted_usage[new_key as usize] -= gfs;
             self.key_weighted_usage[old_key as usize] += gfs;
             assignment[r] = old_key;
-            for &ci in &ctx.group_to_chars[r] {
-                self.update_char(ctx, assignment, ci);
-            }
-            self.cached_score = old_score;
-            self.score_dirty = false;
-            self.编码种数 = 旧种数;
+            self.回滚编码状态(ctx, assignment, &[r], 旧种数, old_score);
             return false;
         }
 
@@ -860,13 +879,7 @@ impl Evaluator {
             self.key_weighted_usage[old_key as usize] += gfs;
 
             assignment[r] = old_key;
-            for &ci in &ctx.group_to_chars[r] {
-                self.update_char(ctx, assignment, ci);
-            }
-
-            self.cached_score = old_score;
-            self.score_dirty = false;
-            self.编码种数 = 旧种数;
+            self.回滚编码状态(ctx, assignment, &[r], 旧种数, old_score);
             false
         }
     }
@@ -917,15 +930,7 @@ impl Evaluator {
             self.key_weighted_usage[k2 as usize] += gfs2;
             assignment[r1] = k1;
             assignment[r2] = k2;
-            for &ci in &ctx.group_to_chars[r1] {
-                self.update_char(ctx, assignment, ci);
-            }
-            for &ci in &ctx.group_to_chars[r2] {
-                self.update_char(ctx, assignment, ci);
-            }
-            self.cached_score = old_score;
-            self.score_dirty = false;
-            self.编码种数 = 旧种数;
+            self.回滚编码状态(ctx, assignment, &[r1, r2], 旧种数, old_score);
             return false;
         }
 
@@ -944,16 +949,7 @@ impl Evaluator {
 
             assignment[r1] = k1;
             assignment[r2] = k2;
-            for &ci in &ctx.group_to_chars[r1] {
-                self.update_char(ctx, assignment, ci);
-            }
-            for &ci in &ctx.group_to_chars[r2] {
-                self.update_char(ctx, assignment, ci);
-            }
-
-            self.cached_score = old_score;
-            self.score_dirty = false;
-            self.编码种数 = 旧种数;
+            self.回滚编码状态(ctx, assignment, &[r1, r2], 旧种数, old_score);
             false
         }
     }
@@ -965,11 +961,9 @@ impl Evaluator {
 #[cfg(test)]
 mod targets_proptest {
     use super::*;
-    use crate::config::TargetsConfig;
     use crate::context::OptContext;
-    use crate::types::{KeyDistConfig, RootGroup, ScaleConfig, WeightConfig, EQUIV_TABLE_SIZE};
+    use crate::types::RootGroup;
     use proptest::prelude::*;
-    use std::collections::HashMap;
 
     /// 5 个动态组，每组 1 根 1 字，允许 4 个键。
     /// 键位必然冲突（5 组挤 4 键）→ 一定有重码，供 `_max` 约束测试用。
@@ -988,19 +982,7 @@ mod targets_proptest {
             let ch = char::from_u32(0x4e00 + i as u32).unwrap();
             splits.push((ch, vec![root], f));
         }
-        let fixed_roots: HashMap<String, u8> = HashMap::new();
-        let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
-        let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        OptContext::new(
-            &splits,
-            &fixed_roots,
-            &groups,
-            equiv_table,
-            key_dist,
-            ScaleConfig::default(),
-            WeightConfig::default(),
-            TargetsConfig::default(),
-        )
+        crate::test_util::造默认上下文(&splits, &groups)
     }
 
     /// 目标偏差公式（design.md）
@@ -1177,19 +1159,7 @@ mod full_evaluator_tests {
             let ch = char::from_u32(0x4e00 + i as u32).unwrap();
             splits.push((ch, vec![root], 10 + (i as u64 % 3)));
         }
-        let fixed_roots: HashMap<String, u8> = HashMap::new();
-        let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
-        let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        OptContext::new(
-            &splits,
-            &fixed_roots,
-            &groups,
-            equiv_table,
-            key_dist,
-            ScaleConfig::default(),
-            WeightConfig::default(),
-            TargetsConfig::default(),
-        )
+        crate::test_util::造默认上下文(&splits, &groups)
     }
 
     /// 碰撞数必须等于「每个非空桶成员数 − 1」之和，且等于 Σ(桶内除最大频率外的字频)。

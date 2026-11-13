@@ -631,17 +631,25 @@ pub fn 打印统计(s: &简码统计) {
 /// 从任意字频/拆分表读「字 → 字频」：取每行最后一列能解析成整数的记录。
 ///
 /// 同时兼容 `字<TAB>字频`（`全字频表.txt`）与 `字<TAB>根序列<TAB>字频`（拆分表）。
+/// 把一行表文本归一化为「列」：去尾部 `\r`、跳过空行与 `#` 注释、按 `\t` 切分、
+/// 列数不足 2 视为无效（返回 `None`）。
+///
+/// `读字频` 与 `合成全码条目` 等多个解析函数共用同一套逐行规约口径，抽出来避免漂移。
+fn 归一化表行(行: &str) -> Option<Vec<&str>> {
+    let 行 = 行.trim_end_matches('\r');
+    if 行.is_empty() || 行.starts_with('#') {
+        return None;
+    }
+    let 列: Vec<&str> = 行.split('\t').collect();
+    if 列.len() < 2 {
+        return None;
+    }
+    Some(列)
+}
+
 pub fn 读字频(文本: &str) -> HashMap<char, u64> {
     let mut 表: HashMap<char, u64> = HashMap::new();
-    for 行 in 文本.lines() {
-        let 行 = 行.trim_end_matches('\r');
-        if 行.is_empty() || 行.starts_with('#') {
-            continue;
-        }
-        let 列: Vec<&str> = 行.split('\t').collect();
-        if 列.len() < 2 {
-            continue;
-        }
+    for 列 in 文本.lines().filter_map(归一化表行) {
         let Some(字) = 列[0].chars().next() else {
             continue;
         };
@@ -662,15 +670,7 @@ pub fn 读字频(文本: &str) -> HashMap<char, u64> {
 pub fn 合成全码条目(全码文本: &str, 字频: &HashMap<char, u64>) -> Vec<全码条目> {
     let 纯全码 = 剥离简码段(全码文本);
     let mut 出 = Vec::new();
-    for 行 in 纯全码.lines() {
-        let 行 = 行.trim_end_matches('\r');
-        if 行.is_empty() || 行.starts_with('#') {
-            continue;
-        }
-        let 列: Vec<&str> = 行.split('\t').collect();
-        if 列.len() < 2 {
-            continue;
-        }
+    for 列 in 纯全码.lines().filter_map(归一化表行) {
         let Some(字) = 列[0].chars().next() else {
             continue;
         };

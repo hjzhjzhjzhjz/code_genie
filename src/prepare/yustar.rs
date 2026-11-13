@@ -24,9 +24,7 @@
 //    必须同步维护的代码，故仍走 [`crate::prepare::共用步骤`]。
 // =========================================================================
 
-use std::collections::HashMap;
-
-use crate::prepare::{inputs, names, roots, 上下文, 共用步骤};
+use crate::prepare::{inputs, roots, 上下文, 共用步骤};
 
 /// 星陈的单步入口：按步骤号分派，与魔灵/灵明的步骤表互不相干
 pub fn 步骤(上: &上下文, 步骤: usize) -> Result<(), String> {
@@ -62,60 +60,7 @@ fn 步骤6_星陈声韵表(上: &上下文) -> Result<(), String> {
         "(6) 生成星陈字根声韵表 {}（不做非常用字根削声母）...",
         上.字根表
     );
-
-    let mut 声韵码: HashMap<String, String> = HashMap::new();
-    let mut 读音: HashMap<String, String> = HashMap::new();
-    for 行 in 上.读(names::字根读音)? {
-        let 列: Vec<&str> = 行.split_whitespace().collect();
-        if 列.len() < 2 || 声韵码.contains_key(列[0]) {
-            continue;
-        }
-        读音.insert(列[0].to_string(), 列[1].to_string());
-        let 归一 = roots::去调(列[1]);
-        let 归一 = match 归一.as_str() {
-            "er" => "0e".to_string(), // 与「二」归并
-            "nv" => "nu".to_string(), // 女
-            other => other.to_string(),
-        };
-        let Some((声母, 韵腹)) = roots::声韵(&归一) else {
-            return Err(format!("Invalid pinyin: {行}"));
-        };
-        声韵码.insert(列[0].to_string(), format!("{声母}{韵腹}"));
-    }
-
-    let mut 表: Vec<(String, String, String)> = Vec::new();
-    for 行 in 上.读(names::字根频率)? {
-        let 列: Vec<&str> = 行.split_whitespace().collect();
-        if 列.is_empty() {
-            continue;
-        }
-        let 根 = 列[0];
-        let 码 = match roots::修正表(根, 上.方案) {
-            Some(v) => v.to_string(),
-            None => 声韵码.get(根).cloned().unwrap_or_else(|| "o".to_string()),
-        };
-        // 星陈：这里不删声母（魔灵/灵明 会调 roots::删首个非韵母）
-        let 码 = roots::按优化键重映射(码, 上.方案);
-        let 拼音 = if 码.chars().count() > 1 {
-            读音.get(根).map(String::as_str).unwrap_or("")
-        } else {
-            ""
-        };
-        表.push((根.to_string(), 码, 拼音.to_string()));
-    }
-
-    // 先按声韵码、再按字根（字节序），与魔灵那份保持同一排序
-    表.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
-    let mut 出 = String::with_capacity(表.len() * 16);
-    for (根, 码, 拼音) in &表 {
-        出.push_str(&format!("{根}\t{码}\t{拼音}\n"));
-    }
-    let 单字符 = 表.iter().filter(|(_, c, _)| c.chars().count() == 1).count();
-    println!(
-        "    {} 个根，其中单字符声码 {} 个（无小码）",
-        表.len(),
-        单字符
-    );
+    let 出 = roots::生成字根声韵表(上, false, true)?;
     let 名 = 上.字根表.clone();
     上.写(&名, &出)
 }

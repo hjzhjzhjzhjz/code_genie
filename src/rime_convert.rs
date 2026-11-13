@@ -213,6 +213,31 @@ fn 收一条(文: &mut String, 已见: &mut HashSet<String>, 文本: &str, 码: 
     true
 }
 
+/// 找「`...` 起始行」并跳过它：返回数据段起点下标（找不到则 0）。
+///
+/// 多个读表循环都要跳过 rime 词典里 `...` 之前的表头/注释，抽出来统一口径。
+fn 数据起始(行们: &[String]) -> usize {
+    行们
+        .iter()
+        .position(|l| l.starts_with("..."))
+        .map(|i| i + 1)
+        .unwrap_or(0)
+}
+
+/// 把一行表文本归一化为「列」：跳过空行与 `#` 注释、按 `\t` 切分、列数不足 2 视为无效。
+///
+/// `读字根键位` 与 `读拆分表` 共用同一套逐行规约。
+fn 读表行(行: &str) -> Option<Vec<&str>> {
+    if 行.trim().is_empty() || 行.starts_with('#') {
+        return None;
+    }
+    let 列: Vec<&str> = 行.split('\t').collect();
+    if 列.len() < 2 {
+        return None;
+    }
+    Some(列)
+}
+
 /// 合并出一张完整码表：单字全码 → 单字简码 → 词组 → 词组简码 → 主词典裸词（现算）。
 ///
 /// 输出 `文本<TAB>码`，按 (文本, 码) 去重，保持各来源原有顺序。
@@ -231,11 +256,7 @@ fn 写完整码表(
         let mut 数 = 0usize;
         if 源.is_file() {
             let 行们 = 读行(源)?;
-            let 起 = 行们
-                .iter()
-                .position(|l| l.starts_with("..."))
-                .map(|i| i + 1)
-                .unwrap_or(0);
+            let 起 = 数据起始(&行们);
             for 行 in &行们[起..] {
                 let 行 = 行.trim_end();
                 if 行.is_empty() || !行.contains('\t') {
@@ -256,11 +277,7 @@ fn 写完整码表(
     let mut 裸数 = 0usize;
     if 主词典.is_file() {
         let 行们 = 读行(主词典)?;
-        let 起 = 行们
-            .iter()
-            .position(|l| l.starts_with("..."))
-            .map(|i| i + 1)
-            .unwrap_or(0);
+        let 起 = 数据起始(&行们);
         for 行 in &行们[起..] {
             let 词 = 行.trim();
             if 词.is_empty() || 词.contains('\t') || 词.starts_with('#') {
@@ -477,14 +494,7 @@ fn 读字根键位(路径: &Path) -> Result<字根表, String> {
     // 根 → { A/S/Y: 键位串 }
     let mut 位表: HashMap<String, HashMap<char, String>> = HashMap::new();
 
-    for 行 in 读行(路径)? {
-        if 行.trim().is_empty() || 行.starts_with('#') {
-            continue;
-        }
-        let 列: Vec<&str> = 行.split('\t').collect();
-        if 列.len() < 2 {
-            continue;
-        }
+    for 列 in 读行(路径)?.iter().filter_map(|l| 读表行(l)) {
         let 根 = 列[0].trim();
         let 键 = 列[1].trim();
         if 根.is_empty() || 键.is_empty() {
@@ -524,14 +534,7 @@ fn 读字根键位(路径: &Path) -> Result<字根表, String> {
 
 fn 读拆分表(路径: &Path) -> Result<拆分表, String> {
     let mut 表 = 拆分表::new();
-    for 行 in 读行(路径)? {
-        if 行.trim().is_empty() || 行.starts_with('#') {
-            continue;
-        }
-        let 列: Vec<&str> = 行.split('\t').collect();
-        if 列.len() < 2 {
-            continue;
-        }
+    for 列 in 读行(路径)?.iter().filter_map(|l| 读表行(l)) {
         let 根们: Vec<String> = 列[1].split_whitespace().map(|s| s.to_string()).collect();
         if 根们.is_empty() {
             continue;

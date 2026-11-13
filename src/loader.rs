@@ -412,9 +412,7 @@ pub fn load_key_distribution(path: &str) -> Result<[KeyDistConfig; EQUIV_TABLE_S
 #[cfg(test)]
 mod keymap_assignment_tests {
     use super::*;
-    use crate::config::TargetsConfig;
     use crate::context::OptContext;
-    use crate::types::{ScaleConfig, WeightConfig, EQUIV_TABLE_SIZE};
     use proptest::prelude::*;
 
     /// 由一组 `RootGroup` 构造最小 OptContext。
@@ -424,19 +422,7 @@ mod keymap_assignment_tests {
             let ch = char::from_u32(0x4e00 + gi as u32).unwrap();
             splits.push((ch, vec![g.roots[0].clone()], 100u64));
         }
-        let fixed_roots: HashMap<String, u8> = HashMap::new();
-        let equiv_table = [[0.0f64; EQUIV_TABLE_SIZE]; EQUIV_TABLE_SIZE];
-        let key_dist = [KeyDistConfig::default(); EQUIV_TABLE_SIZE];
-        OptContext::new(
-            &splits,
-            &fixed_roots,
-            &groups,
-            equiv_table,
-            key_dist,
-            ScaleConfig::default(),
-            WeightConfig::default(),
-            TargetsConfig::default(),
-        )
+        crate::test_util::造默认上下文(&splits, &groups)
     }
 
     /// 由「每组的 allowed_keys」构造 ctx，组名为 g0/g1/...（每组单根）。

@@ -90,10 +90,10 @@ pub fn meta_path(ckpt_dir: &Path) -> PathBuf {
     ckpt_dir.join("meta.json")
 }
 
-/// 生成毫秒级时间戳字符串（如 "20260618-093015.123"），供 `ThreadCheckpoint.timestamp` 使用。
-pub fn now_timestamp_ms() -> String {
-    chrono::Local::now().format("%Y%m%d-%H%M%S%.3f").to_string()
-}
+/// 毫秒级时间戳字符串的生成逻辑已统一下沉到 `crate::fsutil`（见 `fsutil::now_timestamp_ms`）。
+/// 此处转发以保持 `checkpoint::now_timestamp_ms` 这一对外入口不变——annealing 等调用方零改动。
+/// 此举同时打破了 `checkpoint ↔ fsutil` 的双向引用环（checkpoint 仍单向依赖 fsutil）。
+pub use crate::fsutil::now_timestamp_ms;
 
 /// 原子写：先写 `*.tmp` 临时文件再 `rename` 到目标路径，避免写入中途中断损坏目标文件。
 fn save_atomic<T: Serialize>(value: &T, path: &Path) -> std::io::Result<()> {
@@ -169,17 +169,6 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
-    fn unique_dir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!(
-            "cg_ckpt_{}_{}_{}",
-            tag,
-            std::process::id(),
-            now_timestamp_ms().replace('.', "")
-        ));
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
     fn metrics(seed: u64) -> Metrics {
         Metrics {
             collision_count: (seed % 1000) as usize,
@@ -250,7 +239,7 @@ mod tests {
         // Feature: annealing-checkpoint-resume, Property 4: 原子保存后可加载且与源相等（无 .tmp 残留）
         #[test]
         fn prop4_atomic_save_then_load(tc in arb_tc()) {
-            let dir = unique_dir("p4");
+            let dir = crate::test_util::unique_temp_dir("p4");
             save_thread_checkpoint(&tc, &dir, None).unwrap();
             let loaded = load_thread_checkpoint(&thread_path(&dir, tc.thread_id)).unwrap();
             prop_assert!(tc_eq(&tc, &loaded));
@@ -264,7 +253,7 @@ mod tests {
         // Feature: annealing-checkpoint-resume, Property 6: 归档保留旧版本且规范文件恒为最新（无 symlink）
         #[test]
         fn prop6_archive_retains_history(tcs in prop::collection::vec(arb_tc(), 2..6)) {
-            let dir = unique_dir("p6");
+            let dir = crate::test_util::unique_temp_dir("p6");
             // 固定 thread_id 与时间戳唯一，依次写出，归档应保留每个被覆盖的历史版本。
             let mut prev_ts: Option<String> = None;
             let mut written: Vec<ThreadCheckpoint> = Vec::new();
@@ -296,7 +285,7 @@ mod tests {
     // Feature: annealing-checkpoint-resume, Property 3: CheckpointMeta 往返恒等且版本校验
     #[test]
     fn prop3_meta_roundtrip_and_version_check() {
-        let dir = unique_dir("p3");
+        let dir = crate::test_util::unique_temp_dir("p3");
         let meta = CheckpointMeta {
             version: CHECKPOINT_VERSION,
             timestamp: "2026-06-18 09:30:15".to_string(),
