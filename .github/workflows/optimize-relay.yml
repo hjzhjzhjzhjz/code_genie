@@ -1,0 +1,167 @@
+name: CodeGenie 退火接力
+
+# 「CodeGenie 退火优化」跑完后，自动把该 run 的产物当种子，
+# 再 dispatch 一轮同参数优化，实现无人值守的跨 run 续算。
+#
+# 为什么不用 optimize.yml 自带的 repeat：单 job 有效预算 295 分钟，
+# 一轮 1.6 亿步已占约 3.5 小时，第二轮基本跑不动；必须跨 run 接力。
+#
+# 平台约束（2026-11-13 核实 GitHub Docs）：
+#   - workflow_run 只在默认分支生效，本文件必须存在于 moling；
+#   - workflow_run 链式最多 3 层，自动接力可能只走 1~2 轮；
+#     需要继续时用 workflow_dispatch 手动填 upstream_run_id 再触发；
+#   - GITHUB_TOKEN 触发的 workflow_dispatch 属于防递归规则的例外，
+#     会正常创建新 run，故不需要 PAT / 额外凭证，只需 actions: write。
+#
+# 参数为何固化在 env：GitHub 的 run 对象与 workflow_run 事件都不暴露
+# workflow_dispatch 的 inputs，无法自动继承；这里固化本批口径，保证每轮
+# total_steps / 配置 / 输入 / 线程数完全一致。换批时改这里即可。
+on:
+  workflow_run:
+    workflows: ["CodeGenie 退火优化"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      upstream_run_id:
+        description: 要接力的上游 run id（留空 = 取最近一个成功的优化 run）
+        required: false
+        default: ""
+        type: string
+      dry_run:
+        description: true = 只打印将 dispatch 的参数，不真正触发
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  actions: write
+  contents: read
+
+env:
+  REF: moling
+  CONFIG_BASE: config-104簇.ron
+  FILES_DIR: inputs-104簇
+  TOTAL_STEPS: "160000000"
+  THREADS: "4"
+  REPEAT: "1"
+  # 只接力该系列，避免把冒烟测试或别批实验也续上
+  SERIES_PREFIX: out-104簇-16000w-195种
+  # out_dir 形如 {SERIES_PREFIX}-rN；N >= MAX_ROUND 时停止
+  MAX_ROUND: "4"
+
+jobs:
+  relay:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 计算并触发下一轮
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_ID: ${{ github.event.workflow_run.id }}
+          EVENT_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          EVENT_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          INPUT_ID: ${{ inputs.upstream_run_id }}
+          DRY: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re, subprocess, sys
+
+          仓库 = os.environ["GITHUB_REPOSITORY"]
+          分支 = os.environ["REF"]
+          系列 = os.environ["SERIES_PREFIX"]
+          轮次上限 = int(os.environ["MAX_ROUND"])
+          仅预览 = os.environ.get("DRY", "") == "true"
+
+          def gh(*参数, 合并错误=False):
+              选项 = {"text": True}
+              if 合并错误:
+                  选项["stderr"] = subprocess.STDOUT
+              return subprocess.check_output(["gh", *参数], **选项)
+
+          def api(路径):
+              return json.loads(gh("api", 路径))
+
+          事件id = os.environ.get("EVENT_ID", "").strip()
+          手动id = os.environ.get("INPUT_ID", "").strip()
+          结论 = os.environ.get("EVENT_CONCLUSION", "").strip()
+          上游分支 = os.environ.get("EVENT_BRANCH", "").strip()
+          自动模式 = bool(事件id) and not 手动id
+
+          if 自动模式 and 结论 != "success":
+              print(f"上游 run 结论为 {结论}，只接力成功 run")
+              sys.exit(0)
+          if 自动模式 and 上游分支 and 上游分支 != 分支:
+              print(f"上游分支 {上游分支} != {分支}，跳过")
+              sys.exit(0)
+
+          if 手动id or 事件id:
+              候选 = [手动id or 事件id]
+          else:
+              最近 = api(f"repos/{仓库}/actions/workflows/optimize.yml/runs?per_page=20&status=success")
+              列表 = 最近.get("workflow_runs", [])
+              候选 = [str(列表[0]["id"])] if 列表 else []
+              print(f"未指定上游 run，取最近一个成功 run：{候选}")
+
+          # artifact 名：codegenie-{out_dir}-run{run_number}-s{shard}
+          名正则 = re.compile(r"^codegenie-(.+)-run\d+-s(\d+)$")
+          轮正则 = re.compile(r"^" + re.escape(系列) + r"-r(\d+)$")
+          try:
+              已有产物 = api(f"repos/{仓库}/actions/artifacts?per_page=100").get("artifacts", [])
+          except Exception as e:
+              print(f"产物清单获取失败（不影响接力）：{e}")
+              已有产物 = []
+
+          触发数 = 0
+          for rid in 候选:
+              try:
+                  信息 = api(f"repos/{仓库}/actions/runs/{rid}")
+              except Exception as e:
+                  print(f"run {rid} 元数据获取失败，跳过：{e}")
+                  continue
+              if 信息.get("conclusion") != "success":
+                  print(f"run {rid} 结论 {信息.get('conclusion')}，跳过")
+                  continue
+              产物 = api(f"repos/{仓库}/actions/runs/{rid}/artifacts?per_page=100").get("artifacts", [])
+              for 项 in 产物:
+                  if 项.get("expired"):
+                      continue
+                  m = 名正则.match(项["name"])
+                  if not m:
+                      continue
+                  输出目录, 分片 = m.group(1), m.group(2)
+                  rm = 轮正则.match(输出目录)
+                  if not rm:
+                      print(f"run {rid} 的 {项['name']} 不属于 {系列}-rN 系列，跳过")
+                      continue
+                  轮 = int(rm.group(1))
+                  if 轮 >= 轮次上限:
+                      print(f"run {rid} 已达轮次上限 r{轮} >= r{轮次上限}，停止")
+                      continue
+                  下一轮目录 = f"{系列}-r{轮 + 1}"
+                  # 轻量防重：下一轮同分片的 artifact 已存在就不再触发
+                  重正则 = re.compile(r"^codegenie-" + re.escape(下一轮目录) + rf"-run\d+-s{分片}$")
+                  if any(重正则.match(x["name"]) for x in 已有产物):
+                      print(f"r{轮 + 1}/s{分片} 已有产物，跳过重复接力")
+                      continue
+                  参数 = [
+                      "-R", 仓库, "workflow", "run", "optimize.yml", "--ref", 分支,
+                      "-f", f"ref={分支}",
+                      "-f", f"config_base={os.environ['CONFIG_BASE']}",
+                      "-f", f"files_dir={os.environ['FILES_DIR']}",
+                      "-f", f"total_steps={os.environ['TOTAL_STEPS']}",
+                      "-f", f"threads={os.environ['THREADS']}",
+                      "-f", f"shard_list=[{分片}]",
+                      "-f", f"out_dir={下一轮目录}",
+                      "-f", f"seed_run_id={rid}",
+                      "-f", f"seed_shard={分片}",
+                      "-f", f"repeat={os.environ['REPEAT']}",
+                  ]
+                  print("将 dispatch: gh " + " ".join(参数), flush=True)
+                  if not 仅预览:
+                      print(gh(*参数, 合并错误=True).strip() or "(gh 无输出)", flush=True)
+                      触发数 += 1
+          if 仅预览:
+              print("dry-run 结束：未触发任何 run")
+          else:
+              print(f"完成：实际触发 {触发数} 轮")
+          PY
