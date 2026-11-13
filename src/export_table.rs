@@ -215,11 +215,11 @@ pub(crate) fn 取码序列按规则<'a>(
             if n == 1 {
                 s.push((根[0].as_str(), 码位::Y));
             } else {
-                for i in 1..n {
+                for (i, 根项) in 根.iter().enumerate().take(n).skip(1) {
                     if n > 3 && i == 2 && 有声母(0) {
                         continue;
                     }
-                    s.push((根[i].as_str(), 码位::A));
+                    s.push((根项.as_str(), 码位::A));
                 }
                 if 有声母(末) {
                     s.push((根[末].as_str(), 码位::S));

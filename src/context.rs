@@ -168,9 +168,9 @@ impl OptContext {
         // 预计算每个组的加权频率总和
         // group_freq_sum[r] = sum of freq_f for each (ci, part) where part references group r
         let mut group_freq_sum = vec![0.0f64; num_groups];
-        for ci in 0..char_infos.len() {
-            let freq_f = char_infos[ci].frequency as f64;
-            for &p in &char_infos[ci].parts {
+        for info in char_infos.iter() {
+            let freq_f = info.frequency as f64;
+            for &p in &info.parts {
                 if p >= GROUP_MARKER {
                     let gi = (p - GROUP_MARKER) as usize;
                     group_freq_sum[gi] += freq_f;

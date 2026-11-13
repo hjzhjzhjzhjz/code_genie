@@ -74,9 +74,9 @@ impl TemperatureSchedule {
 
         let total = cumulative[n];
         let mut lut = Vec::with_capacity(n + 1);
-        for i in 0..=n {
+        for (i, &累积) in cumulative.iter().take(n + 1).enumerate() {
             let q = if total > 0.0 {
-                cumulative[i] / total
+                累积 / total
             } else {
                 i as f64 / n as f64
             };

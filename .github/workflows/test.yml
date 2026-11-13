@@ -148,7 +148,10 @@ jobs:
         id: test
         run: |
           set -o pipefail
-          if ! cargo test --all-targets 2>&1 | tee test.log; then
+          # 只跑 bin / 集成测试：benches 是 divan 自带 main 的基准程序，
+          # 其素材依赖本地 dlrk/ 数据（不入库），跑它会直接 panic；
+          # bench 的编译仍由上面的 clippy --all-targets 覆盖，基准由 cargo bench 手动跑。
+          if ! cargo test --bins --tests 2>&1 | tee test.log; then
             echo "=== 失败用例 ==="
             grep -E '^(test .* FAILED|---- .* stdout ----|thread .* panicked)' -A 12 test.log | head -n 160
             exit 1

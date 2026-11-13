@@ -2,12 +2,12 @@
 //!
 //! 对准 2026-11-11 火焰图定标点名的路径：
 //!   - `try_move`         —— 真实的退火单步单元（组级别改键 + 组内所有字 update_char + 全分重算），
-//!                          是头条数字，未来任何重构都以它为对照基线。
+//!     是头条数字，未来任何重构都以它为对照基线。
 //!   - `compute_full_score` —— 强制重算全分（含 `刷新编码种数`：368 基名指纹 sort/dedup），
-//!                          隔离火焰图里那 2.66% 的路径。
+//!     隔离火焰图里那 2.66% 的路径。
 //!   - `update_char`      —— 真实「组键翻转」后对该组每个字做增量桶迁移（非 no-op）。
 //!   - `resolve_key` / `calc_code_only` / `calc_equiv_from_parts` —— 各为一次全表遍历，
-//!                          用于拆出 `resolve_key`(5.74%) 与 `calc_equiv_from_parts`(5.43%) 的占比。
+//!     用于拆出 `resolve_key`(5.74%) 与 `calc_equiv_from_parts`(5.43%) 的占比。
 //!
 //! 本项目是纯 binary crate，没有 lib target。这里用 `#[path]` 在 bench crate 内重建同一套
 //! 模块树：模块内的 `crate::xxx` 解析到本 crate 同名模块，因此**不改 src/main.rs、不加 lib**。
@@ -17,8 +17,6 @@
 
 #![allow(dead_code)]
 #![allow(unused_imports)]
-// bench crate 用 #[path] 重建了整套 src 模块树，避免和 bin crate 重复报同一批 lint
-#![allow(clippy::needless_range_loop, clippy::doc_overindented_list_items)]
 
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
