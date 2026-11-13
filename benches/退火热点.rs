@@ -390,3 +390,30 @@ fn calc_equiv_from_parts(bencher: divan::Bencher) {
         black_box(累加)
     });
 }
+
+/// 冲突条目重建（火焰图 `rebuild_entries` 调用链 13.14%，退火前 1/4 段达 20.21%）。
+/// 逐桶折算代表对 + 排序；用同一个 cache 反复重排，状态不变、只测纯算法。
+/// window=20 是生产默认采样窗口（只保证前 20 条有序）。
+#[divan::bench]
+fn collision_rebuild(bencher: divan::Bencher) {
+    let ctx = 取素材();
+    let assignment = 初始分配(ctx);
+    let mut cache = annealing::CollisionCache::new(ctx, &assignment, true, 0, 20);
+    eprintln!("冲突条目 {} 条", cache.entries().len());
+    bencher.bench_local(|| {
+        cache.rebuild_entries(ctx);
+        black_box(cache.entries());
+    });
+}
+
+/// 全量排序口径（window 开到最大）：与改造前的 `sort_collisions` 整表排序对照。
+#[divan::bench]
+fn collision_rebuild_full(bencher: divan::Bencher) {
+    let ctx = 取素材();
+    let assignment = 初始分配(ctx);
+    let mut cache = annealing::CollisionCache::new(ctx, &assignment, true, 0, usize::MAX);
+    bencher.bench_local(|| {
+        cache.rebuild_entries(ctx);
+        black_box(cache.entries());
+    });
+}
