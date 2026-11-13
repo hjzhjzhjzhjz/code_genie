@@ -236,6 +236,21 @@ pub struct AnnealingConfig {
     /// 整键互换（full_key_swap）算子执行概率（0.0~1.0），0 关闭。缺省 0.01。
     #[serde(default = "default_full_key_swap_probability")]
     pub full_key_swap_probability: f64,
+    /// 是否在周期写 checkpoint 时全量重建评估器（把 f64 增量累加器重置为真值）。
+    ///
+    /// 4000 万步长跑里，累加器反复 `+=` / `-=` 会累积 f64 舍入漂移；实测 10 万步
+    /// 绝对漂移 6.89e-7、相对 2.67e-14（见 `src/漂移测量.rs`）。开启后每个
+    /// checkpoint 周期用 `Evaluator::new` 全量重算，与 `resume` 恢复走同一入口，
+    /// 顺带让「一次跑完」与「中断续算」的评分口径一致。
+    ///
+    /// 重建**不消耗随机数**，RNG 序列不变；但会微调评分数值，故默认关闭，
+    /// 不改变未显式开启的用户的搜索轨迹。需要严格复现历史结果时保持 false。
+    #[serde(default = "default_rebuild_evaluator_at_checkpoint")]
+    pub rebuild_evaluator_at_checkpoint: bool,
+}
+/// 默认 **关闭**：数值修正也会微调 `get_score`，不应改变未显式开启用户的搜索轨迹。
+fn default_rebuild_evaluator_at_checkpoint() -> bool {
+    false
 }
 
 /// 默认 **关闭**（0.0）：这是新增算子，不应改变未显式开启的用户的搜索轨迹。
@@ -540,6 +555,7 @@ impl Default for Config {
                 conflict_key_by_load: default_conflict_key_by_load(),
                 checkpoint_interval_ratio: default_checkpoint_interval_ratio(),
                 full_key_swap_probability: default_full_key_swap_probability(),
+                rebuild_evaluator_at_checkpoint: default_rebuild_evaluator_at_checkpoint(),
             },
             scale: None,
             targets: None,
@@ -885,6 +901,40 @@ distribution_max = 10.0
         );
 
         let _ = std::fs::remove_dir_all(&目录);
+    }
+
+    /// 周期写盘点全量重建默认关闭，且旧配置（缺该字段）必须仍能解析。
+    #[test]
+    fn 重建开关默认关闭且向后兼容() {
+        assert!(
+            !Config::default().annealing.rebuild_evaluator_at_checkpoint,
+            "重建会微调评分，默认必须关闭以不改变既有搜索轨迹"
+        );
+        let 旧配置 = minimal_config_prefix();
+        let 缺字段: Config = toml::from_str(旧配置).expect("旧 TOML 配置应仍能解析");
+        assert!(
+            !缺字段.annealing.rebuild_evaluator_at_checkpoint,
+            "缺字段时应回落到默认 false"
+        );
+        let 显式开启 = format!("{旧配置}rebuild_evaluator_at_checkpoint = true\n");
+        let 开启: Config = toml::from_str(&显式开启).expect("显式开启的 TOML 应能解析");
+        assert!(开启.annealing.rebuild_evaluator_at_checkpoint);
+
+        // 生产配置是 RON，缺字段时也必须回落到 false（RON 与 TOML 双格式兜底）。
+        let 最小 = Config::default();
+        let ron文本 = ron::ser::to_string(&最小).unwrap();
+        assert!(
+            ron文本.contains("rebuild_evaluator_at_checkpoint:false"),
+            "序列化文本应含新字段，否则下面的删除是空操作: {ron文本}"
+        );
+        // 该字段在 RON 里是 annealing 段的最后一项，后面没有逗号。
+        let 去掉新字段 = ron文本.replace("rebuild_evaluator_at_checkpoint:false", "");
+        assert_ne!(去掉新字段, ron文本, "应确实删掉了新字段");
+        let ron回落: Config = ron::from_str(&去掉新字段).expect("旧 RON 配置应仍能解析");
+        assert!(
+            !ron回落.annealing.rebuild_evaluator_at_checkpoint,
+            "RON 缺字段时应回落到默认 false"
+        );
     }
 }
 #[cfg(test)]

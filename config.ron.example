@@ -75,6 +75,7 @@
         conflict_key_by_load: true,        // 落点选键：true = 按键位剩余配额加权（分布更匀，代价重码略升）；false = 均匀随机
         checkpoint_interval_ratio: 0.05,   // checkpoint 间隔（占 total_steps 比例）
         full_key_swap_probability: 0.01,   // 整键互换算子概率（0 = 关闭）
+        rebuild_evaluator_at_checkpoint: false, // 周期写盘点时全量重建评估器累加器（消除 f64 长跑漂移）；默认 false，开启后评分会微调
     ),
     simple_levels: [
         (level: 1, code_num: 1, rules: ["Aa"], commit_keys: Some("_")),              // 一级简码

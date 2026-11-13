@@ -42,6 +42,10 @@ toml = "1"
 [dev-dependencies]
 divan = "0.1.21"
 proptest = { version = "1", default-features = false, features = ["std"] }
+# 仅测试用：任意精度「真值」基准，用于量化 f64 增量累加器的长跑漂移。
+# 只开 floats（会传递启用 rationals / naturals_and_integers）+ std，不进发布二进制。
+# 注意 malachite 是 LGPL-3.0-only；挂 dev-dependencies 才不会把许可证义务带进产物。
+malachite = { version = "0.14", default-features = false, features = ["floats", "std"] }
 
 [profile.release]
 opt-level = 3

@@ -56,6 +56,10 @@ mod zigen;
 
 #[cfg(test)]
 mod test_util;
+// Rust 模块名不允许非 ASCII，文件名仍用中文（与项目脚本命名一致），用 #[path] 指定。
+#[cfg(test)]
+#[path = "漂移测量.rs"]
+mod drift_check;
 
 use crate::annealing::{simulated_annealing_resumable, SaResult};
 use crate::calibrate::calibrate_scales;

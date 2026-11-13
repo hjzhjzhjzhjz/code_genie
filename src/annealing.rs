@@ -1620,6 +1620,20 @@ pub fn simulated_annealing_resumable(
         }
         // === 周期写 checkpoint（每 checkpoint_interval 步，需求 1.2）===
         if ckpt_dir.is_some() && step > start_step && step % checkpoint_interval == 0 {
+            // 可选（默认关闭）：顺手全量重建评估器，把 f64 增量累加器重置为真值。
+            // 走的是与 resume 恢复完全相同的 Evaluator::new，因此「一次跑完」与
+            // 「中断续算」的评分口径一致。重建不消耗随机数，RNG 序列不变。
+            //
+            // 重建后当前分数会微调（长跑漂移量级约 1e-7），必须把 best_* 也刷到
+            // 同一真值口径，否则下一步 `current_score < best_score` 会把口径差
+            // 误判成「新的改进」，进而错误重置 steps_since_improve、扰动重热节奏。
+            // 先重建再写盘，写出的 checkpoint 里 best_score 也是真值口径。
+            if cfg.annealing.rebuild_evaluator_at_checkpoint {
+                evaluator = Evaluator::new(ctx, &assignment);
+                let mut 最优评估器 = Evaluator::new(ctx, &best_assignment);
+                best_score = 最优评估器.get_score(ctx, &best_assignment);
+                best_metrics = 最优评估器.get_metrics(ctx);
+            }
             write_ckpt(
                 step,
                 &assignment,
@@ -2544,6 +2558,84 @@ mod resume_tests {
         );
 
         let _ = std::fs::remove_dir_all(&ckpt_dir);
+    }
+
+    // 周期写盘点全量重建：写出的 best_score 必须是「从 best_assignment 全量重算」的真值口径。
+    #[test]
+    fn 开启重建时检查点最优分为全量真值口径() {
+        let ctx = make_ctx(8);
+        let total_steps = 3000usize;
+        let mut cfg = tiny_cfg(total_steps);
+        cfg.annealing.rebuild_evaluator_at_checkpoint = true;
+        let interval = checkpoint_interval(total_steps, cfg.annealing.checkpoint_interval_ratio);
+        let ckpt_dir = tmp_ckpt_dir("rebuild");
+        let stop = Arc::new(AtomicBool::new(false));
+        let r = simulated_annealing_resumable(
+            &ctx,
+            &cfg,
+            0,
+            &stop,
+            None,
+            Some(&ckpt_dir),
+            interval,
+            None,
+            None,
+        );
+        assert!(!r.interrupted);
+        let tpath = checkpoint::thread_path(&ckpt_dir, 0);
+        let tc = checkpoint::load_thread_checkpoint(&tpath).unwrap();
+        assert_eq!(tc.current_step % interval, 0, "最后一次写出应在周期点");
+
+        // 开关开启时 best_score 与 best_assignment 在同一真值口径下配对，
+        // 保证 resume 恢复后 `current_score < best_score` 不会拿新旧口径互相比。
+        let mut 真值评估器 = Evaluator::new(&ctx, &tc.best_assignment);
+        let 真值 = 真值评估器.get_score(&ctx, &tc.best_assignment);
+        assert!(
+            (tc.best_score - 真值).abs() < 1e-12,
+            "检查点最优分不是全量真值: {} vs {}",
+            tc.best_score,
+            真值
+        );
+        let _ = std::fs::remove_dir_all(&ckpt_dir);
+    }
+
+    // 重建只能改数值口径，绝不能消耗随机数：同种子下开/关两次运行必须逐位一致。
+    #[test]
+    fn 重建不消耗随机数_同种子轨迹逐位一致() {
+        let ctx = make_ctx(8);
+        let total_steps = 3000usize;
+        let mut cfg = tiny_cfg(total_steps);
+        let interval = checkpoint_interval(total_steps, cfg.annealing.checkpoint_interval_ratio);
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut 跑一次 = |重建: bool, 标签: &str| {
+            cfg.annealing.rebuild_evaluator_at_checkpoint = 重建;
+            let 目录 = tmp_ckpt_dir(标签);
+            let r = simulated_annealing_resumable(
+                &ctx,
+                &cfg,
+                0,
+                &stop,
+                None,
+                Some(&目录),
+                interval,
+                None,
+                Some(20261113),
+            );
+            let _ = std::fs::remove_dir_all(&目录);
+            r
+        };
+        let 关闭 = 跑一次(false, "no_rebuild");
+        let 开启 = 跑一次(true, "with_rebuild");
+        assert_eq!(
+            关闭.assignment, 开启.assignment,
+            "重建不应改变随机流，最终分配必须逐位相同"
+        );
+        assert!(
+            (关闭.score - 开启.score).abs() < 1e-9,
+            "重建只允许修正 1e-7 量级的累加漂移，不应改变搜索结论: {} vs {}",
+            关闭.score,
+            开启.score
+        );
     }
 
     // 需求 7.9：current_step >= total_steps 的检查点 resume 时跳过主循环、直接收尾，不报错。
