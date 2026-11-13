@@ -956,7 +956,10 @@ fn 生成方案档案(
         .and_then(|n| n.as_u64());
 
     let 字节 = std::fs::read(码表).map_err(|e| format!("读不了码表: {}", e))?;
-    let 摘要 = format!("{:x}", Sha256::digest(&字节));
+    let 摘要 = Sha256::digest(&字节)
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>();
 
     let mut 档 = 值.clone();
     {

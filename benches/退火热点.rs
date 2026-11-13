@@ -81,7 +81,7 @@ use crate::context::OptContext;
 use crate::evaluator::Evaluator;
 use crate::types::{ScaleConfig, WeightConfig};
 use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
+use rand::{Rng, RngExt, SeedableRng};
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;

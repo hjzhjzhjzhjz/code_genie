@@ -22,20 +22,20 @@ mimalloc = ["dep:mimalloc"]
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3.4"
-rand = "0.9"
+rand = "0.10"
 rayon = "1.10"
-rustc-hash = "1.1"
+rustc-hash = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["float_roundtrip"] }
-sha2 = "0.10"
+sha2 = "0.11"
 smallvec = "1"
 # 全局分配器：SA 每步都有大量短命分配，Windows/mingw 的堆段只扩不缩，
 # 长跑时私有内存与页文件峰值会持续抬高。mimalloc 用线程本地堆 + 更积极的页回收，
 # 目标是压住这条高水位曲线（可选依赖，见 [features]）。
 mimalloc = { version = "0.1", optional = true }
-ron = "0.8"
+ron = "0.12"
 # 配置文件同时支持 RON 与 TOML（加载器按扩展名优先、另一格式兜底）
-toml = "0.8"
+toml = "1"
 
 [dev-dependencies]
 divan = "0.1.21"

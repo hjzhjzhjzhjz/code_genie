@@ -5,6 +5,8 @@
 use std::collections::HashMap;
 use std::fs;
 
+use rand::RngExt;
+
 use crate::types::{char_to_key_index, KeyDistConfig, RootGroup, EQUIV_TABLE_SIZE};
 
 /// 加载固定字根和受限字根组
@@ -414,7 +416,6 @@ mod keymap_assignment_tests {
     use crate::context::OptContext;
     use crate::types::{ScaleConfig, WeightConfig, EQUIV_TABLE_SIZE};
     use proptest::prelude::*;
-    use rand::Rng;
 
     /// 由一组 `RootGroup` 构造最小 OptContext。
     fn make_ctx_from_groups(groups: Vec<RootGroup>) -> OptContext {
