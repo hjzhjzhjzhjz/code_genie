@@ -1938,6 +1938,7 @@ mod conflict_tests {
     use crate::context::OptContext;
     use crate::types::{KeyDistConfig, RootGroup, ScaleConfig, EQUIV_TABLE_SIZE};
     use proptest::prelude::*;
+    use rand::Rng;
     use std::collections::HashMap;
 
     // 线性 top2 必须与原先「按 (贡献降序, 组号升序) 排序后取前两项」逐例等价，
