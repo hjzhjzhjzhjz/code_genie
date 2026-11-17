@@ -278,6 +278,88 @@ pub fn load_keymap(keymap_path: &str, division_path: &str) -> Result<HashMap<Str
     Ok(root_to_key)
 }
 
+/// 精确初始解的文件名（与 `字根键位表.txt` 同目录、同线程）。
+pub const 精确解文件名: &str = "精确解.txt";
+
+/// 把 `assignment` 编码成精确初始解文本。
+///
+/// 布局：若干 `#` 注释行 + 一行按**组索引顺序**排列的键位字符（长度 = 组数）。
+/// 存的是组→键的直接映射，不经过「字根名 → 键位」这一层，因此不会因为某个字根
+/// 从不出现在拆分表里（缺少槽位信息）而丢掉整组。
+pub fn assignment_to_text(assignment: &[u8]) -> String {
+    let mut out = String::with_capacity(assignment.len() + 256);
+    out.push_str(&format!(
+        "# 精确初始解：按组索引顺序给出键位字符，共 {} 组\n",
+        assignment.len()
+    ));
+    out.push_str("# 播种时直接按组还原；与 字根键位表.txt 相比不依赖拆分表槽位，不会丢组\n");
+    for &k in assignment {
+        out.push(crate::types::key_to_char(k));
+    }
+    out.push('\n');
+    out
+}
+
+/// 解析精确初始解文本，返回组→键位数组。
+///
+/// 只做词法解析（字符 → 键位索引），不做长度与 `allowed_keys` 校验：
+/// 那两件事依赖调用方当前的 `ctx`，在播种入口处统一校验并给出可读报错。
+pub fn load_assignment_text(path: &str) -> Result<Vec<u8>, String> {
+    let content =
+        fs::read_to_string(path).map_err(|e| format!("无法读取精确初始解 {}: {}", path, e))?;
+    let mut out: Vec<u8> = Vec::new();
+    for (行号, line) in content.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        for (列, c) in line.chars().enumerate() {
+            if c.is_whitespace() {
+                continue;
+            }
+            let k = char_to_key_index(c).ok_or_else(|| {
+                format!(
+                    "精确初始解 {} 第{}行第{}列出现非法键位字符 '{}'",
+                    path,
+                    行号 + 1,
+                    列 + 1,
+                    c
+                )
+            })?;
+            out.push(k as u8);
+        }
+    }
+    if out.is_empty() {
+        return Err(format!("精确初始解 {} 不含任何键位字符", path));
+    }
+    Ok(out)
+}
+
+/// 校验精确初始解与当前 `ctx` 是否匹配：组数一致，且每个键位 ∈ 该组 `allowed_keys`。
+///
+/// 与 `keymap_to_assignment` 不同，这里**不做任何随机补全**：精确解要么整体可用，
+/// 要么整份拒绝。播种的「无损」承诺就建立在这条约束上——一旦静默补全，就退化成
+/// 另一条随机轨迹了。
+pub fn 校验精确解(ctx: &crate::context::OptContext, assignment: &[u8]) -> Result<(), String> {
+    if assignment.len() != ctx.num_groups {
+        return Err(format!(
+            "精确初始解有 {} 个组，当前方案需要 {} 个组（配置或输入已变，无法无损播种）",
+            assignment.len(),
+            ctx.num_groups
+        ));
+    }
+    for (gi, &k) in assignment.iter().enumerate() {
+        let allowed = &ctx.groups[gi].allowed_keys;
+        if !allowed.contains(&k) {
+            return Err(format!(
+                "精确初始解第 {} 组的键位 {} 不在该组 allowed_keys {:?} 内",
+                gi, k, allowed
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// 将 keymap（子字根名 → 键位）据当前 `ctx` 折叠为退火初始分配（assignment），并做约束校验。
 ///
 /// 用于「从既有结果给 optimize 播种」：把一份既有 `output-keymap.txt` 解析（`load_keymap`）
@@ -450,6 +532,30 @@ mod keymap_assignment_tests {
     /// 1..6 个组，每组一个非空 allowed_keys 子集。
     fn groups_strategy() -> impl Strategy<Value = Vec<Vec<u8>>> {
         prop::collection::vec(subset(), 1..6)
+    }
+
+    /// 组数或键位与当前方案不符时整份拒绝：宁可报错，也不能静默补全成另一条轨迹。
+    #[test]
+    fn 精确解组数与键位必须匹配当前方案() {
+        let 组们 = vec![
+            RootGroup {
+                roots: vec!["a".to_string()],
+                allowed_keys: vec![0, 1],
+            },
+            RootGroup {
+                roots: vec!["b".to_string()],
+                allowed_keys: vec![0, 1],
+            },
+        ];
+        let ctx = make_ctx_from_groups(组们);
+        assert!(校验精确解(&ctx, &[0, 1]).is_ok());
+        let 少组 = 校验精确解(&ctx, &[0]).unwrap_err();
+        assert!(少组.contains("2 个组"), "组数不符要报出期望值: {少组}");
+        let 非法键 = 校验精确解(&ctx, &[0, 9]).unwrap_err();
+        assert!(
+            非法键.contains("allowed_keys"),
+            "键位越界要指出 allowed_keys: {非法键}"
+        );
     }
 
     #[test]
@@ -630,5 +736,32 @@ mod splits_freq_tests {
         assert_eq!(行[1].2, 1, "缺第三列按 1（原有约定）");
         assert_eq!(行[2].2, 1, "无法解析的频次按 1，但会告警");
         assert_eq!(行[3].2, 37);
+    }
+
+    /// 精确初始解必须逐组无损往返：这是「播种不退化」的唯一保证。
+    #[test]
+    fn 精确解往返逐组一致() {
+        let 目录 = std::env::temp_dir().join(format!("cg_jq_{}", std::process::id()));
+        std::fs::create_dir_all(&目录).unwrap();
+        let 路径 = 目录.join(精确解文件名);
+        // 覆盖字母与符号键，含 26(_) / 27(;) / 30(/)
+        let 原 = vec![0u8, 25, 26, 27, 30, 4, 18, 30, 0, 11];
+        std::fs::write(&路径, assignment_to_text(&原)).unwrap();
+        let 回 = load_assignment_text(路径.to_str().unwrap()).unwrap();
+        assert_eq!(回, 原, "精确解往返必须逐组一致");
+        let _ = std::fs::remove_dir_all(&目录);
+    }
+
+    /// 非法字符必须报错并指出行列，而不是静默丢弃（静默丢弃会悄悄改变组数）。
+    #[test]
+    fn 精确解拒绝非法字符() {
+        let 目录 = std::env::temp_dir().join(format!("cg_jq_bad_{}", std::process::id()));
+        std::fs::create_dir_all(&目录).unwrap();
+        let 路径 = 目录.join(精确解文件名);
+        std::fs::write(&路径, "# 注释\nab9c\n").unwrap();
+        let e = load_assignment_text(路径.to_str().unwrap()).unwrap_err();
+        assert!(e.contains("非法键位字符"), "报错应说明非法字符: {e}");
+        assert!(e.contains('9'), "报错应带上具体字符: {e}");
+        let _ = std::fs::remove_dir_all(&目录);
     }
 }

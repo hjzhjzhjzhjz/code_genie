@@ -249,6 +249,12 @@ pub fn save_thread_results(
         root_usage,
     );
     crate::fsutil::write_output(format!("{}/字根键位表.txt", thread_dir), &root_out);
+    // 精确初始解：按组索引直接落盘，供下一轮播种无损还原（字根键位表会丢掉
+    // 在拆分表中从未出现的组，往返有损）。
+    crate::fsutil::write_output(
+        format!("{}/{}", thread_dir, crate::loader::精确解文件名),
+        crate::loader::assignment_to_text(assignment),
+    );
 
     save_key_distribution_to_dir(ctx, assignment, &thread_dir);
     save_equiv_distribution_to_dir(ctx, assignment, &thread_dir);

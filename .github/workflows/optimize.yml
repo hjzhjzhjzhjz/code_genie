@@ -160,7 +160,9 @@ jobs:
           while IFS= read -r km; do
             nn=$(printf 'thread-%02d' "$i")
             mkdir -p "seed/$nn"
-            cp "$km" "seed/$nn/字根键位表.txt"
+            # 整个线程目录一起复制：除字根键位表外还带 精确解.txt，
+            # 有它时程序走按组精确还原（无损），没有才回落到键位表（会随机补全未覆盖组）。
+            cp -a "$(dirname "$km")/." "seed/$nn/"
             i=$((i+1))
           done < <(find 历史 -type f -path '*/thread-*/字根键位表.txt' | sort)
           if [ "$i" -eq 0 ]; then

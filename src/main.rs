@@ -100,8 +100,9 @@ enum Commands {
         #[arg(short = 'd', long = "output-dir")]
         output_dir: Option<String>,
 
-        /// 从既有 output 目录播种：读取 {DIR}/thread-NN/字根键位表.txt 作为各线程初始解
-        /// （按 thread-NN 编号轮询映射）。与 --seed-keymap 互斥。
+        /// 从既有 output 目录播种：读取 {DIR}/thread-NN/精确解.txt 精确还原各组键位；
+        /// 缺该文件时回落到 {DIR}/thread-NN/字根键位表.txt（会随机补齐未覆盖组，有损）。
+        /// 按 thread-NN 编号轮询映射。与 --seed-keymap 互斥。
         #[arg(long = "seed-dir")]
         seed_dir: Option<String>,
 
@@ -1380,7 +1381,28 @@ fn run_optimize(
             None => rand::rngs::StdRng::from_rng(&mut rand::rng()),
         };
         let mut v = Vec::with_capacity(seed_paths.len());
+        let mut 精确数 = 0usize;
         for p in &seed_paths {
+            // 优先走精确解：组→键直接还原，不做任何随机补全。
+            let 精确路径 = std::path::Path::new(p).with_file_name(loader::精确解文件名);
+            if 精确路径.is_file() {
+                let 文本 = 精确路径.to_string_lossy().to_string();
+                let asg = must(loader::load_assignment_text(&文本));
+                if let Err(e) = loader::校验精确解(&ctx, &asg) {
+                    eprintln!("❌ 精确初始解 {} 不可用: {}", 文本, e);
+                    std::process::exit(1);
+                }
+                let 分 = Evaluator::new(&ctx, &asg).get_score(&ctx, &asg);
+                println!(
+                    "✅ 精确播种 {}：{} 组全部还原（无随机补全），起评分 {:.6}",
+                    文本,
+                    asg.len(),
+                    分
+                );
+                精确数 += 1;
+                v.push(asg);
+                continue;
+            }
             let map = must(loader::load_keymap(p, &cfg.files.splits));
             match loader::keymap_to_assignment(&ctx, &map, &mut rng) {
                 Ok((asg, filled)) => {
@@ -1405,8 +1427,10 @@ fn run_optimize(
             }
         }
         println!(
-            "🌱 播种来源: {} 个种子；{} 线程按 round-robin(i % K) 映射",
+            "🌱 播种来源: {} 个种子（精确 {} / 键位表 {}）；{} 线程按 round-robin(i % K) 映射",
             v.len(),
+            精确数,
+            v.len() - 精确数,
             num_threads
         );
         v
