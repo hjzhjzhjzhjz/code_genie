@@ -224,21 +224,35 @@ impl OptContext {
         code
     }
 
-    /// 从拆分计算全码等价值。返回 `None` 表示没有有效按键对，不参与当量统计。
+    /// 一次遍历同时算出全码与当量。
+    ///
+    /// `Evaluator::new`（全表构建）与 `Evaluator::update_char`（单字增量）原本对同一个
+    /// `parts` 走两遍——先 `calc_code_only` 求码、再 `calc_equiv_from_parts` 求当量，
+    /// 第二遍把每个 part 的 `resolve_key` 重做一次。这里合成一遍：`parts` 只加载一次、
+    /// 每个 part 只 resolve 一次，滚动累加 `code`（整数位权）与 `total`（相邻键对当量），
+    /// `prev_key` 顺带前移。
+    ///
+    /// **与两个旧函数逐位一致**：编码是整数乘加，与 `calc_code_only` 同序同式；当量按
+    /// `i = 1..n` 的相邻键对顺序累加，与 `calc_equiv_from_parts` 完全相同，连收尾的
+    /// 「虚拟空格补一对」也照原序追加在循环之后。加数相同、顺序相同 ⇒ `f64` 结果逐位相同。
     #[inline(always)]
-    pub fn calc_equiv_from_parts(&self, ci: usize, assignment: &[u8]) -> Option<f64> {
+    pub fn calc_code_and_equiv(&self, ci: usize, assignment: &[u8]) -> (usize, Option<f64>) {
         let info = &self.char_infos[ci];
         let n = info.parts.len();
         if n == 0 {
-            return None;
+            return (0, None);
         }
 
+        let base = self.code_base;
         let mut prev_key = self.resolve_key(info.parts[0], assignment) as usize;
+        // 首位等价于 `0 * base + (k + 1)`，直接取 `k + 1` 省一次乘加。
+        let mut code = prev_key + 1;
         let mut total = 0.0;
-        let mut pair_count = n.saturating_sub(1);
+        let mut pair_count = n - 1;
 
-        for i in 1..n {
-            let cur_key = self.resolve_key(info.parts[i], assignment) as usize;
+        for &p in &info.parts[1..] {
+            let cur_key = self.resolve_key(p, assignment) as usize;
+            code = code * base + (cur_key + 1);
             total += self.equiv_table[prev_key][cur_key];
             prev_key = cur_key;
         }
@@ -248,10 +262,21 @@ impl OptContext {
             pair_count += 1;
         }
 
-        if pair_count == 0 {
+        let equiv = if pair_count == 0 {
             None
         } else {
             Some(total / pair_count as f64)
-        }
+        };
+        (code, equiv)
+    }
+
+    /// 从拆分计算全码等价值。返回 `None` 表示没有有效按键对，不参与当量统计。
+    ///
+    /// 热路径请直接用 [`Self::calc_code_and_equiv`]：它顺带把全码也算了，省掉一遍
+    /// `parts` 遍历与 `resolve_key`。这里保留单取当量的入口（基准、诊断用），实现共用
+    /// 同一份累加逻辑，避免两处口径漂移。
+    #[inline(always)]
+    pub fn calc_equiv_from_parts(&self, ci: usize, assignment: &[u8]) -> Option<f64> {
+        self.calc_code_and_equiv(ci, assignment).1
     }
 }

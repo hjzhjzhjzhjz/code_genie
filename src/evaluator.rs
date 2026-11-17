@@ -221,8 +221,7 @@ impl Evaluator {
             let info = &ctx.char_infos[ci];
             let freq_f = info.frequency as f64;
 
-            let code = ctx.calc_code_only(ci, assignment);
-            let equiv = ctx.calc_equiv_from_parts(ci, assignment);
+            let (code, equiv) = ctx.calc_code_and_equiv(ci, assignment);
 
             let b = full_buckets.get_mut_or_insert(code as u32);
             let pos = b.members.len();
@@ -319,8 +318,18 @@ impl Evaluator {
     #[inline]
     pub fn update_char(&mut self, ctx: &OptContext, assignment: &[u8], ci: usize) {
         let old_code = self.状态[ci].code as usize;
-        let new_code = ctx.calc_code_only(ci, assignment);
+        let old_eq = self.状态[ci].equiv;
+        // 一遍同时拿到新码与新当量：旧写法先 `calc_code_only`、码变了再
+        // `calc_equiv_from_parts`，同一个 `parts` 走两遍、每 part resolve 两次。
+        let (new_code, new_eq) = ctx.calc_code_and_equiv(ci, assignment);
         if old_code == new_code {
+            // 全码是定长 base 进制、每位取 `键+1`，码相同即键位序列相同 ⇒ 当量必然相同，
+            // 所以这里提前返回不会漏掉当量更新。用 debug 断言把这个前提钉住：
+            // 万一将来编码规则改成非单射，这条断言会在测试里立刻炸出来。
+            debug_assert!(
+                old_eq == new_eq,
+                "码值相同但当量不同（全码编码不再是单射），update_char 的提前返回会漏更新当量"
+            );
             return;
         }
 
@@ -328,8 +337,6 @@ impl Evaluator {
         let freq_f = freq as f64;
 
         // 更新等价值，并同步有效当量字频分母。
-        let old_eq = self.状态[ci].equiv;
-        let new_eq = ctx.calc_equiv_from_parts(ci, assignment);
         match (old_eq, new_eq) {
             (Some(old), Some(new)) => {
                 self.total_equiv_weighted += (new - old) * freq_f;
@@ -1197,6 +1204,87 @@ mod full_evaluator_tests {
             (m.collision_rate - want_cf as f64 / ctx.total_frequency as f64).abs() < 1e-12,
             "碰撞率应为碰撞字频占比"
         );
+    }
+
+    /// 3 组 3 键、字根数 1~4 混合：覆盖「短字追加虚拟空格」与「已满 max_parts 不追加」两条收尾分支。
+    fn 造多根上下文() -> OptContext {
+        let mut groups = Vec::new();
+        for g in 0..3 {
+            groups.push(RootGroup {
+                roots: vec![format!("r{g}")],
+                allowed_keys: (0..3).collect(),
+            });
+        }
+        let mut splits = Vec::new();
+        for (i, 根数) in [1usize, 2, 3, 4, 2, 4].into_iter().enumerate() {
+            let 根们: Vec<String> = (0..根数).map(|k| format!("r{}", (i + k) % 3)).collect();
+            let ch = char::from_u32(0x4e00 + i as u32).unwrap();
+            splits.push((ch, 根们, 100 + i as u64));
+        }
+        let mut ctx = crate::test_util::造默认上下文(&splits, &groups);
+        // 当量表铺成非均匀值：全零表会让「累加顺序错了」照样逐位相同，测不出问题。
+        for (i, 行) in ctx.equiv_table.iter_mut().enumerate() {
+            for (j, 格) in 行.iter_mut().enumerate() {
+                *格 = ((i * 31 + j * 17) % 29) as f64 * 0.0625 + 0.03125;
+            }
+        }
+        ctx
+    }
+
+    /// 老的两遍写法：先码、再当量，各自独立遍历 `parts`。作为逐位一致的对照（oracle），
+    /// 防止融合后循环里的累加顺序或加数被悄悄改掉。
+    fn 两遍参考(ctx: &OptContext, ci: usize, asg: &[u8]) -> (usize, Option<f64>) {
+        let 参考码 = ctx.calc_code_only(ci, asg);
+        let info = &ctx.char_infos[ci];
+        let n = info.parts.len();
+        if n == 0 {
+            return (参考码, None);
+        }
+        let 空格 = crate::types::KEY_SPACE;
+        let mut prev = ctx.resolve_key(info.parts[0], asg) as usize;
+        let mut total = 0.0;
+        let mut 对数 = n.saturating_sub(1);
+        for i in 1..n {
+            let 当前 = ctx.resolve_key(info.parts[i], asg) as usize;
+            total += ctx.equiv_table[prev][当前];
+            prev = 当前;
+        }
+        if n < ctx.max_parts && prev != 空格 && !ctx.termination_key_mask[prev] {
+            total += ctx.equiv_table[prev][空格];
+            对数 += 1;
+        }
+        let 当量 = if 对数 == 0 {
+            None
+        } else {
+            Some(total / 对数 as f64)
+        };
+        (参考码, 当量)
+    }
+
+    /// 一遍融合求值必须与「两遍分别求」**逐位**相同（含短字补空格的收尾项）。
+    #[test]
+    fn 融合求值与非融合逐位一致() {
+        let ctx = 造多根上下文();
+        let 键数 = 3usize;
+        let 分配们: Vec<Vec<u8>> = vec![
+            (0..ctx.num_groups).map(|i| (i % 键数) as u8).collect(),
+            (0..ctx.num_groups)
+                .map(|i| ((i * 2 + 1) % 键数) as u8)
+                .collect(),
+            vec![2u8; ctx.num_groups],
+        ];
+        for asg in &分配们 {
+            for ci in 0..ctx.char_infos.len() {
+                let (码, 当量) = ctx.calc_code_and_equiv(ci, asg);
+                let (参考码, 参考当量) = 两遍参考(&ctx, ci, asg);
+                assert_eq!(码, 参考码, "字 #{ci} 全码不一致");
+                assert_eq!(
+                    当量.map(f64::to_bits),
+                    参考当量.map(f64::to_bits),
+                    "字 #{ci} 当量不是逐位相同（累加顺序或加数变了）"
+                );
+            }
+        }
     }
 
     /// 逐字 `update_char` 走到目标分配后，所有聚合与直接从零构建等同。
