@@ -13,7 +13,7 @@
 // 3. 第 0 步需要的两份字频 JSON 若缺失，会先尝试本机 `curl` 拉取（与 bash 版
 //    同样的外部依赖），失败则给出「手动放到 --dir 下」的明确提示。
 //
-// 上游素材（`yustar_chaifen*.dict.yaml`、`yuhao_charsets.lua`、`yuhao-zigens.csv`、
+// 上游素材（`yustar_chaifen*.dict.yaml`、`yuhao-zigens.csv`、
 // `beiyu-char-freq.txt`、`charAbsoluteFrequency*.json`、`chars.dict.yaml`）跟方案
 // 无关，统一放在仓库根的 `yuhao-data/`（见 [`crate::data_dir`]）。读取时先看
 // `--dir` 再看素材目录，所以「素材平铺在 `--dir` 下」的老布局照样能跑；

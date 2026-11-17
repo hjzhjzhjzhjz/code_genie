@@ -5,7 +5,6 @@
 // 跟方案无关的上游数据统一放在仓库根的 `yuhao-data/`（宇浩测评器的数据也在那儿）：
 //
 //   yustar_chaifen.dict.yaml / yustar_chaifen_tw.dict.yaml   宇浩星陈拆分表
-//   yuhao_charsets.lua                                       简繁常用字符集
 //   yuhao-zigens.csv                                         字根字形变体
 //   chars.dict.yaml                                          万象拼音词典（字根读音）
 //   beiyu-char-freq.txt                                      北语字频（纯简体模式）
