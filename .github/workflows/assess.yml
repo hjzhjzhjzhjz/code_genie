@@ -49,36 +49,17 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: 检出 yuhao-assess
-        uses: actions/checkout@v7
-        with:
-          repository: forfudan/yuhao-assess
-          path: yuhao-assess
-          fetch-depth: 1
-
-      - name: 安装 pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 9
-
-      - name: 安装 Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-
-      - name: 安装测评器依赖
-        working-directory: yuhao-assess
+      # 全链路纯 Rust、零 Node：测评（assess_core）与连续文本当量（fill-continuous）
+      # 均为原生实现。所需数据（字频/字集/当量/区块/语料）已全部纳入本仓 yuhao-data/，
+      # 无需 checkout yuhao-assess，也无需装 pnpm/Node 或联网下载。
+      - name: 校验测评数据
         run: |
-          set -o pipefail
-          pnpm install --frozen-lockfile 2>&1 | tail -n 5
-
-      - name: 准备测评数据
-        run: |
-          mkdir -p yuhao-assess/public/data yuhao-assess/public/texts
-          cp yuhao-data/*.json yuhao-assess/public/data/
-          cp yuhao-data/literature.txt yuhao-assess/public/texts/literature.txt
-          ls -1 yuhao-assess/public/data
-          wc -c < yuhao-assess/public/texts/literature.txt
+          set -e
+          ls -1 yuhao-data/*.json | head
+          test -f yuhao-data/equivTable.json
+          test -f yuhao-data/cjkBlocks.json
+          test -f yuhao-data/literature.txt
+          echo "测评数据齐备（本仓 yuhao-data/）"
 
       - name: 安装 Rust
         uses: dtolnay/rust-toolchain@stable
@@ -139,7 +120,7 @@ jobs:
             --dir out-assess \
             --file-name 完整码表.txt \
             --scheme codegenie-s4.jsonc \
-            --yuhao-dir yuhao-assess \
+            --yuhao-dir yuhao-data \
             --keep out-assess/结果 \
             --summary 汇总.md \
             --profile 方案档案
@@ -168,7 +149,7 @@ jobs:
             --dir artifacts \
             --file-name 完整码表.txt \
             --scheme codegenie-s4.jsonc \
-            --yuhao-dir yuhao-assess \
+            --yuhao-dir yuhao-data \
             --keep artifacts/结果 \
             --summary 汇总.md \
             --profile 方案档案
@@ -197,20 +178,23 @@ jobs:
           fi
           cat 流水线.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: 补连续文本当量
+      # 纯 Rust 实现，替代原 `pnpm tsx fill-continuous.mts`（已无需 Node/pnpm）。
+      # 与 TS 脚本逐字段对拍：184 叶字段全部逐位相等（含两个紧凑分布数组）。
+      - name: 补连续文本当量（纯 Rust）
         run: |
           set -e
           shopt -s nullglob
-          cp fill-continuous.mts yuhao-assess/scripts/
           if [ ! -d 方案档案 ]; then
             echo "::warning::没有方案档案，跳过"
             exit 0
           fi
-          for f in 方案档案/*.json; do
-            echo "── $f"
-            (cd yuhao-assess && pnpm tsx \
-              scripts/fill-continuous.mts --profile "../$f")
-          done
+          档案=(方案档案/*.json)
+          if [ ${#档案[@]} -eq 0 ]; then
+            echo "::warning::方案档案目录为空，跳过"
+            exit 0
+          fi
+          ./target/release/code_genie fill-continuous \
+            --profile "${档案[@]}" --yuhao-dir yuhao-data
 
       - name: 上传结果
         if: always()

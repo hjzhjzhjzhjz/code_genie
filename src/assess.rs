@@ -2,7 +2,8 @@
 // 📊 宇浩测评封装
 // =========================================================================
 //
-// 调 yuhao-assess 的 Node CLI（`pnpm cli`），把 JSON 结果解析成对比表。
+// 用内置纯 Rust 内核（assess_core）算宇浩测评，把 JSON 结果解析成对比表。
+// 已取代旧版对 `pnpm cli`（yuhao-assess Node CLI）的 spawn，无需 Node / pnpm。
 // 方案之间的强弱只看这里输出的宇浩指标，不看 CodeGenie 内部得分。
 //
 // 除宇浩自带的速度当量、重码、选重、码长之外，另补三项它没折算进排序的：
@@ -12,7 +13,6 @@
 // =========================================================================
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -161,67 +161,33 @@ fn 解析(
     })
 }
 
-/// 找可用的 pnpm 命令（Windows 上是 pnpm.cmd）
-fn pnpm() -> String {
-    for 候选 in ["pnpm", "pnpm.cmd"] {
-        if Command::new(候选)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-        {
-            return 候选.to_string();
-        }
-    }
-    String::from("pnpm")
-}
-
 /// 对一张码表跑测评，返回 (结果 JSON, 输出文件路径)
+///
+/// 纯 Rust 内核替代旧的 `pnpm cli` spawn：不再需要 Node / pnpm / 外部 yuhao-assess
+/// 仓库，只需数据文件（data + settings）。结果结构与 Node CLI 等价。
 fn 测评一张(
     码表: &Path,
     名: &str,
     方案: &Path,
     工作目录: &Path,
 ) -> Result<(Value, PathBuf), String> {
-    // CLI 在 yuhao 目录里跑，必须给绝对路径
-    let 码表 = &std::fs::canonicalize(码表).unwrap_or_else(|_| 码表.to_path_buf());
+    let 码表 = std::fs::canonicalize(码表).unwrap_or_else(|_| 码表.to_path_buf());
+    // 数据已在 yuhao-data 平铺（无 public/data、public/settings 中间层）
+    let 数据目录 = 工作目录;
+    let 设置目录 = 工作目录;
 
+    let 值 = crate::assess_core::测评(&码表, 方案, 数据目录, 设置目录)
+        .map_err(|e| format!("测评失败: {} ({})", 码表.display(), e))?;
+
+    // 仍按旧约定写一份 JSON 到 assess-tmp/：--keep / --profile 逻辑依赖这个路径
     let 子目录 = 工作目录.join("assess-tmp");
     std::fs::create_dir_all(&子目录).map_err(|e| format!("建不了临时目录: {}", e))?;
     let 安全名 = 名.replace(['/', '\\'], "_");
     let 相对 = format!("assess-tmp/{}.json", 安全名);
     let 绝对 = 工作目录.join(&相对);
-    let _ = std::fs::remove_file(&绝对);
-
-    let 输出 = Command::new(pnpm())
-        .current_dir(工作目录)
-        .arg("cli")
-        .arg(码表)
-        .arg("--scheme")
-        .arg(方案)
-        .arg("--format")
-        .arg("json")
-        .arg("--output")
-        .arg(&相对)
-        .output()
-        .map_err(|e| format!("无法执行 pnpm: {}", e))?;
-
-    let 错误尾 = || -> String {
-        String::from_utf8_lossy(&输出.stderr)
-            .lines()
-            .rev()
-            .take(4)
-            .collect::<Vec<_>>()
-            .join(" / ")
-    };
-
-    if !输出.status.success() {
-        return Err(format!("测评失败: {} ({})", 码表.display(), 错误尾()));
-    }
-
-    let 文本 = std::fs::read_to_string(&绝对)
-        .map_err(|e| format!("读不到 {}: {} / {}", 绝对.display(), e, 错误尾()))?;
-    let 值 = serde_json::from_str(&文本).map_err(|e| format!("解析测评结果失败: {}", e))?;
+    let 文本 = serde_json::to_string_pretty(&值).map_err(|e| format!("序列化测评结果失败: {}", e))?;
+    std::fs::write(&绝对, format!("{}\n", 文本))
+        .map_err(|e| format!("写不了 {}: {}", 绝对.display(), e))?;
     Ok((值, 绝对))
 }
 
@@ -525,13 +491,8 @@ pub fn run(
     }
 
     // 宇浩自己用的 CJK 区段，选重统计要和它一致
-    let 区块 = handfeel::读区块(
-        &工作目录
-            .join("public")
-            .join("settings")
-            .join("cjkBlocks.json"),
-    )
-    .unwrap_or_else(|| handfeel::默认区块.to_vec());
+    let 区块 = handfeel::读区块(&工作目录.join("cjkBlocks.json"))
+        .unwrap_or_else(|| handfeel::默认区块.to_vec());
 
     // 词表用于算连击
     let 词表 = handfeel::找词表(&工作目录);
@@ -624,6 +585,73 @@ pub fn run(
                 Err(e) => eprintln!("⚠️ 写不了汇总: {}", e),
             },
             Err(e) => eprintln!("⚠️ {}", e),
+        }
+    }
+}
+
+/// 给方案档案补「連續文本當量」——纯 Rust 实现，替代 fill-continuous.mts 的
+/// `pnpm tsx` 调用。对齐脚本 CLI：`--profile <档案...> [--table <码表>]
+/// [--samples N] [--window N]`；数据从 yuhao 目录的 public/ 读，不依赖 Node。
+pub fn run_fill_continuous(
+    档案列表: &[String],
+    yuhao目录: &str,
+    码表覆盖: Option<&str>,
+    样本数: usize,
+    窗口: usize,
+) {
+    let 工作目录 = std::fs::canonicalize(yuhao目录).unwrap_or_else(|_| PathBuf::from(yuhao目录));
+
+    let 覆盖路径 = 码表覆盖.map(|t| {
+        std::fs::canonicalize(t).unwrap_or_else(|_| PathBuf::from(t))
+    });
+
+    for 档案 in 档案列表 {
+        let 路径 = PathBuf::from(档案);
+        println!("── {}", 路径.display());
+
+        // --table 覆盖：把码表绝对路径写进档案的 _碼表（内核据此取码）
+        if let Some(源) = &覆盖路径 {
+            match std::fs::read_to_string(&路径) {
+                Ok(文本) => {
+                    let 清理 = 文本.trim_start_matches('\u{feff}');
+                    match serde_json::from_str::<Value>(清理) {
+                        Ok(mut 值) => {
+                            if let Some(obj) = 值.as_object_mut() {
+                                obj.insert("_碼表".to_string(), json!(源.to_string_lossy()));
+                            }
+                            match serde_json::to_string_pretty(&值) {
+                                Ok(写回) => {
+                                    if let Err(e) = std::fs::write(&路径, format!("{}\n", 写回)) {
+                                        eprintln!("  ⚠️ 写入 _碼表 失败: {}", e);
+                                        continue;
+                                    }
+                                }
+                                Err(e) => { eprintln!("  ⚠️ 序列化失败: {}", e); continue; }
+                            }
+                        }
+                        Err(e) => { eprintln!("  ⚠️ 解析档案失败: {}", e); continue; }
+                    }
+                }
+                Err(e) => { eprintln!("  ⚠️ 读档案失败: {}", e); continue; }
+            }
+        }
+
+        match crate::assess_core::补连续当量(&路径, &工作目录, 样本数, 窗口) {
+            Ok(结果) => {
+                let 全 = &结果["統計"]["全碼加選重"];
+                let 简 = &结果["統計"]["全部簡碼加選重"];
+                let f = |v: &Value| v.as_f64().unwrap_or(0.0);
+                println!(
+                    "  全碼 μ {:.4}　中位 {:.4}　P90 {:.4}",
+                    f(&全["平均數"]), f(&全["中位數"]), f(&全["九零分位數"])
+                );
+                println!(
+                    "  全簡 μ {:.4}　中位 {:.4}　P90 {:.4}",
+                    f(&简["平均數"]), f(&简["中位數"]), f(&简["九零分位數"])
+                );
+                println!("  已写入 {}", 路径.display());
+            }
+            Err(e) => eprintln!("  ⚠️ 补连续当量失败: {}", e),
         }
     }
 }

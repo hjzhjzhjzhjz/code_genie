@@ -283,12 +283,11 @@ pub fn 算连击(码表: &Path, 词表: &Path) -> Result<连击, String> {
 
 /// 自动找词表：优先测评器数据目录，其次仓库内置
 pub fn 找词表(yuhao目录: &Path) -> Option<std::path::PathBuf> {
+    let 文件名 = "wordAbsoluteFrequencySC.json";
     let 候选 = [
-        yuhao目录
-            .join("public")
-            .join("data")
-            .join("wordAbsoluteFrequencySC.json"),
-        std::path::PathBuf::from("yuhao-data").join("wordAbsoluteFrequencySC.json"),
+        // 现在传入的是本仓 yuhao-data 平铺数据目录（无 public/data 中间层）
+        yuhao目录.join(文件名),
+        std::path::PathBuf::from("yuhao-data").join(文件名),
     ];
     候选.into_iter().find(|路| 路.is_file())
 }

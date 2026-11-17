@@ -186,6 +186,31 @@ __FONT_FACE__
     font-weight: 600;
   }
 
+  /* 相同编码的字根聚成一张小卡：卡头是完整编码，卡内是该码全部字根 */
+  .row_root .codegroup {
+    display: inline-block;
+    max-width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 2px 6px 5px;
+    margin: 0 5px 6px 0;
+    vertical-align: top;
+    background: rgba(0, 0, 0, 0.012);
+  }
+  .row_root .codegroup.multi {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent-soft);
+  }
+  .row_root .cg-code {
+    display: block;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .5px;
+    color: var(--accent);
+    margin-bottom: 1px;
+  }
+
   /* ── 工具栏 ─────────────────────────────────────────────── */
   #toolbar {
     position: sticky;
@@ -744,30 +769,37 @@ function createKeyboard() {
       keyboard += "<td>";
 
       if (chart_json[l]) {
-        // 键帽内字根跨编码组按覆盖字频率（char_freq）全局降序，与详情弹窗
-        // 「字频排名」同口径、全局固定；freq[page] > 0 && visible(...) 只用于
-        // 过滤当前字集档位下是否有字，不参与排序。
-        let roots = [];
+        // 相同编码的字根放在一起：按完整编码（chart_json 第二层键）聚成一张
+        // 小卡，卡头标编码，多根共码的组高亮；组内仍按覆盖字频率全局降序，
+        // 与详情弹窗「字频排名」同口径；组之间按组内最高频降序，让常用码靠前。
+        // freq[page] > 0 && visible(...) 只用于过滤当前字集档位下是否有字。
+        let groups = [];
         for (let c of Object.keys(chart_json[l])) {
+          let items = [];
           for (let r of Object.keys(chart_json[l][c])) {
             let d = chart_json[l][c][r];
-            if (d.freq[page] > 0 && visible(l, c, r)) roots.push({ r, c, d });
+            if (d.freq[page] > 0 && visible(l, c, r)) items.push({ r, d });
           }
+          if (!items.length) continue;
+          items.sort((a, b) => rootFreq(b.d) - rootFreq(a.d) ||
+                               a.r.localeCompare(b.r, "zh"));
+          groups.push({ c, items, top: rootFreq(items[0].d) });
         }
-        roots.sort((a, b) => rootFreq(b.d) - rootFreq(a.d) ||
-                             a.r.localeCompare(b.r, "zh"));
+        groups.sort((a, b) => b.top - a.top ||
+                              a.c.localeCompare(b.c));
 
-        for (let it of roots) {
-          let d = it.d;
-          let clz = "root";
-          if (d.traditional) clz += " traditional";
-          clz += rootClass(d);
-          keyboard += `<span class="${clz}" data-letter="${l}" data-code="${it.c}" data-root="${it.r}" onclick="showDetail(this)">${mr(it.r)}</span>`;
-          // 编码组被打散后，小徽章改为每个字根自带（第二位键位字母）
-          if (it.c.length > 1) {
-            keyboard += `<span class="code">${it.c.substring(1)}</span>`;
+        for (let g of groups) {
+          let multi = g.items.length > 1;
+          keyboard += `<span class="codegroup${multi ? " multi" : ""}" title="编码 ${g.c}｜${g.items.length} 个字根">`;
+          keyboard += `<span class="cg-code">${g.c}</span>`;
+          for (let it of g.items) {
+            let d = it.d;
+            let clz = "root";
+            if (d.traditional) clz += " traditional";
+            clz += rootClass(d);
+            keyboard += `<span class="${clz}" data-letter="${l}" data-code="${g.c}" data-root="${it.r}" onclick="showDetail(this)">${mr(it.r)}</span>`;
           }
-          keyboard += " ";
+          keyboard += "</span> ";
         }
       }
 

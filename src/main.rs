@@ -28,6 +28,7 @@ use rayon::prelude::*;
 
 mod annealing;
 mod assess;
+mod assess_core;
 mod bucket_store;
 mod calibrate;
 mod checkpoint;
@@ -212,7 +213,7 @@ enum Commands {
         #[arg(long = "no-page")]
         no_page: bool,
     },
-    /// 跑宇浩测评并输出对比表（内部调 yuhao-assess 的 CLI）
+    /// 跑宇浩测评并输出对比表（内置纯 Rust 内核，无需 Node / pnpm）
     #[command(name = "assess")]
     Assess {
         /// 单张码表
@@ -231,8 +232,8 @@ enum Commands {
         #[arg(long, default_value = "codegenie-s4.jsonc")]
         scheme: String,
 
-        /// yuhao-assess 仓库目录
-        #[arg(long = "yuhao-dir", default_value = "../yuhao-assess")]
+        /// 宇浩数据目录（本仓 yuhao-data，含字频/字集/当量/区块/语料，平铺）
+        #[arg(long = "yuhao-dir", default_value = "yuhao-data")]
         yuhao_dir: String,
 
         /// 保留每份测评 JSON 到该目录
@@ -259,6 +260,30 @@ enum Commands {
         /// （通用重码率 ≤0.00031、常用国字 ≤0.00028、动态选重 <0.0020、速度当量 <1.270）筛选并按重码率排序
         #[arg(long)]
         qualify: bool,
+    },
+
+    /// 给方案档案补上「连续文本当量」（纯 Rust，替代 fill-continuous.mts，无需 Node）
+    #[command(name = "fill-continuous")]
+    FillContinuous {
+        /// 方案档案 JSON（可多个）
+        #[arg(long, required = true, num_args = 1..)]
+        profile: Vec<String>,
+
+        /// 宇浩数据目录（本仓 yuhao-data，含 literature.txt 与 equivTable.json，平铺）
+        #[arg(long = "yuhao-dir", default_value = "yuhao-data")]
+        yuhao_dir: String,
+
+        /// 覆盖档案里的码表路径（可选）
+        #[arg(long)]
+        table: Option<String>,
+
+        /// 抽样次数
+        #[arg(long, default_value_t = 20000)]
+        samples: usize,
+
+        /// 窗口字符数
+        #[arg(long, default_value_t = 100)]
+        window: usize,
     },
 
     /// 以星月方案包为底包，只把词典里的码换掉，其余（文件名/schema/lua/词表）原样沿用
@@ -780,6 +805,15 @@ fn main() {
             &version,
             qualify,
         ),
+        Some(Commands::FillContinuous { profile, yuhao_dir, table, samples, window }) => {
+            assess::run_fill_continuous(
+                &profile,
+                &yuhao_dir,
+                table.as_deref(),
+                samples,
+                window,
+            );
+        }
         Some(Commands::Optimize {
             output_dir,
             seed_dir,
