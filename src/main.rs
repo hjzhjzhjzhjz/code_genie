@@ -58,6 +58,8 @@ mod zigen;
 #[cfg(test)]
 mod test_util;
 // Rust 模块名不允许非 ASCII，文件名仍用中文（与项目脚本命名一致），用 #[path] 指定。
+#[path = "测评增强.rs"]
+mod assess_enhance;
 #[cfg(test)]
 #[path = "漂移测量.rs"]
 mod drift_check;

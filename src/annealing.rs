@@ -368,7 +368,7 @@ const COLLISION_ENTRY_REBUILD_THRESHOLD: usize = 64;
 ///    （采样前仍有同键校验兜底）。
 ///
 /// 用「快照 diff」而不是「调用点手动标记」是有意的：`try_move` / `try_swap` /
-/// `try_triple_swap` / `try_key_reorganization` / `try_full_key_swap` 都会改组键位，
+/// `try_triple_swap` / `try_full_key_swap` 都会改组键位，
 /// 逐个调用点埋标记极易漏（漏了也不会报错，只会让缓存悄悄失真）。diff 一次 650 项
 /// 就够，正确性不依赖任何调用点配合。
 ///
@@ -758,41 +758,6 @@ fn try_resolve_conflict(
     false
 }
 
-/// 尝试键位重组
-fn try_key_reorganization(
-    ctx: &OptContext,
-    assignment: &mut [u8],
-    evaluator: &mut Evaluator,
-    temp: f64,
-    rng: &mut impl Rng,
-) -> bool {
-    let n = assignment.len();
-    if n < 2 {
-        return false;
-    }
-
-    let k1 = assignment.choose(&mut *rng).copied().unwrap();
-    let groups_on_k1 = find_groups_on_key(ctx, assignment, k1);
-
-    if groups_on_k1.is_empty() {
-        return false;
-    }
-
-    let gi = groups_on_k1.choose(&mut *rng).copied().unwrap();
-    let allowed = &ctx.groups[gi].allowed_keys;
-
-    // 同上：栈上内联，随机序列与 collect 顺序完全不变。
-    let other_keys: SmallVec<[u8; KEY_SPACE]> =
-        allowed.iter().filter(|&&k| k != k1).copied().collect();
-
-    if other_keys.is_empty() {
-        return false;
-    }
-
-    let new_key = other_keys.choose(&mut *rng).copied().unwrap();
-    evaluator.try_move(ctx, assignment, gi, new_key, temp, rng)
-}
-
 /// 三组循环交换 (g1←k2, g2←k3, g3←k1) — 增量评估
 fn try_triple_swap(
     ctx: &OptContext,
@@ -1043,7 +1008,7 @@ fn enhanced_hill_climb(
         let op_type = step % 10;
 
         let success = match op_type {
-            0..=3 => {
+            0..=4 => {
                 let cache = conflict_cache.get_or_insert_with(|| {
                     CollisionCache::new(
                         ctx,
@@ -1070,7 +1035,7 @@ fn enhanced_hill_climb(
                     false
                 }
             }
-            4..=6 => {
+            5..=7 => {
                 if n >= 2 {
                     let r1 = rng.random_range(0..n);
                     let r2 = rng.random_range(0..n - 1);
@@ -1088,8 +1053,7 @@ fn enhanced_hill_climb(
                     false
                 }
             }
-            7 => try_triple_swap(ctx, &mut assignment, &mut evaluator, zero_temp, rng),
-            8 => try_key_reorganization(ctx, &mut assignment, &mut evaluator, zero_temp, rng),
+            8 => try_triple_swap(ctx, &mut assignment, &mut evaluator, zero_temp, rng),
             _ => {
                 let r = rng.random_range(0..n);
                 let allowed = &ctx.groups[r].allowed_keys;

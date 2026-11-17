@@ -76,6 +76,8 @@ mod shortcode;
 mod types;
 // evaluator.rs / loader.rs 的 `#[cfg(test)]` 测试模块会引用 `crate::test_util`，
 // 本 bench 用 `#[path]` 重建模块树时须一并挂上，否则 cfg(test) 编译单元找不到该模块。
+#[path = "../src/测评增强.rs"]
+mod assess_enhance;
 #[path = "../src/test_util.rs"]
 mod test_util;
 #[path = "../src/validate.rs"]

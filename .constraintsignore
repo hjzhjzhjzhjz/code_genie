@@ -44,3 +44,4 @@ tools/检查红线.py                          # 检测器自身含规则字面�
 测试减少:src/roots_chart.rs
 断言减少:src/types.rs
 测试减少:src/types.rs
+hanzi-chai-demo/node_modules/**  # 第三方 npm 依赖，非本项目源码；TODO 等注释属上游，不纳入红线
