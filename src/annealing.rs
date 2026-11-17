@@ -1238,7 +1238,6 @@ pub fn 派生种子(主种子: u64, 线程号: usize, 用途: u64) -> u64 {
 }
 
 /// 校准基准（尺度 / 温度）专用的固定种子：换它等于换一整套校准口径，务必别乱动。
-#[allow(dead_code)]
 const 校准种子: u64 = 0x636F_6465_6765_6E69;
 
 pub fn multi_start_init(ctx: &OptContext, cfg: &Config, thread_id: usize) -> Vec<u8> {
@@ -1354,7 +1353,6 @@ fn multi_start_init_with(
 /// 轮转分配是劣质解（实测 1204 重码 / 2.53%，而贪心解 379 / 0.60%）。由于
 /// `scale = 1/基准`，劣质基准会把评分口径整体带偏。
 /// 现在改为「固定种子的 multi_start_init」：确定性照样成立，基准质量与上游一致。
-#[allow(dead_code)]
 pub fn smart_init(ctx: &OptContext, cfg: &Config) -> Vec<u8> {
     multi_start_init_seeded(ctx, cfg, usize::MAX, 校准种子)
 }

@@ -98,14 +98,6 @@ impl 指位分布 {
         self.各行[1] / self.合计() * 100.0
     }
 
-    /// 八指负荷标准差（越小越均衡）
-    #[allow(dead_code)] // 观测辅助，当前未接入报告
-    pub fn 标准差(&self) -> f64 {
-        let 均 = self.合计() / 8.0;
-        let 方: f64 = self.各指.iter().map(|x| (x - 均) * (x - 均)).sum::<f64>() / 8.0;
-        方.sqrt()
-    }
-
     /// 最重的手指编号
     pub fn 最重(&self) -> usize {
         let mut 位 = 0;

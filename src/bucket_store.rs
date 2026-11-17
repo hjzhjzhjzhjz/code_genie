@@ -105,7 +105,6 @@ pub enum BackendReason {
 /// 只按容量判断，**不含字数维度**；生产路径请用 [`choose_backend_for`]，
 /// 它能把「大容量 + 少字数」的稀疏场景正确判成 Sparse。
 #[inline]
-#[allow(dead_code)] // 生产走 choose_backend_for；此函数保留给 new_with_threshold 与阈值边界测试
 pub fn choose_backend_with_threshold(capacity: usize, threshold: usize) -> BackendKind {
     if capacity <= threshold {
         BackendKind::Dense
@@ -215,7 +214,6 @@ impl<B: Bucket> BucketStore<B> {
     /// 按指定阈值构建（**测试专用**：强制走稀疏/密集路径以覆盖两后端一致性）。
     ///
     /// 生产路径走 [`BucketStore::new`] + [`choose_backend_for`]（容量 + 字数联合判据）。
-    #[allow(dead_code)] // 仅 #[cfg(test)] 与单测调用；生产编译时无调用者
     pub fn new_with_threshold(capacity: usize, threshold: usize) -> Self {
         Self::new_by_kind(capacity, choose_backend_with_threshold(capacity, threshold))
     }
