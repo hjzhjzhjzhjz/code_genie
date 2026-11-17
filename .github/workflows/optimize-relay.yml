@@ -45,9 +45,10 @@ env:
   THREADS: "4"
   REPEAT: "1"
   # 只接力该系列，避免把冒烟测试或别批实验也续上
-  SERIES_PREFIX: out-104簇-16000w-195种
+  # 3.2 亿步批次：2 轮 × 1.6 亿步，第二轮播种第一轮
+  SERIES_PREFIX: out-104簇-16000w-195种-32e
   # out_dir 形如 {SERIES_PREFIX}-rN；N >= MAX_ROUND 时停止
-  MAX_ROUND: "4"
+  MAX_ROUND: "2"
 
 jobs:
   relay:
