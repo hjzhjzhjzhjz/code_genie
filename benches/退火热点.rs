@@ -26,6 +26,8 @@ static 全局分配器: mimalloc::MiMalloc = mimalloc::MiMalloc;
 mod annealing;
 #[path = "../src/assess.rs"]
 mod assess;
+#[path = "../src/assess_core.rs"]
+mod assess_core;
 #[path = "../src/bucket_store.rs"]
 mod bucket_store;
 #[path = "../src/calibrate.rs"]

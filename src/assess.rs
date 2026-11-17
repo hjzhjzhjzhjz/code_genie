@@ -185,7 +185,8 @@ fn 测评一张(
     let 安全名 = 名.replace(['/', '\\'], "_");
     let 相对 = format!("assess-tmp/{}.json", 安全名);
     let 绝对 = 工作目录.join(&相对);
-    let 文本 = serde_json::to_string_pretty(&值).map_err(|e| format!("序列化测评结果失败: {}", e))?;
+    let 文本 =
+        serde_json::to_string_pretty(&值).map_err(|e| format!("序列化测评结果失败: {}", e))?;
     std::fs::write(&绝对, format!("{}\n", 文本))
         .map_err(|e| format!("写不了 {}: {}", 绝对.display(), e))?;
     Ok((值, 绝对))
@@ -601,9 +602,7 @@ pub fn run_fill_continuous(
 ) {
     let 工作目录 = std::fs::canonicalize(yuhao目录).unwrap_or_else(|_| PathBuf::from(yuhao目录));
 
-    let 覆盖路径 = 码表覆盖.map(|t| {
-        std::fs::canonicalize(t).unwrap_or_else(|_| PathBuf::from(t))
-    });
+    let 覆盖路径 = 码表覆盖.map(|t| std::fs::canonicalize(t).unwrap_or_else(|_| PathBuf::from(t)));
 
     for 档案 in 档案列表 {
         let 路径 = PathBuf::from(档案);
@@ -621,18 +620,28 @@ pub fn run_fill_continuous(
                             }
                             match serde_json::to_string_pretty(&值) {
                                 Ok(写回) => {
-                                    if let Err(e) = std::fs::write(&路径, format!("{}\n", 写回)) {
+                                    if let Err(e) = std::fs::write(&路径, format!("{}\n", 写回))
+                                    {
                                         eprintln!("  ⚠️ 写入 _碼表 失败: {}", e);
                                         continue;
                                     }
                                 }
-                                Err(e) => { eprintln!("  ⚠️ 序列化失败: {}", e); continue; }
+                                Err(e) => {
+                                    eprintln!("  ⚠️ 序列化失败: {}", e);
+                                    continue;
+                                }
                             }
                         }
-                        Err(e) => { eprintln!("  ⚠️ 解析档案失败: {}", e); continue; }
+                        Err(e) => {
+                            eprintln!("  ⚠️ 解析档案失败: {}", e);
+                            continue;
+                        }
                     }
                 }
-                Err(e) => { eprintln!("  ⚠️ 读档案失败: {}", e); continue; }
+                Err(e) => {
+                    eprintln!("  ⚠️ 读档案失败: {}", e);
+                    continue;
+                }
             }
         }
 
@@ -643,11 +652,15 @@ pub fn run_fill_continuous(
                 let f = |v: &Value| v.as_f64().unwrap_or(0.0);
                 println!(
                     "  全碼 μ {:.4}　中位 {:.4}　P90 {:.4}",
-                    f(&全["平均數"]), f(&全["中位數"]), f(&全["九零分位數"])
+                    f(&全["平均數"]),
+                    f(&全["中位數"]),
+                    f(&全["九零分位數"])
                 );
                 println!(
                     "  全簡 μ {:.4}　中位 {:.4}　P90 {:.4}",
-                    f(&简["平均數"]), f(&简["中位數"]), f(&简["九零分位數"])
+                    f(&简["平均數"]),
+                    f(&简["中位數"]),
+                    f(&简["九零分位數"])
                 );
                 println!("  已写入 {}", 路径.display());
             }

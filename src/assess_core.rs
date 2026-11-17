@@ -32,20 +32,33 @@ fn strip_jsonc(src: &str) -> String {
         let b = bytes[i];
         if in_str {
             out.push(b);
-            if esc { esc = false; }
-            else if b == b'\\' { esc = true; }
-            else if b == b'"' { in_str = false; }
+            if esc {
+                esc = false;
+            } else if b == b'\\' {
+                esc = true;
+            } else if b == b'"' {
+                in_str = false;
+            }
             i += 1;
             continue;
         }
-        if b == b'"' { in_str = true; out.push(b); i += 1; continue; }
+        if b == b'"' {
+            in_str = true;
+            out.push(b);
+            i += 1;
+            continue;
+        }
         if b == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
-            while i < bytes.len() && bytes[i] != b'\n' { i += 1; }
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
             continue;
         }
         if b == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
             i += 2;
-            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') { i += 1; }
+            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                i += 1;
+            }
             i = (i + 2).min(bytes.len());
             continue;
         }
@@ -61,16 +74,34 @@ fn strip_jsonc(src: &str) -> String {
         let b = bs[j];
         if ins {
             res.push(b);
-            if es { es = false; } else if b == b'\\' { es = true; } else if b == b'"' { ins = false; }
-            j += 1; continue;
+            if es {
+                es = false;
+            } else if b == b'\\' {
+                es = true;
+            } else if b == b'"' {
+                ins = false;
+            }
+            j += 1;
+            continue;
         }
-        if b == b'"' { ins = true; res.push(b); j += 1; continue; }
+        if b == b'"' {
+            ins = true;
+            res.push(b);
+            j += 1;
+            continue;
+        }
         if b == b',' {
             let mut k = j + 1;
-            while k < bs.len() && bs[k].is_ascii_whitespace() { k += 1; }
-            if k < bs.len() && (bs[k] == b'}' || bs[k] == b']') { j += 1; continue; }
+            while k < bs.len() && bs[k].is_ascii_whitespace() {
+                k += 1;
+            }
+            if k < bs.len() && (bs[k] == b'}' || bs[k] == b']') {
+                j += 1;
+                continue;
+            }
         }
-        res.push(b); j += 1;
+        res.push(b);
+        j += 1;
     }
     // 输入是合法 &str，清理只删字节不改字节，故结果必为合法 UTF-8。
     String::from_utf8(res).unwrap()
@@ -85,24 +116,42 @@ struct Scheme {
 }
 
 fn load_scheme(path: &Path) -> Result<Scheme, String> {
-    let text = fs::read_to_string(path).map_err(|e| format!("读不了方案 {}: {}", path.display(), e))?;
+    let text =
+        fs::read_to_string(path).map_err(|e| format!("读不了方案 {}: {}", path.display(), e))?;
     let clean = strip_jsonc(&text);
     let v: Value = serde_json::from_str(&clean).map_err(|e| format!("解析方案失败: {}", e))?;
     let param = v.get("方案參數");
-    let maxlen = param.and_then(|p| p.get("最大碼長")).and_then(|x| x.as_u64()).unwrap_or(4) as usize;
+    let maxlen = param
+        .and_then(|p| p.get("最大碼長"))
+        .and_then(|x| x.as_u64())
+        .unwrap_or(4) as usize;
     let mut sel = HashMap::new();
-    if let Some(m) = param.and_then(|p| p.get("選重鍵表")).and_then(|x| x.as_object()) {
+    if let Some(m) = param
+        .and_then(|p| p.get("選重鍵表"))
+        .and_then(|x| x.as_object())
+    {
         for (k, v) in m {
-            if let Some(s) = v.as_str() { sel.insert(k.clone(), s.to_string()); }
+            if let Some(s) = v.as_str() {
+                sel.insert(k.clone(), s.to_string());
+            }
         }
     }
     let terminators: Vec<String> = param
         .and_then(|p| p.get("編碼終止指示符列表"))
         .and_then(|x| x.as_array())
-        .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
     let has_terminator = !terminators.is_empty();
-    Ok(Scheme { maxlen, sel, has_terminator, terminators })
+    Ok(Scheme {
+        maxlen,
+        sel,
+        has_terminator,
+        terminators,
+    })
 }
 
 /// 生成带选重键的编码：首选且未满码长补 `_`（无终止指示符时），第 n 选补数字 n。
@@ -112,7 +161,7 @@ fn code_with_selection(code: &str, pos: usize, code_len: usize, sc: &Scheme) -> 
             format!("{}_", code)
         } else if sc.has_terminator && code_len < sc.maxlen {
             let last = code.chars().last().unwrap_or('\0');
-            if !sc.terminators.iter().any(|t| t.chars().next() == Some(last)) && last != '_' {
+            if !sc.terminators.iter().any(|t| t.starts_with(last)) && last != '_' {
                 format!("{}_", code)
             } else {
                 code.to_string()
@@ -130,8 +179,12 @@ fn code_with_selection(code: &str, pos: usize, code_len: usize, sc: &Scheme) -> 
 fn replace_sel(code: &str, sel: &HashMap<String, String>) -> String {
     let bytes = code.as_bytes();
     let mut end = code.len();
-    while end > 0 && bytes[end - 1].is_ascii_digit() { end -= 1; }
-    if end == code.len() { return code.to_string(); }
+    while end > 0 && bytes[end - 1].is_ascii_digit() {
+        end -= 1;
+    }
+    if end == code.len() {
+        return code.to_string();
+    }
     let digits = &code[end..];
     match sel.get(digits) {
         Some(rep) if !rep.is_empty() => format!("{}{}", &code[..end], rep),
@@ -154,11 +207,16 @@ struct Tables {
 fn in_cjk_to_j(c: char) -> bool {
     let cp = c as u32;
     // 与 cjkBlocks 到 J 的并集一致；精确端点见 load_blocks。
-    (0x4E00..=0x9FFF).contains(&cp) || (0x3400..=0x4DBF).contains(&cp)
-        || (0x20000..=0x2A6DF).contains(&cp) || (0x2A700..=0x2B73F).contains(&cp)
-        || (0x2B740..=0x2B81D).contains(&cp) || (0x2B820..=0x2CEAD).contains(&cp)
-        || (0x2CEB0..=0x2EBE0).contains(&cp) || (0x30000..=0x3134A).contains(&cp)
-        || (0x31350..=0x323AF).contains(&cp) || (0x2EBF0..=0x2EE5D).contains(&cp)
+    (0x4E00..=0x9FFF).contains(&cp)
+        || (0x3400..=0x4DBF).contains(&cp)
+        || (0x20000..=0x2A6DF).contains(&cp)
+        || (0x2A700..=0x2B73F).contains(&cp)
+        || (0x2B740..=0x2B81D).contains(&cp)
+        || (0x2B820..=0x2CEAD).contains(&cp)
+        || (0x2CEB0..=0x2EBE0).contains(&cp)
+        || (0x30000..=0x3134A).contains(&cp)
+        || (0x31350..=0x323AF).contains(&cp)
+        || (0x2EBF0..=0x2EE5D).contains(&cp)
         || (0x323B0..=0x33479).contains(&cp)
 }
 
@@ -175,28 +233,46 @@ fn parse_and_build(table_path: &Path, sc: &Scheme) -> Result<Tables, String> {
     let mut entries: Vec<(char, String)> = Vec::new();
     for line in text.lines() {
         let line = line.trim();
-        if line.is_empty() || line.starts_with('#') || line.starts_with("//") { continue; }
+        if line.is_empty() || line.starts_with('#') || line.starts_with("//") {
+            continue;
+        }
         let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() < 2 { continue; }
+        if parts.len() < 2 {
+            continue;
+        }
         let ch = parts[0];
         let code = parts[1];
-        if ch.is_empty() || code.is_empty() { continue; }
+        if ch.is_empty() || code.is_empty() {
+            continue;
+        }
         let mut ci = ch.chars();
-        let c = match ci.next() { Some(c) if ci.next().is_none() => c, _ => continue };
-        if !in_cjk_to_j(c) { continue; }
+        let c = match ci.next() {
+            Some(c) if ci.next().is_none() => c,
+            _ => continue,
+        };
+        if !in_cjk_to_j(c) {
+            continue;
+        }
         entries.push((c, code.to_string()));
     }
     // 第二遍：同编码下每字位置
     let mut pos_map: HashMap<String, HashMap<char, usize>> = HashMap::new();
     for (c, code) in &entries {
         let m = pos_map.entry(code.clone()).or_default();
-        if !m.contains_key(c) { let n = m.len() + 1; m.insert(*c, n); }
+        if !m.contains_key(c) {
+            let n = m.len() + 1;
+            m.insert(*c, n);
+        }
     }
     // 第三遍：建四表，并模拟 JS Map 的 delete+set 顺序
     let mut t = Tables {
-        order: vec![], full_map_order: vec![], short_map_order: vec![],
-        full: HashMap::new(), short: HashMap::new(),
-        full_sel: HashMap::new(), short_sel: HashMap::new(),
+        order: vec![],
+        full_map_order: vec![],
+        short_map_order: vec![],
+        full: HashMap::new(),
+        short: HashMap::new(),
+        full_sel: HashMap::new(),
+        short_sel: HashMap::new(),
     };
     let mut maxl: HashMap<char, usize> = HashMap::new();
     let mut minl: HashMap<char, usize> = HashMap::new();
@@ -208,18 +284,23 @@ fn parse_and_build(table_path: &Path, sc: &Scheme) -> Result<Tables, String> {
             t.order.push(*c);
             t.full_map_order.push(*c);
             t.short_map_order.push(*c);
-            t.full.insert(*c, code.clone()); t.short.insert(*c, code.clone());
-            t.full_sel.insert(*c, sel_code.clone()); t.short_sel.insert(*c, sel_code.clone());
-            maxl.insert(*c, clen); minl.insert(*c, clen);
+            t.full.insert(*c, code.clone());
+            t.short.insert(*c, code.clone());
+            t.full_sel.insert(*c, sel_code.clone());
+            t.short_sel.insert(*c, sel_code.clone());
+            maxl.insert(*c, clen);
+            minl.insert(*c, clen);
             continue;
         }
         if clen > *maxl.get(c).unwrap() {
-            t.full.insert(*c, code.clone()); t.full_sel.insert(*c, sel_code.clone());
+            t.full.insert(*c, code.clone());
+            t.full_sel.insert(*c, sel_code.clone());
             maxl.insert(*c, clen);
             move_to_end(&mut t.full_map_order, *c);
         }
         if clen < *minl.get(c).unwrap() {
-            t.short.insert(*c, code.clone()); t.short_sel.insert(*c, sel_code.clone());
+            t.short.insert(*c, code.clone());
+            t.short_sel.insert(*c, sel_code.clone());
             minl.insert(*c, clen);
             move_to_end(&mut t.short_map_order, *c);
         }
@@ -242,11 +323,15 @@ fn scan_key_order(text: &str) -> Vec<char> {
         if bytes[i] == b'"' {
             let start = i + 1;
             let mut j = start;
-            while j < bytes.len() && bytes[j] != b'"' { j += 1; }
+            while j < bytes.len() && bytes[j] != b'"' {
+                j += 1;
+            }
             if j < bytes.len() {
-                if let Ok(s) = std::str::from_utf8(&bytes[start..j]) {
-                    let mut cs = s.chars();
-                    if let Some(c) = cs.next() { if cs.next().is_none() { v.push(c); } }
+                if let Ok(s) = std::str::from_utf8(&bytes[start..j])
+                    && let Some(c) = s.chars().next()
+                    && s.chars().nth(1).is_none()
+                {
+                    v.push(c);
                 }
                 i = j + 1;
                 continue;
@@ -258,8 +343,10 @@ fn scan_key_order(text: &str) -> Vec<char> {
 }
 
 fn load_freq(path: &Path) -> Result<Freq, String> {
-    let text = fs::read_to_string(path).map_err(|e| format!("读不了字频 {}: {}", path.display(), e))?;
-    let raw: HashMap<String, u64> = serde_json::from_str(&text).map_err(|e| format!("解析字频失败: {}", e))?;
+    let text =
+        fs::read_to_string(path).map_err(|e| format!("读不了字频 {}: {}", path.display(), e))?;
+    let raw: HashMap<String, u64> =
+        serde_json::from_str(&text).map_err(|e| format!("解析字频失败: {}", e))?;
     let order = scan_key_order(&text);
     let total: u64 = raw.values().sum();
     let mut f64m = HashMap::new();
@@ -274,25 +361,42 @@ fn load_freq(path: &Path) -> Result<Freq, String> {
 fn merged_freq(a: &Freq, b: &Freq) -> Freq {
     let mut f64m = a.f64m.clone();
     for (c, f) in &b.f64m {
-        if !f64m.contains_key(c) || f64m.get(c).unwrap() < f { f64m.insert(*c, *f); }
+        if !f64m.contains_key(c) || f64m.get(c).unwrap() < f {
+            f64m.insert(*c, *f);
+        }
     }
     let mut order = a.order.clone();
     let aset: HashMap<char, ()> = a.order.iter().map(|&c| (c, ())).collect();
-    for &c in &b.order { if !aset.contains_key(&c) { order.push(c); } }
+    for &c in &b.order {
+        if !aset.contains_key(&c) {
+            order.push(c);
+        }
+    }
     Freq { f64m, order }
 }
 
 // ---------- 速度当量 ----------
 
 /// 保序累加编码对频率，再按当量矩阵折算（严格复刻 TS 的 Map 累加顺序）。
-fn weighted_ordered(order: &[char], table: &HashMap<char, String>, freq: &Freq,
-                    equiv: &HashMap<String, f64>, sel: &HashMap<String, String>) -> f64 {
+fn weighted_ordered(
+    order: &[char],
+    table: &HashMap<char, String>,
+    freq: &Freq,
+    equiv: &HashMap<String, f64>,
+    sel: &HashMap<String, String>,
+) -> f64 {
     let mut keys: Vec<String> = Vec::new();
     let mut idx: HashMap<String, usize> = HashMap::new();
     let mut vals: Vec<f64> = Vec::new();
     for c in order {
-        let code = match table.get(c) { Some(x) => x, None => continue };
-        let f = match freq.f64m.get(c) { Some(x) if *x != 0.0 => *x, _ => continue };
+        let code = match table.get(c) {
+            Some(x) => x,
+            None => continue,
+        };
+        let f = match freq.f64m.get(c) {
+            Some(x) if *x != 0.0 => *x,
+            _ => continue,
+        };
         let c2 = replace_sel(code, sel);
         let chars: Vec<char> = c2.chars().collect();
         for w in chars.windows(2) {
@@ -310,22 +414,35 @@ fn weighted_ordered(order: &[char], table: &HashMap<char, String>, freq: &Freq,
     let mut tw = 0.0f64;
     let mut tf = 0.0f64;
     for (k, f) in keys.iter().zip(vals.iter()) {
-        if let Some(&e) = equiv.get(k) { tw += e * f; tf += f; }
+        if let Some(&e) = equiv.get(k) {
+            tw += e * f;
+            tf += f;
+        }
     }
-    if tf > 0.0 { tw / tf } else { 0.0 }
+    if tf > 0.0 {
+        tw / tf
+    } else {
+        0.0
+    }
 }
 
-fn gen_level(order: &[char], short_sel: &HashMap<char, String>, full_sel: &HashMap<char, String>,
-             maxlen: usize) -> (Vec<char>, HashMap<char, String>) {
+fn gen_level(
+    order: &[char],
+    short_sel: &HashMap<char, String>,
+    full_sel: &HashMap<char, String>,
+    maxlen: usize,
+) -> (Vec<char>, HashMap<char, String>) {
     let mut res = HashMap::new();
     let mut o = Vec::new();
     for c in order {
         let sc = &short_sel[c];
         let take = sc.chars().count() <= maxlen && sc.ends_with('_');
         if take {
-            o.push(*c); res.insert(*c, sc.clone());
+            o.push(*c);
+            res.insert(*c, sc.clone());
         } else if let Some(fc) = full_sel.get(c) {
-            o.push(*c); res.insert(*c, fc.clone());
+            o.push(*c);
+            res.insert(*c, fc.clone());
         }
     }
     (o, res)
@@ -337,7 +454,10 @@ fn calc_dyn_sorted(tab: &HashMap<char, String>, map_order: &[char], freq: &Freq)
     let mut groups: Vec<(String, Vec<(char, f64)>)> = Vec::new();
     let mut gidx: HashMap<String, usize> = HashMap::new();
     for &c in map_order {
-        let code = match tab.get(&c) { Some(x) => x, None => continue };
+        let code = match tab.get(&c) {
+            Some(x) => x,
+            None => continue,
+        };
         let f = freq.f64m.get(&c).copied().unwrap_or(0.0);
         let gi = *gidx.entry(code.clone()).or_insert_with(|| {
             groups.push((code.clone(), Vec::new()));
@@ -350,27 +470,48 @@ fn calc_dyn_sorted(tab: &HashMap<char, String>, map_order: &[char], freq: &Freq)
         if cf.len() > 1 {
             cf.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
             let mut gt = 0.0f64;
-            for &(_, f) in cf.iter() { gt += f; }
+            for &(_, f) in cf.iter() {
+                gt += f;
+            }
             let first = cf[0].1;
             total_dup += gt - first;
         }
     }
     let mut total_freq = 0.0f64;
-    for &c in map_order { total_freq += freq.f64m.get(&c).copied().unwrap_or(0.0); }
-    if total_freq > 0.0 { total_dup / total_freq } else { 0.0 }
+    for &c in map_order {
+        total_freq += freq.f64m.get(&c).copied().unwrap_or(0.0);
+    }
+    if total_freq > 0.0 {
+        total_dup / total_freq
+    } else {
+        0.0
+    }
 }
 
 fn calc_dyn_original(tab: &HashMap<char, String>, map_order: &[char], freq: &Freq) -> f64 {
     let mut total_dup = 0.0f64;
     let mut total_freq = 0.0f64;
     for &c in map_order {
-        let code = match tab.get(&c) { Some(x) => x, None => continue };
+        let code = match tab.get(&c) {
+            Some(x) => x,
+            None => continue,
+        };
         let f = freq.f64m.get(&c).copied().unwrap_or(0.0);
         total_freq += f;
-        let is_sel = code.chars().last().map(|ch| ch.is_ascii_digit()).unwrap_or(false);
-        if is_sel { total_dup += f; }
+        let is_sel = code
+            .chars()
+            .last()
+            .map(|ch| ch.is_ascii_digit())
+            .unwrap_or(false);
+        if is_sel {
+            total_dup += f;
+        }
     }
-    if total_freq > 0.0 { total_dup / total_freq } else { 0.0 }
+    if total_freq > 0.0 {
+        total_dup / total_freq
+    } else {
+        0.0
+    }
 }
 
 // ---------- 简码效率 ----------
@@ -383,19 +524,41 @@ struct EffItem {
     prod: f64,
 }
 
-fn calc_short_eff(freq: &Freq, short_sel: &HashMap<char, String>, full_sel: &HashMap<char, String>,
-                  maxlen: usize, nlist: &[usize]) -> (String, Vec<(usize, f64)>) {
+fn calc_short_eff(
+    freq: &Freq,
+    short_sel: &HashMap<char, String>,
+    full_sel: &HashMap<char, String>,
+    maxlen: usize,
+    nlist: &[usize],
+) -> (String, Vec<(usize, f64)>) {
     let mut items: Vec<EffItem> = Vec::new();
     for &ch in &freq.order {
-        let f = match freq.f64m.get(&ch) { Some(x) if *x > 0.0 => *x, _ => continue };
-        let sc = match short_sel.get(&ch) { Some(x) => x, None => continue };
-        let fc = match full_sel.get(&ch) { Some(x) => x, None => continue };
+        let f = match freq.f64m.get(&ch) {
+            Some(x) if *x > 0.0 => *x,
+            _ => continue,
+        };
+        let sc = match short_sel.get(&ch) {
+            Some(x) => x,
+            None => continue,
+        };
+        let fc = match full_sel.get(&ch) {
+            Some(x) => x,
+            None => continue,
+        };
         let sc_len = sc.chars().count();
         let fc_len = fc.chars().count();
         let diff = fc_len as i64 - sc_len as i64;
-        items.push(EffItem { ch, sc_len, fc_len, freq: f, prod: f * diff as f64 });
+        items.push(EffItem {
+            ch,
+            sc_len,
+            fc_len,
+            freq: f,
+            prod: f * diff as f64,
+        });
     }
-    let mut valid: Vec<usize> = items.iter().enumerate()
+    let mut valid: Vec<usize> = items
+        .iter()
+        .enumerate()
         .filter(|(_, it)| it.sc_len < it.fc_len && it.sc_len < maxlen)
         .map(|(i, _)| i)
         .collect();
@@ -410,7 +573,11 @@ fn calc_short_eff(freq: &Freq, short_sel: &HashMap<char, String>, full_sel: &Has
         let mut tw = 0.0f64;
         let mut tf = 0.0f64;
         for (i, it) in items.iter().enumerate() {
-            let len = if selected.contains_key(&i) { it.sc_len } else { it.fc_len };
+            let len = if selected.contains_key(&i) {
+                it.sc_len
+            } else {
+                it.fc_len
+            };
             tw += it.freq * len as f64;
             tf += it.freq;
         }
@@ -421,21 +588,31 @@ fn calc_short_eff(freq: &Freq, short_sel: &HashMap<char, String>, full_sel: &Has
 
 // ---------- 键位热力 ----------
 
-fn calc_key_heat(tab: &HashMap<char, String>, map_order: &[char], freq: &Freq,
-                 sel: &HashMap<String, String>) -> Map<String, Value> {
+fn calc_key_heat(
+    tab: &HashMap<char, String>,
+    map_order: &[char],
+    freq: &Freq,
+    sel: &HashMap<String, String>,
+) -> Map<String, Value> {
     let mut dist: HashMap<String, f64> = HashMap::new();
     for &c in map_order {
         let w = freq.f64m.get(&c).copied().unwrap_or(0.0);
         if let Some(code) = tab.get(&c) {
             let code = replace_sel(code, sel);
             for ch in code.to_lowercase().chars() {
-                let key = if ch == '_' { "space".to_string() } else { ch.to_string() };
+                let key = if ch == '_' {
+                    "space".to_string()
+                } else {
+                    ch.to_string()
+                };
                 *dist.entry(key).or_insert(0.0) += w;
             }
         }
     }
     let mut m = Map::new();
-    for (k, v) in dist { m.insert(k, json!(v)); }
+    for (k, v) in dist {
+        m.insert(k, json!(v));
+    }
     m
 }
 
@@ -444,53 +621,95 @@ fn calc_key_heat(tab: &HashMap<char, String>, map_order: &[char], freq: &Freq,
 fn load_blocks(settings_dir: &Path) -> Result<Blocks, String> {
     let path = settings_dir.join("cjkBlocks.json");
     let raw: Value = serde_json::from_str(
-        &fs::read_to_string(&path).map_err(|e| format!("读不了 {}: {}", path.display(), e))?)
-        .map_err(|e| format!("解析 cjkBlocks 失败: {}", e))?;
+        &fs::read_to_string(&path).map_err(|e| format!("读不了 {}: {}", path.display(), e))?,
+    )
+    .map_err(|e| format!("解析 cjkBlocks 失败: {}", e))?;
     let blocks = raw.get("blocks").unwrap().as_object().unwrap();
-    let names = ["cjk_basic", "cjk_a", "cjk_b", "cjk_c", "cjk_d", "cjk_e",
-                 "cjk_f", "cjk_g", "cjk_h", "cjk_i", "cjk_j"];
+    let names = [
+        "cjk_basic",
+        "cjk_a",
+        "cjk_b",
+        "cjk_c",
+        "cjk_d",
+        "cjk_e",
+        "cjk_f",
+        "cjk_g",
+        "cjk_h",
+        "cjk_i",
+        "cjk_j",
+    ];
     let mut out = [(0u32, 0u32); 11];
     for (i, name) in names.iter().enumerate() {
         let b = blocks.get(*name).unwrap().as_object().unwrap();
-        let parse_hex = |s: &str| -> u32 {
-            u32::from_str_radix(s.trim_start_matches("0x"), 16).unwrap()
-        };
-        out[i] = (parse_hex(b.get("start").unwrap().as_str().unwrap()),
-                  parse_hex(b.get("end").unwrap().as_str().unwrap()));
+        let parse_hex =
+            |s: &str| -> u32 { u32::from_str_radix(s.trim_start_matches("0x"), 16).unwrap() };
+        out[i] = (
+            parse_hex(b.get("start").unwrap().as_str().unwrap()),
+            parse_hex(b.get("end").unwrap().as_str().unwrap()),
+        );
     }
     Ok(out)
 }
 
-fn build_static_dup(t: &Tables, data_dir: &Path, blocks: &Blocks) -> Result<Map<String, Value>, String> {
+fn build_static_dup(
+    t: &Tables,
+    data_dir: &Path,
+    blocks: &Blocks,
+) -> Result<Map<String, Value>, String> {
     let path = data_dir.join("charsets.json");
     let cs_raw: HashMap<String, Value> = serde_json::from_str(
-        &fs::read_to_string(&path).map_err(|e| format!("读不了 {}: {}", path.display(), e))?)
-        .map_err(|e| format!("解析 charsets 失败: {}", e))?;
+        &fs::read_to_string(&path).map_err(|e| format!("读不了 {}: {}", path.display(), e))?,
+    )
+    .map_err(|e| format!("解析 charsets 失败: {}", e))?;
     let cjk_sets: Vec<(&str, usize)> = vec![
-        ("CJK基本", 0), ("到CJK擴A", 1), ("到CJK擴B", 2), ("到CJK擴C", 3),
-        ("到CJK擴D", 4), ("到CJK擴E", 5), ("到CJK擴F", 6), ("到CJK擴G", 7),
-        ("到CJK擴H", 8), ("到CJK擴I", 9), ("到CJK擴J", 10),
+        ("CJK基本", 0),
+        ("到CJK擴A", 1),
+        ("到CJK擴B", 2),
+        ("到CJK擴C", 3),
+        ("到CJK擴D", 4),
+        ("到CJK擴E", 5),
+        ("到CJK擴F", 6),
+        ("到CJK擴G", 7),
+        ("到CJK擴H", 8),
+        ("到CJK擴I", 9),
+        ("到CJK擴J", 10),
     ];
     let flag_sets: Vec<(&str, &str)> = vec![
-        ("GB2312", "is_gb2312"), ("通用規範", "is_tonggui"), ("常用國字", "is_guozi"),
+        ("GB2312", "is_gb2312"),
+        ("通用規範", "is_tonggui"),
+        ("常用國字", "is_guozi"),
     ];
     let in_cjk = |c: char, upto: usize| -> bool {
         let cp = c as u32;
         blocks[..=upto].iter().any(|&(a, b)| cp >= a && cp <= b)
     };
     let in_mark = |c: char, flag: &str| -> bool {
-        cs_raw.get(&c.to_string()).and_then(|v| v.get(flag)).and_then(|v| v.as_bool()).unwrap_or(false)
+        cs_raw
+            .get(&c.to_string())
+            .and_then(|v| v.get(flag))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
     };
     let theoretical_mark = |flag: &str| -> usize {
-        cs_raw.values().filter(|v| v.get(flag).and_then(|x| x.as_bool()).unwrap_or(false)).count()
+        cs_raw
+            .values()
+            .filter(|v| v.get(flag).and_then(|x| x.as_bool()).unwrap_or(false))
+            .count()
     };
     let theoretical_cjk = |upto: usize| -> usize {
-        blocks[..=upto].iter().map(|&(a, b)| (b - a + 1) as usize).sum()
+        blocks[..=upto]
+            .iter()
+            .map(|&(a, b)| (b - a + 1) as usize)
+            .sum()
     };
     type SetPred<'a> = Box<dyn Fn(char) -> bool + 'a>;
     let mut sets: Vec<(&str, SetPred)> = Vec::new();
-    for &(name, flag) in &flag_sets { sets.push((name, Box::new(move |c| in_mark(c, flag)))); }
-    for &(name, upto) in &cjk_sets { sets.push((name, Box::new(move |c| in_cjk(c, upto)))); }
+    for &(name, flag) in &flag_sets {
+        sets.push((name, Box::new(move |c| in_mark(c, flag))));
+    }
+    for &(name, upto) in &cjk_sets {
+        sets.push((name, Box::new(move |c| in_cjk(c, upto))));
+    }
 
     let mut dup = Map::new();
     for (cs, pred) in &sets {
@@ -500,26 +719,38 @@ fn build_static_dup(t: &Tables, data_dir: &Path, blocks: &Blocks) -> Result<Map<
             let mut groups: HashMap<&String, usize> = HashMap::new();
             let mut cnt = 0usize;
             for c in &t.order {
-                if pred(*c) {
-                    if let Some(code) = tab.get(c) { *groups.entry(code).or_insert(0) += 1; cnt += 1; }
+                if pred(*c)
+                    && let Some(code) = tab.get(c)
+                {
+                    *groups.entry(code).or_insert(0) += 1;
+                    cnt += 1;
                 }
             }
-            if tname == "全碼" { actual = cnt; }
+            if tname == "全碼" {
+                actual = cnt;
+            }
             let chars: usize = groups.values().filter(|&&n| n > 1).sum();
             let grps: usize = groups.values().filter(|&&n| n > 1).count();
             d.insert(format!("{}重碼字數", tname), json!(chars));
             d.insert(format!("{}重碼組數", tname), json!(grps));
         }
-        let theoretical: usize = if let Some(upto) = cjk_sets.iter().find(|(n, _)| *n == *cs).map(|x| x.1) {
-            theoretical_cjk(upto)
-        } else {
-            let flag = flag_sets.iter().find(|(n, _)| *n == *cs).unwrap().1;
-            theoretical_mark(flag)
-        };
+        let theoretical: usize =
+            if let Some(upto) = cjk_sets.iter().find(|(n, _)| *n == *cs).map(|x| x.1) {
+                theoretical_cjk(upto)
+            } else {
+                let flag = flag_sets.iter().find(|(n, _)| *n == *cs).unwrap().1;
+                theoretical_mark(flag)
+            };
         d.insert("實際字符數".to_string(), json!(actual));
         d.insert("理論字符數".to_string(), json!(theoretical));
-        d.insert("字集覆蓋率".to_string(),
-            json!(if theoretical > 0 { actual as f64 / theoretical as f64 } else { 0.0 }));
+        d.insert(
+            "字集覆蓋率".to_string(),
+            json!(if theoretical > 0 {
+                actual as f64 / theoretical as f64
+            } else {
+                0.0
+            }),
+        );
         dup.insert((*cs).to_string(), json!(d));
     }
     Ok(dup)
@@ -529,27 +760,45 @@ fn build_static_dup(t: &Tables, data_dir: &Path, blocks: &Blocks) -> Result<Map<
 
 fn build_candidates(t: &Tables, data_dir: &Path, blocks: &Blocks) -> Map<String, Value> {
     let cs_path = data_dir.join("charsets.json");
-    let cs_raw: HashMap<String, Value> = serde_json::from_str(
-        &fs::read_to_string(&cs_path).unwrap()).unwrap();
+    let cs_raw: HashMap<String, Value> =
+        serde_json::from_str(&fs::read_to_string(&cs_path).unwrap()).unwrap();
     let flag_sets: Vec<(&str, &str)> = vec![
-        ("GB2312", "is_gb2312"), ("通用規範", "is_tonggui"), ("常用國字", "is_guozi"),
+        ("GB2312", "is_gb2312"),
+        ("通用規範", "is_tonggui"),
+        ("常用國字", "is_guozi"),
     ];
     let cjk_sets: Vec<(&str, usize)> = vec![
-        ("CJK基本", 0), ("到CJK擴A", 1), ("到CJK擴B", 2), ("到CJK擴C", 3),
-        ("到CJK擴D", 4), ("到CJK擴E", 5), ("到CJK擴F", 6), ("到CJK擴G", 7),
-        ("到CJK擴H", 8), ("到CJK擴I", 9), ("到CJK擴J", 10),
+        ("CJK基本", 0),
+        ("到CJK擴A", 1),
+        ("到CJK擴B", 2),
+        ("到CJK擴C", 3),
+        ("到CJK擴D", 4),
+        ("到CJK擴E", 5),
+        ("到CJK擴F", 6),
+        ("到CJK擴G", 7),
+        ("到CJK擴H", 8),
+        ("到CJK擴I", 9),
+        ("到CJK擴J", 10),
     ];
     let in_cjk = |c: char, upto: usize| -> bool {
         let cp = c as u32;
         blocks[..=upto].iter().any(|&(a, b)| cp >= a && cp <= b)
     };
     let in_mark = |c: char, flag: &str| -> bool {
-        cs_raw.get(&c.to_string()).and_then(|v| v.get(flag)).and_then(|v| v.as_bool()).unwrap_or(false)
+        cs_raw
+            .get(&c.to_string())
+            .and_then(|v| v.get(flag))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
     };
     type SetPred<'a> = Box<dyn Fn(char) -> bool + 'a>;
     let mut sets: Vec<(&str, SetPred)> = Vec::new();
-    for &(name, flag) in &flag_sets { sets.push((name, Box::new(move |c| in_mark(c, flag)))); }
-    for &(name, upto) in &cjk_sets { sets.push((name, Box::new(move |c| in_cjk(c, upto)))); }
+    for &(name, flag) in &flag_sets {
+        sets.push((name, Box::new(move |c| in_mark(c, flag))));
+    }
+    for &(name, upto) in &cjk_sets {
+        sets.push((name, Box::new(move |c| in_cjk(c, upto))));
+    }
 
     let mut out = Map::new();
     for (name, pred) in &sets {
@@ -558,24 +807,28 @@ fn build_candidates(t: &Tables, data_dir: &Path, blocks: &Blocks) -> Map<String,
         let mut groups: Vec<(&String, Vec<char>)> = Vec::new();
         let mut gidx: HashMap<&String, usize> = HashMap::new();
         for c in &t.full_map_order {
-            if pred(*c) {
-                if let Some(code) = t.full.get(c) {
-                    let gi = *gidx.entry(code).or_insert_with(|| {
-                        groups.push((code, Vec::new()));
-                        groups.len() - 1
-                    });
-                    groups[gi].1.push(*c);
-                }
+            if pred(*c)
+                && let Some(code) = t.full.get(c)
+            {
+                let gi = *gidx.entry(code).or_insert_with(|| {
+                    groups.push((code, Vec::new()));
+                    groups.len() - 1
+                });
+                groups[gi].1.push(*c);
             }
         }
         let max_n = groups.iter().map(|(_, v)| v.len()).max().unwrap_or(0);
-        let codes: Vec<String> = groups.iter()
+        let codes: Vec<String> = groups
+            .iter()
             .filter(|(_, v)| v.len() == max_n)
             .map(|(k, _)| (*k).clone())
             .collect();
-        out.insert((*name).to_string(), json!({
-            "最大候選個數": max_n, "編碼列表": codes,
-        }));
+        out.insert(
+            (*name).to_string(),
+            json!({
+                "最大候選個數": max_n, "編碼列表": codes,
+            }),
+        );
     }
     out.insert("字符數".to_string(), json!(t.full.len()));
     out
@@ -590,7 +843,12 @@ fn build_candidates(t: &Tables, data_dir: &Path, blocks: &Blocks) -> Map<String,
 /// `码表` 单张码表路径；`方案` JSONC 方案路径（取最大码长/选重键表/终止指示符）；
 /// `data_dir` 字频与字集 JSON 目录、`settings_dir` 当量矩阵与 CJK 区块目录；
 /// 两者均可直接指向本仓平铺的 yuhao-data/（equivTable/cjkBlocks 已纳入本仓）。
-pub fn 测评(码表: &Path, 方案: &Path, data_dir: &Path, settings_dir: &Path) -> Result<Value, String> {
+pub fn 测评(
+    码表: &Path,
+    方案: &Path,
+    data_dir: &Path,
+    settings_dir: &Path,
+) -> Result<Value, String> {
     let sc = load_scheme(方案)?;
     let maxlen = sc.maxlen;
     let t = parse_and_build(码表, &sc)?;
@@ -599,8 +857,10 @@ pub fn 测评(码表: &Path, 方案: &Path, data_dir: &Path, settings_dir: &Path
     // 当量矩阵
     let eq_path = settings_dir.join("equivTable.json");
     let eq_raw: Value = serde_json::from_str(
-        &fs::read_to_string(&eq_path).map_err(|e| format!("读不了 {}: {}", eq_path.display(), e))?)
-        .map_err(|e| format!("解析当量矩阵失败: {}", e))?;
+        &fs::read_to_string(&eq_path)
+            .map_err(|e| format!("读不了 {}: {}", eq_path.display(), e))?,
+    )
+    .map_err(|e| format!("解析当量矩阵失败: {}", e))?;
     let mut equiv = HashMap::new();
     for (k, v) in eq_raw.get("data").unwrap().as_object().unwrap() {
         equiv.insert(k.clone(), v.as_f64().unwrap());
@@ -624,8 +884,11 @@ pub fn 测评(码表: &Path, 方案: &Path, data_dir: &Path, settings_dir: &Path
         ("全部簡碼", &t.order, &t.short_sel),
     ];
     let freq_list: Vec<(&str, &Freq)> = vec![
-        ("北語簡體字頻", &scf), ("臺標繁體字頻", &tcf), ("知乎簡體字頻", &zh),
-        ("古籍繁體字頻", &gj), ("繁簡聯合字頻", &hj),
+        ("北語簡體字頻", &scf),
+        ("臺標繁體字頻", &tcf),
+        ("知乎簡體字頻", &zh),
+        ("古籍繁體字頻", &gj),
+        ("繁簡聯合字頻", &hj),
     ];
     let mut speed = Map::new();
     for (fname, freq) in &freq_list {
@@ -649,14 +912,20 @@ pub fn 测评(码表: &Path, 方案: &Path, data_dir: &Path, settings_dir: &Path
     ];
     let mut dynres = Map::new();
     for (skey, okey, freq) in &dyn_specs {
-        dynres.insert((*skey).to_string(), json!({
-            "全碼": calc_dyn_sorted(&t.full, &t.full_map_order, freq),
-            "簡碼": calc_dyn_sorted(&t.short, &t.short_map_order, freq),
-        }));
-        dynres.insert((*okey).to_string(), json!({
-            "全碼": calc_dyn_original(&t.full_sel, &t.full_map_order, freq),
-            "簡碼": calc_dyn_original(&t.short_sel, &t.short_map_order, freq),
-        }));
+        dynres.insert(
+            (*skey).to_string(),
+            json!({
+                "全碼": calc_dyn_sorted(&t.full, &t.full_map_order, freq),
+                "簡碼": calc_dyn_sorted(&t.short, &t.short_map_order, freq),
+            }),
+        );
+        dynres.insert(
+            (*okey).to_string(),
+            json!({
+                "全碼": calc_dyn_original(&t.full_sel, &t.full_map_order, freq),
+                "簡碼": calc_dyn_original(&t.short_sel, &t.short_map_order, freq),
+            }),
+        );
     }
 
     // 简码效率：5 频 × 28 N
@@ -674,12 +943,20 @@ pub fn 测评(码表: &Path, 方案: &Path, data_dir: &Path, settings_dir: &Path
     let mut effres = Map::new();
     for (key, freq) in &eff_specs {
         let (full_str, nres) = calc_short_eff(freq, &t.short_sel, &t.full_sel, maxlen, &n_values);
-        let nval: Vec<Value> = nres.iter().map(|(n, v)| json!({
-            "最有效率的簡碼個數": n, "字頻加權碼長": v,
-        })).collect();
-        effres.insert((*key).to_string(), json!({
-            "N值結果": nval, "完整字符字符串": full_str,
-        }));
+        let nval: Vec<Value> = nres
+            .iter()
+            .map(|(n, v)| {
+                json!({
+                    "最有效率的簡碼個數": n, "字頻加權碼長": v,
+                })
+            })
+            .collect();
+        effres.insert(
+            (*key).to_string(),
+            json!({
+                "N值結果": nval, "完整字符字符串": full_str,
+            }),
+        );
     }
 
     // 键位热力（含选重键折算）
@@ -717,9 +994,13 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
 /// mulberry32：与 TS 版逐位一致，保证 20000 个窗口起点完全相同。
-struct Mulberry32 { state: u32 }
+struct Mulberry32 {
+    state: u32,
+}
 impl Mulberry32 {
-    fn new(seed: u32) -> Self { Self { state: seed } }
+    fn new(seed: u32) -> Self {
+        Self { state: seed }
+    }
     fn next(&mut self) -> f64 {
         self.state = self.state.wrapping_add(0x6d2b79f5);
         let mut t = self.state;
@@ -743,8 +1024,12 @@ fn 是语料汉字(c: char) -> bool {
 /// 升序数组线性插值分位数（复刻 取分位數）。
 fn 取分位数(升序: &[f64], q: f64) -> f64 {
     let n = 升序.len();
-    if n == 0 { return 0.0; }
-    if n == 1 { return 升序[0]; }
+    if n == 0 {
+        return 0.0;
+    }
+    if n == 1 {
+        return 升序[0];
+    }
     let 位置 = (n - 1) as f64 * q;
     let 下标 = 位置.floor() as usize;
     let 上标 = (下标 + 1).min(n - 1);
@@ -758,25 +1043,37 @@ fn 取条件尾部均值(升序: &[f64], 门槛: f64) -> f64 {
     let mut 右 = 升序.len();
     while 左 < 右 {
         let 中 = (左 + 右) / 2;
-        if 升序[中] < 门槛 { 左 = 中 + 1; } else { 右 = 中; }
+        if 升序[中] < 门槛 {
+            左 = 中 + 1;
+        } else {
+            右 = 中;
+        }
     }
-    if 左 >= 升序.len() { return 门槛; }
+    if 左 >= 升序.len() {
+        return 门槛;
+    }
     let mut 和 = 0.0;
-    for i in 左..升序.len() { 和 += 升序[i]; }
+    for &v in &升序[左..] {
+        和 += v;
+    }
     和 / (升序.len() - 左) as f64
 }
 
 /// 复刻 壓縮分佈：分布(当量值,个数) → {起始,步長,個數}，格点 0.001。
 fn 压缩分布(分布: &[(f64, usize)]) -> Value {
     let 步长 = 0.001f64;
-    if 分布.is_empty() { return json!({ "起始": 0.0, "步長": 步长, "個數": [] }); }
+    if 分布.is_empty() {
+        return json!({ "起始": 0.0, "步長": 步长, "個數": [] });
+    }
     let 起始 = 分布[0].0;
     let 末 = 分布[分布.len() - 1].0;
     let 格点 = ((末 - 起始) / 步长).round() as usize + 1;
     let mut 个数 = vec![0usize; 格点];
     for &(值, 计) in 分布 {
         let 下标 = ((值 - 起始) / 步长).round() as i64;
-        if 下标 >= 0 && (下标 as usize) < 格点 { 个数[下标 as usize] += 计; }
+        if 下标 >= 0 && (下标 as usize) < 格点 {
+            个数[下标 as usize] += 计;
+        }
     }
     json!({ "起始": 起始, "步長": 步长, "個數": 个数 })
 }
@@ -791,21 +1088,37 @@ fn 蒙特卡洛连续当量(
     窗口: usize,
 ) -> Result<Value, String> {
     let m = 清洗.len();
-    if m < 窗口 { return Err(format!("语料仅 {} 字，不足一个窗口 {}", m, 窗口)); }
+    if m < 窗口 {
+        return Err(format!("语料仅 {} 字，不足一个窗口 {}", m, 窗口));
+    }
 
     // 字符 → 按键串（复刻 構建字符按鍵映射）；标点单列，汉字查表后 replace_sel
     let mut 映射: HashMap<char, String> = HashMap::new();
     let mut 未编码: HashSet<char> = HashSet::new();
     for &c in 清洗 {
-        if 映射.contains_key(&c) || 未编码.contains(&c) { continue; }
-        if c == '，' { 映射.insert(c, ",".to_string()); continue; }
-        if c == '。' { 映射.insert(c, ".".to_string()); continue; }
+        if 映射.contains_key(&c) || 未编码.contains(&c) {
+            continue;
+        }
+        if c == '，' {
+            映射.insert(c, ",".to_string());
+            continue;
+        }
+        if c == '。' {
+            映射.insert(c, ".".to_string());
+            continue;
+        }
         match tab.get(&c) {
-            Some(code) => { 映射.insert(c, replace_sel(code, sel)); }
-            None => { 未编码.insert(c); }
+            Some(code) => {
+                映射.insert(c, replace_sel(code, sel));
+            }
+            None => {
+                未编码.insert(c);
+            }
         }
     }
-    let 未编码字数 = if 未编码.is_empty() { 0 } else {
+    let 未编码字数 = if 未编码.is_empty() {
+        0
+    } else {
         清洗.iter().filter(|c| 未编码.contains(c)).count()
     };
 
@@ -818,8 +1131,10 @@ fn 蒙特卡洛连续当量(
     for _ in 0..样本数 {
         let 起点 = (rng.next() * ((起点上限 + 1) as f64)).floor() as usize;
         let mut 序列 = String::with_capacity(窗口 * 3);
-        for i in 起点..起点 + 窗口 {
-            if let Some(k) = 映射.get(&清洗[i]) { 序列.push_str(k); }
+        for c in &清洗[起点..起点 + 窗口] {
+            if let Some(k) = 映射.get(c) {
+                序列.push_str(k);
+            }
         }
         // 序列全为 ASCII（字母 / 数字 / , . _ ; '），字节切片 == TS substring
         let 字节 = 序列.as_bytes();
@@ -828,22 +1143,34 @@ fn 蒙特卡洛连续当量(
         let mut 有效码对 = 0usize;
         for i in 0..码对数 {
             let 对 = std::str::from_utf8(&字节[i..i + 2]).unwrap();
-            if let Some(&v) = 当量表.get(对) { 总当量 += v; 有效码对 += 1; }
+            if let Some(&v) = 当量表.get(对) {
+                总当量 += v;
+                有效码对 += 1;
+            }
         }
         累计码对 += 码对数;
         累计有效 += 有效码对;
-        if 有效码对 > 0 { 样本.push(总当量 / 有效码对 as f64); }
+        if 有效码对 > 0 {
+            样本.push(总当量 / 有效码对 as f64);
+        }
     }
 
-    if 样本.is_empty() { return Err("没有得到任何有效样本，请检查码表与当量表".to_string()); }
+    if 样本.is_empty() {
+        return Err("没有得到任何有效样本，请检查码表与当量表".to_string());
+    }
     样本.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let n = 样本.len();
     let 平均数 = 样本.iter().fold(0.0f64, |s, &v| s + v) / n as f64;
-    let 方差 = 样本.iter().fold(0.0f64, |s, &v| s + (v - 平均数) * (v - 平均数)) / n as f64;
+    let 方差 = 样本
+        .iter()
+        .fold(0.0f64, |s, &v| s + (v - 平均数) * (v - 平均数))
+        / n as f64;
 
     // 分布：Math.round(v*1000)/1000 归并（BTreeMap 整数键天然升序）
     let mut 计数: BTreeMap<i64, usize> = BTreeMap::new();
-    for &v in &样本 { *计数.entry((v * 1000.0).round() as i64).or_insert(0) += 1; }
+    for &v in &样本 {
+        *计数.entry((v * 1000.0).round() as i64).or_insert(0) += 1;
+    }
     let 分布: Vec<(f64, usize)> = 计数.iter().map(|(&k, &c)| (k as f64 / 1000.0, c)).collect();
 
     let 九零 = 取分位数(&样本, 0.9);
@@ -866,37 +1193,67 @@ fn 蒙特卡洛连续当量(
 
 /// 给方案档案补上「連續文本當量」并写回，完整复刻 fill-continuous.mts。
 /// 返回写入的连续当量结果块（供调用方打印摘要）。
-pub fn 补连续当量(档案路径: &Path, yuhao目录: &Path, 样本数: usize, 窗口: usize) -> Result<Value, String> {
+pub fn 补连续当量(
+    档案路径: &Path,
+    yuhao目录: &Path,
+    样本数: usize,
+    窗口: usize,
+) -> Result<Value, String> {
     let 原文 = fs::read_to_string(档案路径).map_err(|e| format!("读不了档案: {}", e))?;
     let 清理 = 原文.trim_start_matches('\u{feff}');
     let mut 档: Value = serde_json::from_str(清理).map_err(|e| format!("解析档案失败: {}", e))?;
 
-    let 码表路径 = 档.get("_碼表").and_then(|v| v.as_str())
+    let 码表路径 = 档
+        .get("_碼表")
+        .and_then(|v| v.as_str())
         .map(PathBuf::from)
         .ok_or_else(|| "档案缺 _碼表，无法定位码表".to_string())?;
 
     let 参数 = 档.get("方案參數");
-    let 最大码长 = 参数.and_then(|p| p.get("最大碼長")).and_then(|x| x.as_u64()).unwrap_or(4) as usize;
+    let 最大码长 = 参数
+        .and_then(|p| p.get("最大碼長"))
+        .and_then(|x| x.as_u64())
+        .unwrap_or(4) as usize;
     let mut sel = HashMap::new();
-    if let Some(m) = 参数.and_then(|p| p.get("選重鍵表")).and_then(|x| x.as_object()) {
-        for (k, v) in m { if let Some(s) = v.as_str() { sel.insert(k.clone(), s.to_string()); } }
+    if let Some(m) = 参数
+        .and_then(|p| p.get("選重鍵表"))
+        .and_then(|x| x.as_object())
+    {
+        for (k, v) in m {
+            if let Some(s) = v.as_str() {
+                sel.insert(k.clone(), s.to_string());
+            }
+        }
     }
     if sel.is_empty() {
         sel.insert("2".to_string(), ";".to_string());
         sel.insert("3".to_string(), "'".to_string());
     }
-    let sc = Scheme { maxlen: 最大码长, sel: sel.clone(), has_terminator: false, terminators: vec![] };
+    let sc = Scheme {
+        maxlen: 最大码长,
+        sel: sel.clone(),
+        has_terminator: false,
+        terminators: vec![],
+    };
 
     let 语料原文 = fs::read_to_string(yuhao目录.join("literature.txt"))
         .map_err(|e| format!("读不了语料: {}", e))?;
-    let 清洗: Vec<char> = 语料原文.chars()
-        .filter(|&c| c == '，' || c == '。' || 是语料汉字(c)).collect();
+    let 清洗: Vec<char> = 语料原文
+        .chars()
+        .filter(|&c| c == '，' || c == '。' || 是语料汉字(c))
+        .collect();
 
     let eq文本 = fs::read_to_string(yuhao目录.join("equivTable.json"))
         .map_err(|e| format!("读不了当量表: {}", e))?;
     let eq: Value = serde_json::from_str(&eq文本).map_err(|e| format!("解析当量表失败: {}", e))?;
-    let 当量表: HashMap<String, f64> = eq.get("data").and_then(|d| d.as_object())
-        .map(|m| m.iter().map(|(k, v)| (k.clone(), v.as_f64().unwrap_or(0.0))).collect())
+    let 当量表: HashMap<String, f64> = eq
+        .get("data")
+        .and_then(|d| d.as_object())
+        .map(|m| {
+            m.iter()
+                .map(|(k, v)| (k.clone(), v.as_f64().unwrap_or(0.0)))
+                .collect()
+        })
         .unwrap_or_default();
 
     let t = parse_and_build(&码表路径, &sc)?;
@@ -911,10 +1268,16 @@ pub fn 补连续当量(档案路径: &Path, yuhao目录: &Path, 样本数: usize
     });
 
     {
-        let obj = 档.as_object_mut().ok_or_else(|| "档案根不是 JSON 对象".to_string())?;
+        let obj = 档
+            .as_object_mut()
+            .ok_or_else(|| "档案根不是 JSON 对象".to_string())?;
         obj.remove("_碼表");
-        let 测评 = obj.entry("測評結果".to_string()).or_insert_with(|| json!({}));
-        if let Some(m) = 测评.as_object_mut() { m.insert("連續文本當量".into(), 结果.clone()); }
+        let 测评 = obj
+            .entry("測評結果".to_string())
+            .or_insert_with(|| json!({}));
+        if let Some(m) = 测评.as_object_mut() {
+            m.insert("連續文本當量".into(), 结果.clone());
+        }
     }
     let 文本 = serde_json::to_string_pretty(&档).map_err(|e| format!("序列化档案失败: {}", e))?;
     fs::write(档案路径, format!("{}\n", 文本)).map_err(|e| format!("写档案失败: {}", e))?;
@@ -940,7 +1303,13 @@ mod tests {
         ];
         for &e in &期望 {
             let got = rng.next();
-            assert_eq!(got.to_bits(), e.to_bits(), "mulberry32 与 TS 不符: {} vs {}", got, e);
+            assert_eq!(
+                got.to_bits(),
+                e.to_bits(),
+                "mulberry32 与 TS 不符: {} vs {}",
+                got,
+                e
+            );
         }
     }
 

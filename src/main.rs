@@ -806,14 +806,14 @@ fn main() {
             &version,
             qualify,
         ),
-        Some(Commands::FillContinuous { profile, yuhao_dir, table, samples, window }) => {
-            assess::run_fill_continuous(
-                &profile,
-                &yuhao_dir,
-                table.as_deref(),
-                samples,
-                window,
-            );
+        Some(Commands::FillContinuous {
+            profile,
+            yuhao_dir,
+            table,
+            samples,
+            window,
+        }) => {
+            assess::run_fill_continuous(&profile, &yuhao_dir, table.as_deref(), samples, window);
         }
         Some(Commands::Optimize {
             output_dir,
