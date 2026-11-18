@@ -28,7 +28,7 @@ cargo run --release -- -c config.ron --rng-seed 42 optimize -d out
 cargo run --release -- optimize --resume -d out
 
 # 测评
-cargo run --release -- assess --dir runs --yuhao-dir yuhao-assess
+cargo run --release -- assess --dir runs --yuhao-dir yuhao-data
 
 # 聚类重码分析：哪一簇压成大码代价最高（聚类表内嵌于 assets/roots_cluster.ron）
 cargo run --release -- clusters --per-row --schema moling
@@ -89,7 +89,7 @@ cargo test --release
 | `bucket_store.rs` | 全码桶存储，按「Dense 绝对占用预算」+ `n_chars` 判定密集/稀疏后端（`choose_backend_for`） |
 | `export_table.rs` | 取码内核；`取码序列` 实现星月 encoder 状态机 |
 | `clusters.rs` | 聚类重码分析：复用 `prepare::inputs::展开` 得到码位序列，按五种取码法（去第 0~3 码、全码）统计动重/静重/组数；`--per-row` 逐行代入聚类表与基线做差 |
-| `assess.rs` | 调 yuhao-assess 跑测评、出对比表、生成可导入网页版的方案档案；`--qualify` 按阈值（通用重码率 ≤0.00031、常用国字 ≤0.00028、动态选重 <0.0020、速度当量 <1.270）筛合格方案，取代已删的 `moling/compare-optimization-results.sh` |
+| `assess.rs` | 纯 Rust 内核跑宇浩测评（不再 spawn Node/pnpm，不再依赖外部 yuhao-assess 仓库）、出对比表、生成可导入网页版的方案档案；`--qualify` 按阈值（通用重码率 ≤0.00031、常用国字 ≤0.00028、动态选重 <0.0020、速度当量 <1.270）筛合格方案，取代已删的 `moling/compare-optimization-results.sh` |
 | `handfeel.rs` | 手感指标：速度当量、动态选重、同指连击率、换手率 |
 | `checkpoint.rs` | 断点续算：线程检查点、元信息、原子写、历史归档 |
 | `fsutil.rs` | 文件读写，覆盖前自动按时间戳归档旧文件 |

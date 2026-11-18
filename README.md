@@ -28,7 +28,7 @@ cargo build --release
 |------|------|----------|
 | `optimize`（默认） | 跑模拟退火优化；`--resume -d <dir>` 从 checkpoint 续算；`--shortcode-only -d <dir>` 只给既有输出补简码 | `code_genie -c config.ron optimize -d out` |
 | `run` | 一轮完整流程：备份输入 → prepare → optimize，写 `COMMENT.txt` 与日志 | `code_genie run --dir moling --comment "第一轮"` |
-| `assess` | 宇浩测评对比 + 方案档案；`--qualify` 只列达标方案 | `code_genie assess --dir runs --yuhao-dir yuhao-assess --qualify` |
+| `assess` | 宇浩测评对比 + 方案档案；`--qualify` 只列达标方案 | `code_genie assess --dir runs --yuhao-dir yuhao-data --qualify` |
 | `clusters` | 聚类重码分析：把一簇压成一个大码要付出多少重码（聚类表内嵌于 `assets/roots_cluster.ron`） | `code_genie clusters --per-row` |
 
 > `prepare` 是 `run` 的内置阶段（帮助里隐藏）：`run` 会自动执行，不需要单独调用。
