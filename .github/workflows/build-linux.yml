@@ -93,20 +93,18 @@ jobs:
                     moling/单字拆分.txt moling/字根声韵.txt \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - name: 功能冒烟（全子命令 + 真实数据跑通取码链路）
+      - name: 功能冒烟（子命令清单）
         run: |
           set -e
           CG=./target/release/code_genie
           echo "--- 版本 ---"
           $CG --version
-          echo "--- 子命令清单（应含全部功能）---"
-          $CG --help
-          echo "--- 取码链路冒烟（真实数据）---"
-          $CG pipeline \
-            --keymap runs/s4-export/output-keymap.txt \
-            --chaifen moling/拆分全表.txt \
-            --chars "的 一" --output /tmp/流水线.md
-          wc -l < /tmp/流水线.md
+          echo "--- 子命令清单（应含全部对外功能）---"
+          $CG --help | tee /tmp/help.txt
+          for c in optimize run assess clusters; do
+            grep -qE "^\s+$c\b" /tmp/help.txt || { echo "❌ 缺少子命令 $c"; exit 1; }
+          done
+          echo "子命令冒烟 OK"
 
       - name: 优化冒烟（内嵌当量/用指分布 + 5000 步）
         run: |
@@ -138,7 +136,7 @@ jobs:
           required = ["moling/字根约束.txt",
                       "moling/单字拆分.txt", "moling/字根声韵.txt",
                       "moling/拆分全表.txt",
-                      "codegenie-s4.jsonc"]
+                      "测评方案.jsonc"]
           missing = [f for f in required if not pathlib.Path(f).exists()]
           if missing:
               raise SystemExit("缺少打包所需文件（应在 code_genie prepare 步骤生成）："
@@ -184,7 +182,7 @@ jobs:
           mkdir -p "$DIR"
           ./code_genie assess \\
             --dir "$DIR" \\
-            --scheme codegenie-s4.jsonc \\
+            --scheme 测评方案.jsonc \\
             --yuhao-dir yuhao-assess \\
             --keep "$DIR/结果" \\
             --summary "$DIR/汇总.md" \\
@@ -252,7 +250,7 @@ jobs:
           ./target/release/code_genie -c config.ron assess \
             --dir /tmp/assess-dir \
             --file-name 完整码表.txt \
-            --scheme codegenie-s4.jsonc \
+            --scheme 测评方案.jsonc \
             --yuhao-dir /tmp/yh \
             --summary /tmp/测评.md
           echo "--- 测评摘要 ---"

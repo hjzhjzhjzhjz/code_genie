@@ -1,12 +1,12 @@
-// 104簇-内置字频 云端优化配置（与本地 跑分布修正-104簇-16000w.toml 逐项等价）。
+// r2s1实分 云端优化配置（与本地 跑分布修正-104簇-16000w.toml 逐项等价）。
 // total_steps / threads 由 optimize workflow 按输入参数改写；
-// files 里三个文件位于 inputs-104簇/（workflow 传 files_dir=inputs-104簇 时自动加前缀）。
+// files 里三个文件位于 inputs-r2s1实分/（workflow 传 files_dir=inputs-r2s1实分 时自动加前缀）。
 (
     files: (
         fixed: "字根约束-新聚类.txt",                    // 固定字根与各码位约束
         splits: "单字拆分-星陈-全字集-内置字频.txt",     // 优化用拆分表
         pair_equiv: "",                                  // 留空 = 内嵌当量表
-        key_dist: "用指分布.txt",                        // 二轮校准用指分布（总和 100.00）
+        key_dist: "用指分布.txt",                        // r2-s1 实际击键分布
         full_splits: "",                                 // 不生成完整码表（与本地口径一致）
     ),
     keys: (

@@ -39,8 +39,8 @@ permissions:
 
 env:
   REF: moling
-  CONFIG_BASE: config-104簇.ron
-  FILES_DIR: inputs-104簇
+  CONFIG_BASE: config-r2s1实分.ron
+  FILES_DIR: inputs-r2s1实分
   TOTAL_STEPS: "160000000"
   THREADS: "4"
   REPEAT: "1"

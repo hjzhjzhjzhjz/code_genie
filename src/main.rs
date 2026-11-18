@@ -207,7 +207,7 @@ enum Commands {
         file_name: String,
 
         /// 方案配置（jsonc）
-        #[arg(long, default_value = "codegenie-s4.jsonc")]
+        #[arg(long, default_value = "测评方案.jsonc")]
         scheme: String,
 
         /// 宇浩数据目录（本仓 yuhao-data，含字频/字集/当量/区块/语料，平铺）

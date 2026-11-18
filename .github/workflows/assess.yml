@@ -15,7 +15,7 @@ on:
       keymap:
         description: 键位映射文件（仓库内路径，仅 run_id 为空时用）
         required: false
-        default: runs/s4-export/output-keymap.txt
+        default: runs/r2s1实分-s3-键位表.txt
         type: string
 
 permissions:
@@ -107,7 +107,7 @@ jobs:
           ./target/release/code_genie assess \
             --dir out-assess \
             --file-name 完整码表.txt \
-            --scheme codegenie-s4.jsonc \
+            --scheme 测评方案.jsonc \
             --yuhao-dir yuhao-data \
             --keep out-assess/结果 \
             --summary 汇总.md \
@@ -136,7 +136,7 @@ jobs:
           ./target/release/code_genie assess \
             --dir artifacts \
             --file-name 完整码表.txt \
-            --scheme codegenie-s4.jsonc \
+            --scheme 测评方案.jsonc \
             --yuhao-dir yuhao-data \
             --keep artifacts/结果 \
             --summary 汇总.md \

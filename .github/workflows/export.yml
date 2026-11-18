@@ -6,7 +6,7 @@ on:
       keymap:
         description: 键位映射文件（仓库内路径；同目录需有 optimize 产出的 完整码表.txt）
         required: true
-        default: runs/s4-export/output-keymap.txt
+        default: runs/r2s1实分-s3-键位表.txt
         type: string
       out_name:
         description: 输出文件名

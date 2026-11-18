@@ -6,7 +6,7 @@ csvdiff 要求带表头的标准 CSV，所以这里先剥注释、补表头、�
 
 用法：
     python tools/对比码表.py 旧/output-keymap.txt 新/output-keymap.txt
-    python tools/对比码表.py runs/s4-export runs/0.0220-0.1113   # 传目录则找 output-keymap.txt
+    python tools/对比码表.py runs/r2s1实分-s3-键位表.txt 新/output-keymap.txt
     python tools/对比码表.py 旧.txt 新.txt --全部                  # 不截断明细
     python tools/对比码表.py 旧.txt 新.txt --仅摘要                # 只看计数
 

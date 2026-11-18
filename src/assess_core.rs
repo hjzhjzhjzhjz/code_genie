@@ -4,7 +4,7 @@
 //
 // 取代旧版 assess.rs 里对 `pnpm cli`（yuhao-assess Node CLI）的 spawn 调用。
 // f64 输出严格复刻 Node CLI 的累加顺序 / Map 迭代顺序，已与生产方案
-// codegenie-s4.jsonc 的 CLI 产物逐字段对拍：497 项中 492 逐位相等、
+// 测评方案.jsonc 的 CLI 产物逐字段对拍：497 项中 492 逐位相等、
 // 5 项机器精度内（速度当量的固有 f64 微差）、零真差异。
 //
 // 复用 assess.rs 已有的 handfeel（指位/连击/选重）与打印/汇总逻辑——
