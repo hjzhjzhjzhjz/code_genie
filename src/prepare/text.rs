@@ -13,7 +13,6 @@
 // 3. 键位串：`join(" ", split /\s*/, $s)` 的效果是「滤掉空白、逐字符用空格连接」。
 // =========================================================================
 
-use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -71,26 +70,6 @@ pub fn 是汉字(c: char) -> bool {
     )
 }
 
-/// 读取字根映射表（花括号名 → 显示字），供 `chart -d` 的字根键位图页面使用。
-///
-/// 兼容 tab 与任意空白分隔，跳过空行和 `#` 注释；同名只留最后一条（与 perl 版
-/// 一致）。映射表是可选的展示层数据，读不到时返回空表，不阻断主流程。
-///
-/// 统一成兼容 tab 与任意空白分隔，供 `chart -d` 读同一份 tsv。
-pub fn 加载映射(path: &Path) -> HashMap<String, String> {
-    let mut 表 = HashMap::new();
-    let Ok(文本) = fs::read_to_string(path) else {
-        return 表;
-    };
-    for 行 in 文本.lines() {
-        let 列: Vec<&str> = 行.split_whitespace().collect();
-        if 列.len() >= 2 && !列[0].starts_with('#') {
-            表.insert(列[0].to_string(), 列[1].to_string());
-        }
-    }
-    表
-}
-
 /// 按 `\s*` 打散成单字符再用单空格连接（`join(" ", split /\s*/, $s)` 的等价形式）
 pub fn 打散(s: &str) -> String {
     let 字: Vec<String> = s
@@ -127,7 +106,7 @@ mod tests {
     #[test]
     fn 汉字判定覆盖各平面() {
         // 扩展 B–H 整平面（0x20000..=0x3FFFF）都要算汉字：
-        // 旧 sentence.rs 的私有判定只到 0x2A6DF，会漏掉这批字。
+        // 旧版私有判定只到 0x2A6DF，会漏掉这批字。
         for c in [
             '一',
             '的',
@@ -144,29 +123,6 @@ mod tests {
         for c in ['a', '1', '，', '\t', 'あ'] {
             assert!(!是汉字(c), "{c} 不应判为汉字");
         }
-    }
-
-    #[test]
-    fn 加载映射兼容两种分隔符且跳过注释() {
-        let 目录 = std::env::temp_dir().join("code_genie_prepare_mapping_test");
-        fs::create_dir_all(&目录).unwrap();
-        let 路径 = 目录.join("mapping.tsv");
-        fs::write(
-            &路径,
-            "# 这是注释\n{⺮右}\t⺮\n{日} 日\n{⺮右}\t⺀\n\n空行后不写\n",
-        )
-        .unwrap();
-        let 表 = 加载映射(&路径);
-        assert_eq!(表.get("{⺮右}").unwrap(), "⺀", "同名只留最后一条");
-        assert_eq!(表.get("{日}").unwrap(), "日", "空格分隔也要读得进");
-        assert!(!表.contains_key("#"), "注释行不能进表");
-        let _ = fs::remove_dir_all(&目录);
-    }
-
-    #[test]
-    fn 加载映射缺文件返回空表() {
-        let 路径 = std::env::temp_dir().join("code_genie_不存在的映射表.tsv");
-        assert!(加载映射(&路径).is_empty());
     }
 
     #[test]

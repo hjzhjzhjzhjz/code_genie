@@ -54,22 +54,14 @@ mod handfeel;
 mod loader;
 #[path = "../src/output.rs"]
 mod output;
-#[path = "../src/pipeline.rs"]
-mod pipeline;
 #[path = "../src/prepare/mod.rs"]
 mod prepare;
-#[path = "../src/rime_convert.rs"]
-mod rime_convert;
-#[path = "../src/roots_chart.rs"]
-mod roots_chart;
 #[path = "../src/roots_cluster.rs"]
 mod roots_cluster;
 #[path = "../src/run.rs"]
 mod run;
 #[path = "../src/schedule.rs"]
 mod schedule;
-#[path = "../src/sentence.rs"]
-mod sentence;
 #[path = "../src/shortcode.rs"]
 mod shortcode;
 #[path = "../src/types.rs"]
@@ -82,8 +74,6 @@ mod assess_enhance;
 mod test_util;
 #[path = "../src/validate.rs"]
 mod validate;
-#[path = "../src/zigen.rs"]
-mod zigen;
 
 use crate::context::OptContext;
 use crate::evaluator::Evaluator;

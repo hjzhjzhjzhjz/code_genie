@@ -65,7 +65,7 @@ pub const SPARSE_THRESHOLD: usize = 1 << 21;
 ///
 /// 与容量无关，直接给「每评估器 Dense 占用」定一个预算：只要 `capacity × sizeof(B)`
 /// 在这个预算内，就用 Dense 换数组访问速度（实测 SA 吞吐快约 1.6 倍，见文件头表格）。
-/// 8 MiB 覆盖本项目 3 码方案（`32^3 × 48 B ≈ 1.5 MB`）与简码各级别桶，
+/// 8 MiB 覆盖本项目 3 码方案（`32^3 × 48 B ≈ 1.5 MB`），
 /// 同时把 4 码方案（`32^4 × 48 B ≈ 48 MB`）挡在门外。
 pub const DENSE_BUDGET_BYTES: usize = 8 << 20;
 
@@ -494,7 +494,7 @@ mod tests {
             BackendKind::Sparse,
             "超预算且几乎无占用 → 稀疏"
         );
-        // 小容量无条件 Dense（简码各级别桶落在这里）
+        // 小容量无条件 Dense
         assert_eq!(choose_backend_for(1, 1, 4096), BackendKind::Dense);
         assert_eq!(choose_backend_for(1, usize::MAX, 4096), BackendKind::Dense);
         // 绝对上限优先：容量超上限时即便字数极多也走 Sparse（饱和乘法不溢出）

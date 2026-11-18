@@ -159,7 +159,6 @@ def 主() -> int:
         f"| 权重·当量 | {取(配置, 'weights.full_code.equivalence')} |",
         f"| 权重·CV | {取(配置, 'weights.full_code.equiv_cv')} |",
         f"| 权重·分布 | {取(配置, 'weights.full_code.distribution')} |",
-        f"| 简码 | {'启用' if 取(配置, 'weights.simple_code.enabled') == 'true' else '关闭'} |",
     ]
     行 += [
         "",

@@ -42,18 +42,13 @@ mod fsutil;
 mod handfeel;
 mod loader;
 mod output;
-mod pipeline;
 mod prepare;
-mod rime_convert;
-mod roots_chart;
 mod roots_cluster;
 mod run;
 mod schedule;
-mod sentence;
 mod shortcode;
 mod types;
 mod validate;
-mod zigen;
 
 #[cfg(test)]
 mod test_util;
@@ -120,6 +115,26 @@ enum Commands {
         /// 该模式读 <dir>/inputs/ 里的备份配置，不加载 -c。
         #[arg(long)]
         resume: bool,
+
+        /// 只补简码：对既有输出目录重算三级前缀简码（不跑退火），必须配合 -d。
+        /// 等价于旧 `shortcode` 子命令。
+        #[arg(long = "shortcode-only")]
+        shortcode_only: bool,
+
+        /// 简码字频表（仅 --shortcode-only）；缺省自动探测 inputs/ 下的拆分表
+        #[arg(long)]
+        freq: Option<String>,
+
+        /// 简码口径（仅 --shortcode-only）：未满 4 码的短码补一个 `_` 计键。
+        /// 缺省开；`--padding-space=false` 切回旧的码串长度档。
+        #[arg(
+            long = "padding-space",
+            default_value_t = true,
+            num_args = 0..=1,
+            default_missing_value = "true",
+            action = clap::ArgAction::Set
+        )]
+        padding_space: bool,
     },
 
     /// 跑一轮完整优化：备份输入 → prepare → optimize[--resume]，写 COMMENT.txt 与日志
@@ -176,46 +191,6 @@ enum Commands {
         scale: Option<String>,
     },
 
-    /// 生成字根键位图（单页 HTML）：产 roots/chaifen/mabiao/.js/.html 全套
-    #[command(name = "chart")]
-    Chart {
-        /// 优化输出目录（需含 output-keymap.txt / 拆分全表.txt / 全字频表.txt；
-        /// 可由 prepare 产物拼齐，取代 generate-root-chart.sh）
-        #[arg(short = 'd', long)]
-        dir: String,
-
-        /// 方案名：moling（魔靈）/ yuling（靈明）/ yustar（星陳）
-        #[arg(long, default_value = "moling")]
-        schema: String,
-
-        /// 页面标题（缺省「<方案>字根表 <日期>」）
-        #[arg(long)]
-        title: Option<String>,
-
-        /// Unihan 数据目录（含 Unihan_Readings.txt / Unihan_Variants.txt）
-        #[arg(long = "unihan-dir")]
-        unihan_dir: Option<String>,
-
-        /// 字根字体文件（.woff/.ttf）；文件存在则 base64 内嵌，否则当字体名
-        #[arg(long)]
-        font: Option<String>,
-
-        /// 每页字数（必须 ≥ 1；0 会让分页整除直接 panic）
-        #[arg(long = "page-size", default_value_t = 500, value_parser = 正整数)]
-        page_size: usize,
-
-        /// 每个字根最多几个例字
-        #[arg(long = "max-examples", default_value_t = 10)]
-        max_examples: usize,
-
-        /// 统计前多少个高频字
-        #[arg(long = "top-chars", default_value_t = 8000)]
-        top_chars: usize,
-
-        /// 只出 .js / .tsv，不出 .html
-        #[arg(long = "no-page")]
-        no_page: bool,
-    },
     /// 跑宇浩测评并输出对比表（内置纯 Rust 内核，无需 Node / pnpm）
     #[command(name = "assess")]
     Assess {
@@ -265,143 +240,10 @@ enum Commands {
         qualify: bool,
     },
 
-    /// 给方案档案补上「连续文本当量」（纯 Rust，替代 fill-continuous.mts，无需 Node）
-    #[command(name = "fill-continuous")]
-    FillContinuous {
-        /// 方案档案 JSON（可多个）
-        #[arg(long, required = true, num_args = 1..)]
-        profile: Vec<String>,
-
-        /// 宇浩数据目录（本仓 yuhao-data，含 literature.txt 与 equivTable.json，平铺）
-        #[arg(long = "yuhao-dir", default_value = "yuhao-data")]
-        yuhao_dir: String,
-
-        /// 覆盖档案里的码表路径（可选）
-        #[arg(long)]
-        table: Option<String>,
-
-        /// 抽样次数
-        #[arg(long, default_value_t = 20000)]
-        samples: usize,
-
-        /// 窗口字符数
-        #[arg(long, default_value_t = 100)]
-        window: usize,
-    },
-
-    /// 以星月方案包为底包，只把词典里的码换掉，其余（文件名/schema/lua/词表）原样沿用
-    #[command(name = "rime-convert")]
-    RimeConvert {
-        /// 底包目录（starmoon-ime 根目录，含 <前缀>_chaifen.dict.yaml 与 yuhao/）
-        #[arg(long)]
-        base: String,
-
-        /// 算码输出目录（含字根键位表与 zigen-<前缀>.csv）
-        #[arg(long)]
-        output: String,
-
-        /// 字根键位表；缺省按 <output>/output-keymap.txt → roots.tsv 顺序自动找
-        #[arg(long)]
-        keymap: Option<String>,
-
-        /// 拆分表（拆分全表.txt：字<TAB>根 根 …<TAB>频次）
-        #[arg(long, default_value = crate::prepare::names::拆分全表)]
-        chaifen: String,
-
-        /// 输出目录
-        #[arg(long, default_value = "rime-out")]
-        out: String,
-
-        /// 底包的方案前缀（同时用于 zigen-<前缀>.csv）
-        #[arg(long, default_value = "starmoon")]
-        prefix: String,
-    },
-
-    /// 整句准确率：逐单元首候选 + 连续码流解码，两个口径一起给
-    #[command(name = "sentence")]
-    Sentence {
-        /// 全码词典（Rime dict.yaml 或 TSV：字 / 码 / 权重）
-        #[arg(long)]
-        full_dict: String,
-        /// 词组词典（可选；格式同上）
-        #[arg(long)]
-        words_dict: Option<String>,
-        /// 语料文件，一行一句；也接受整段，按非汉字切开
-        #[arg(long)]
-        corpus: String,
-        /// 改用外部解码器（librime），给了就不走内置 Viterbi
-        #[arg(long)]
-        decoder: Option<String>,
-        /// librime 共享数据目录（仅外部解码器用）
-        #[arg(long, default_value = ".")]
-        shared: String,
-        /// librime 用户数据目录（仅外部解码器用）
-        #[arg(long, default_value = "rime-user")]
-        user: String,
-        /// librime 方案 id（仅外部解码器用）
-        #[arg(long, default_value = "xingyun_test")]
-        schema: String,
-        /// 最多测多少句，0 = 全部
-        #[arg(long, default_value = "0")]
-        limit: usize,
-        /// 句长上限
-        #[arg(long, default_value = "20")]
-        max_len: usize,
-        /// 导出中间文件的目录
-        #[arg(long)]
-        dump: Option<String>,
-        /// 结果 Markdown
-        #[arg(long)]
-        out: Option<String>,
-        /// 让外部解码器输出诊断
-        #[arg(long)]
-        verbose: bool,
-    },
-
-    /// 取码链路推导 / 字根归并对比（给 --rules 走归并模式）
-    #[command(name = "pipeline")]
-    Pipeline {
-        /// 字根键位表
-        #[arg(long)]
-        keymap: String,
-
-        /// 纯拆分表
-        #[arg(long)]
-        chaifen: String,
-
-        /// 同键组表 字根约束.txt（推导模式可选），用来标出归并关系
-        #[arg(long)]
-        fixed: Option<String>,
-
-        /// 要查看的字，空格分隔（推导模式）
-        #[arg(long, default_value = "")]
-        chars: String,
-
-        /// 不给 --chars 时，按频次取前 N 个字（推导模式）
-        #[arg(long, default_value = "0")]
-        top: usize,
-
-        /// 推导表写到该文件（Markdown，推导模式）
-        #[arg(long)]
-        output: Option<String>,
-
-        /// 归并规则，可重复。写法：`还=人` 或 `你 1=人 2`，多条用分号分隔。
-        /// 给了任意一条就切换到归并模式。
-        #[arg(long = "rules")]
-        rules: Vec<String>,
-
-        /// 变体码表输出目录（归并模式）
-        #[arg(long, default_value = "归并对比")]
-        out: String,
-
-        /// 对比表写到该文件（Markdown，归并模式）
-        #[arg(long)]
-        summary: Option<String>,
-    },
-
-    /// 从上游 yaml/lua/csv 数据加工出优化器要的输入文件
-    /// （`moling/prepare-inputs.sh` 的原生子命令实现，共 13 个步骤）
-    #[command(name = "prepare")]
+    /// 从上游 yaml/lua/csv 数据加工出优化器要的输入文件（`run` 的内部阶段，共 13 步）
+    ///
+    /// 不是常用入口：正常情况下跑 `run` 会自动执行本阶段。
+    #[command(name = "prepare", hide = true)]
     Prepare {
         /// 工作目录，相当于脚本里的 cwd
         #[arg(long, default_value = "moling")]
@@ -456,58 +298,6 @@ enum Commands {
         /// 逐行代入聚类表，与「全不聚类」基线做差
         #[arg(long)]
         per_row: bool,
-    },
-
-    /// 字形变体表：生成 zigen-<方案>.csv / roots-mapping.tsv / zigen-trainer-<方案>.json
-    #[command(name = "zigen")]
-    Zigen {
-        /// 方案名：只用于拼产物文件名
-        #[arg(long, default_value = "moling")]
-        schema: String,
-
-        /// 字根键位表（output-keymap.txt 或 字根键位表.txt）
-        #[arg(long, default_value = "output-keymap.txt")]
-        keymap: String,
-
-        /// 源目录：取 字根声韵.txt / roots-cluster.ron；yuhao-zigens.csv 是上游素材，
-        /// 源目录里没有就到 yuhao-data/ 里找
-        #[arg(long, default_value = ".")]
-        source: String,
-
-        /// 输出目录
-        #[arg(long, default_value = ".")]
-        out: String,
-
-        /// 字根数与 yuhao-zigens.csv 不一致时按失败退出（原脚本行为）
-        #[arg(long)]
-        strict: bool,
-    },
-
-    /// 给已经算完的输出目录补生成三级前缀简码（不重跑优化）
-    #[command(name = "shortcode")]
-    ShortCode {
-        /// 输出目录（含 完整码表.txt；简码置顶、无注释）
-        #[arg(short = 'd', long)]
-        dir: String,
-
-        /// 字频表（字<TAB>…<TAB>字频）；缺省自动探测 inputs/ 下的拆分表、
-        /// 全字频表.txt，最后回退到内嵌全量拆分表
-        #[arg(long)]
-        freq: Option<String>,
-
-        /// 按「实际按键数」口径分配：未满 4 码的短码补一个 `_` 计键（三级简码 + 空格
-        /// = 4 键不省键故不分配，一级简码写成单字母）。等价于主配置
-        /// `[shortcode] padding_space = true`。本项目按「每级简码都带空格上屏」口径，
-        /// 优化测评「簡碼效率」统一用本档；测评源码该指标用纯编码长度，数值不可直接比。
-        /// 【缺省即本档】传 `--padding-space=false` 可切回旧的码串长度档。
-        #[arg(
-            long = "padding-space",
-            default_value_t = true,
-            num_args = 0..=1,
-            default_missing_value = "true",
-            action = clap::ArgAction::Set
-        )]
-        padding_space: bool,
     },
 }
 
@@ -604,13 +394,19 @@ fn main() {
         return;
     }
 
-    // shortcode 只读产物文件与字频表，不依赖主配置（可对历史输出目录补生成）
-    if let Some(Commands::ShortCode {
-        dir,
+    // 只补简码：读产物与字频表，不依赖主配置（可对历史输出目录补生成）
+    if let Some(Commands::Optimize {
+        output_dir,
+        shortcode_only: true,
         freq,
         padding_space,
+        ..
     }) = &cli.command
     {
+        let Some(dir) = output_dir.as_deref() else {
+            eprintln!("❌ --shortcode-only 需要 `-d <既有输出目录>`");
+            std::process::exit(2);
+        };
         if let Err(e) = run_shortcode(dir, freq.as_deref(), *padding_space) {
             eprintln!("❌ {e}");
             std::process::exit(1);
@@ -643,29 +439,6 @@ fn main() {
         return;
     }
 
-    // zigen 同理：只读 prepare 的产物与上游 csv，不依赖主配置
-    if let Some(Commands::Zigen {
-        schema,
-        keymap,
-        source,
-        out,
-        strict,
-    }) = &cli.command
-    {
-        let 参 = zigen::参数 {
-            方案: schema.clone(),
-            键位文件: keymap.clone(),
-            源目录: source.clone(),
-            输出目录: out.clone(),
-            严格: *strict,
-        };
-        if let Err(e) = zigen::run(&参) {
-            eprintln!("❌ {}", e);
-            std::process::exit(1);
-        }
-        return;
-    }
-
     // 配置**按需**加载（#1：解析失败直接报错退出，不再静默回退默认配置）。
     // 只有 optimize 的 fresh 模式需要主配置；optimize --resume
     // 读 `<dir>/inputs/` 里的备份配置，其余命令只用命令行参数。若一律在分派前加载，
@@ -681,108 +454,6 @@ fn main() {
     };
 
     match cli.command {
-        Some(Commands::Chart {
-            dir,
-            schema,
-            title,
-            unihan_dir,
-            font,
-            page_size,
-            max_examples,
-            top_chars,
-            no_page,
-        }) => {
-            let 参 = roots_chart::参数 {
-                目录: dir,
-                方案: schema,
-                标题: title,
-                unihan目录: unihan_dir,
-                字体: font,
-                每页字数: page_size,
-                例字数: max_examples,
-                高频字数: top_chars,
-                跳过页面: no_page,
-            };
-            if let Err(e) = roots_chart::run(&参) {
-                eprintln!("❌ {e}");
-                std::process::exit(1);
-            }
-        }
-        Some(Commands::RimeConvert {
-            base,
-            output,
-            keymap,
-            chaifen,
-            out,
-            prefix,
-        }) => {
-            let 参 = rime_convert::参数 {
-                底包目录: base,
-                算码目录: output,
-                键位文件: keymap,
-                拆分文件: chaifen,
-                输出目录: out,
-                前缀: prefix,
-            };
-            if let Err(e) = rime_convert::run(&参) {
-                eprintln!("❌ {}", e);
-                std::process::exit(1);
-            }
-        }
-
-        Some(Commands::Sentence {
-            full_dict,
-            words_dict,
-            corpus,
-            decoder,
-            shared,
-            user,
-            schema,
-            limit,
-            max_len,
-            dump,
-            out,
-            verbose,
-        }) => sentence::run(&sentence::参数 {
-            全码词典: full_dict.into(),
-            词组词典: words_dict.map(Into::into),
-            语料: corpus.into(),
-            解码器: decoder.map(Into::into),
-            共享目录: shared.into(),
-            用户目录: user.into(),
-            方案: schema,
-            上限: limit,
-            最长: max_len,
-            导出: dump.map(Into::into),
-            结果: out.map(Into::into),
-            详细: verbose,
-        }),
-
-        Some(Commands::Pipeline {
-            keymap,
-            chaifen,
-            fixed,
-            chars,
-            top,
-            output,
-            rules,
-            out,
-            summary,
-        }) => {
-            if rules.is_empty() {
-                pipeline::流水线(
-                    &keymap,
-                    &chaifen,
-                    fixed.as_deref(),
-                    &chars,
-                    top,
-                    output.as_deref(),
-                )
-            } else {
-                pipeline::归并(&keymap, &chaifen, &rules, &out, summary.as_deref())
-            }
-        }
-
         Some(Commands::Assess {
             table,
             dir,
@@ -808,21 +479,13 @@ fn main() {
             &version,
             qualify,
         ),
-        Some(Commands::FillContinuous {
-            profile,
-            yuhao_dir,
-            table,
-            samples,
-            window,
-        }) => {
-            assess::run_fill_continuous(&profile, &yuhao_dir, table.as_deref(), samples, window);
-        }
         Some(Commands::Optimize {
             output_dir,
             seed_dir,
             seed_keymap,
             scale,
             resume,
+            ..
         }) => {
             if resume {
                 let Some(dir) = output_dir.as_deref() else {
@@ -847,9 +510,7 @@ fn main() {
         // prepare 在加载配置之前就已返回，这里只是让 match 完备
         Some(Commands::Prepare { .. }) => unreachable!("prepare 已在加载配置前处理"),
         Some(Commands::Clusters { .. }) => unreachable!("clusters 已在加载配置前处理"),
-        Some(Commands::Zigen { .. }) => unreachable!("zigen 已在加载配置前处理"),
         Some(Commands::Run { .. }) => unreachable!("run 已在加载配置前处理"),
-        Some(Commands::ShortCode { .. }) => unreachable!("shortcode 已在加载配置前处理"),
         None => {
             let cfg = 载入配置();
             run_optimize(
@@ -1076,17 +737,6 @@ fn resolve_seed_paths(
             found.sort_by_key(|(nn, _)| *nn);
             Ok(found.into_iter().map(|(_, p)| p).collect())
         }
-    }
-}
-
-/// clap 值解析器：只接受 ≥ 1 的整数。
-///
-/// 用于 `--page-size` 这类会做整除的参数：0 在运行时是除零 panic（release 下直接 abort）。
-fn 正整数(s: &str) -> Result<usize, String> {
-    match s.trim().parse::<usize>() {
-        Ok(0) => Err("必须 ≥ 1".to_string()),
-        Ok(n) => Ok(n),
-        Err(e) => Err(format!("不是合法整数：{e}")),
     }
 }
 
@@ -2520,46 +2170,4 @@ mod 命令归并测试 {
         }
     }
 
-    /// merge 并入 pipeline：给 --rules 走归并模式，不给走推导模式。
-    #[test]
-    fn 归并并入_pipeline() {
-        let cli = Cli::try_parse_from([
-            "code_genie",
-            "pipeline",
-            "--keymap",
-            "k",
-            "--chaifen",
-            "c",
-            "--rules",
-            "还=人",
-            "--out",
-            "归并对比",
-        ])
-        .unwrap();
-        match cli.command {
-            Some(Commands::Pipeline { rules, out, .. }) => {
-                assert_eq!(rules, vec!["还=人".to_string()]);
-                assert_eq!(out, "归并对比");
-            }
-            _ => panic!("应解析为 pipeline"),
-        }
-        let cli = Cli::try_parse_from([
-            "code_genie",
-            "pipeline",
-            "--keymap",
-            "k",
-            "--chaifen",
-            "c",
-            "--top",
-            "5",
-        ])
-        .unwrap();
-        match cli.command {
-            Some(Commands::Pipeline { rules, top, .. }) => {
-                assert!(rules.is_empty(), "不给 --rules 走推导模式");
-                assert_eq!(top, 5);
-            }
-            _ => panic!("应解析为 pipeline"),
-        }
-    }
 }

@@ -175,11 +175,72 @@ fn 根键位串(ctx: &OptContext, assignment: &[u8]) -> HashMap<String, String> 
     表
 }
 
+/// 键位串首字母（大码），统一小写
+fn 首(k: &str) -> char {
+    k.chars().next().unwrap_or('?').to_ascii_lowercase()
+}
+
+/// 键位串第 2 个字母（小码）；不足 2 位时回退首字母
+fn 次(k: &str) -> char {
+    k.chars()
+        .nth(1)
+        .unwrap_or_else(|| k.chars().next().unwrap_or('?'))
+        .to_ascii_lowercase()
+}
+
+/// 单字全码（严格按星陈 yustar encoder 状态机），返回小写 3~4 码。
+///
+/// 四条路径，A=大码、S=小码：
+///   1 根 : A1 S1 S1
+///   2 根 : A1 A2 S2 S1
+///   3 根 : A1 A2 A3 S3
+///   ≥4 根: A1 A2 A3 A_last
+fn 单字码(根们: &[String], 字根: &HashMap<String, String>) -> Result<String, String> {
+    if 根们.is_empty() {
+        return Ok(String::new());
+    }
+    let mut 键们 = Vec::with_capacity(根们.len());
+    for r in 根们 {
+        match 字根.get(r) {
+            Some(k) if !k.is_empty() => 键们.push(k.as_str()),
+            _ => return Err(format!("未知字根「{}」", r)),
+        }
+    }
+    let n = 键们.len();
+    Ok(match n {
+        1 => {
+            let k = 键们[0];
+            format!("{}{}{}", 首(k), 次(k), 次(k))
+        }
+        2 => format!(
+            "{}{}{}{}",
+            首(键们[0]),
+            首(键们[1]),
+            次(键们[1]),
+            次(键们[0])
+        ),
+        3 => format!(
+            "{}{}{}{}",
+            首(键们[0]),
+            首(键们[1]),
+            首(键们[2]),
+            次(键们[2])
+        ),
+        _ => format!(
+            "{}{}{}{}",
+            首(键们[0]),
+            首(键们[1]),
+            首(键们[2]),
+            首(键们[n - 1])
+        ),
+    })
+}
+
 /// 按槽位取码：根名 `X.k` 取「X 的键位串」第 k 个字母（小写）。
 ///
 /// 优化器的 `CharInfo.parts` 是**逐槽位取键位**（`白.0` / `白.1` 各算一条独立键位），
 /// 而 `raw_splits` 正是带槽位的展开式（`的 = 白.0 勹.0 丶.0 丶.1`）。所以输出码表必须按
-/// 槽位取，不能用只认**紧凑基名**的 `rime_convert::单字码`——否则 `白.0` 查不到 `白`、
+/// 槽位取，不能用只认**紧凑基名**的 `单字码`——否则 `白.0` 查不到 `白`、
 /// 且根数也会按 4 根算（应为 3 根），导致整表为空或码错。
 ///
 /// 无槽位后缀的根（`k == -1`）按第 0 码位处理，便于兼容紧凑拆分表。
@@ -435,7 +496,7 @@ pub(crate) fn 全量码表文本(
     let mut 缺根 = 0usize;
     let mut 缺根计数: HashMap<&str, usize> = HashMap::new();
     for (字, 根们, 频) in 全量拆分 {
-        match crate::rime_convert::单字码(根们, &字根表) {
+        match 单字码(根们, &字根表) {
             Ok(code) if !code.is_empty() => {
                 编码行.push((字, code, *频));
                 全条 += 1;

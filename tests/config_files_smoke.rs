@@ -129,13 +129,13 @@ fn skip_if_absent(relative: &str) -> bool {
 }
 
 #[test]
-fn config_ron_example_has_new_simple_code_items_with_defaults_and_comments() {
+fn config_ron_example_has_new_items_with_defaults_and_comments() {
     // 规范示例文件：存在性 + 取值等于代码默认 + 带注释。
     check_config_file("config.ron.example", true, true);
 }
 
 #[test]
-fn moling_config_ron_has_new_simple_code_items() {
+fn moling_config_ron_has_new_items() {
     // 机器生成的实验配置：只校验存在性（不要求注释/取值）。
     if skip_if_absent("moling/config.ron") {
         return;

@@ -17,7 +17,7 @@
 //    - 边际：把若干键归并到同键后，重码对象集合的净增（已重码的不重复列）。
 //
 // 数据来源：码表（字→码）+ 字频 JSON + 词表 TSV + 词频 JSON，全部来自测评数据目录。
-// 词编码按「各字编码按序拼接，取前 maxlen 码」，与 sentence.rs 的词编码口径一致。
+// 词编码按「各字编码按序拼接，取前 maxlen 码」。
 
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
