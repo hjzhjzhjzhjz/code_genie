@@ -12,18 +12,6 @@ on:
         required: false
         default: ""
         type: string
-      pipeline_chars:
-        description: 拆分流水线要查看的字（空格分隔）
-        required: false
-        default: "的 一 是 想"
-        type: string
-      merges:
-        description: 归并规则，一行一个变体；写法 `A=B` 或 `A 1=B 2`
-        required: false
-        default: |
-          勹=白
-          丶 2=白 2
-        type: string
       keymap:
         description: 键位映射文件（仓库内路径，仅 run_id 为空时用）
         required: false
@@ -49,8 +37,8 @@ jobs:
         with:
           fetch-depth: 1
 
-      # 全链路纯 Rust、零 Node：测评（assess_core）与连续文本当量（fill-continuous）
-      # 均为原生实现。所需数据（字频/字集/当量/区块/语料）已全部纳入本仓 yuhao-data/，
+      # 全链路纯 Rust、零 Node：测评内核（assess_core）为原生实现。所需数据
+      # （字频/字集/当量/区块/语料）已全部纳入本仓 yuhao-data/，
       # 无需 checkout yuhao-assess，也无需装 pnpm/Node 或联网下载。
       - name: 校验测评数据
         run: |
@@ -155,47 +143,6 @@ jobs:
             --profile 方案档案
           if [ -f 汇总.md ]; then cat 汇总.md >> "$GITHUB_STEP_SUMMARY"; else echo "::warning::没有生成汇总表（可能没找到码表）"; fi
 
-      - name: 拆分流水线与归并
-        if: github.event_name == 'workflow_dispatch' && inputs.run_id == ''
-        env:
-          CHARS: ${{ inputs.pipeline_chars }}
-          MERGES: ${{ inputs.merges }}
-        run: |
-          set -e
-          K=runs/s4-export/output-keymap.txt
-          C=moling/拆分全表.txt
-          ./target/release/code_genie pipeline --keymap "$K" --chaifen "$C" \
-            --fixed moling/字根约束.txt --chars "$CHARS" --top 5 --output 流水线.md
-          args=()
-          while IFS= read -r line; do
-            [ -z "$line" ] && continue
-            args+=(--rules "$line")
-          done <<< "$MERGES"
-          if [ ${#args[@]} -gt 0 ]; then
-            ./target/release/code_genie pipeline --keymap "$K" --chaifen "$C" \
-              "${args[@]}" --out 归并对比 --summary 归并.md
-            cat 归并.md >> "$GITHUB_STEP_SUMMARY"
-          fi
-          cat 流水线.md >> "$GITHUB_STEP_SUMMARY"
-
-      # 纯 Rust 实现，替代原 `pnpm tsx fill-continuous.mts`（已无需 Node/pnpm）。
-      # 与 TS 脚本逐字段对拍：184 叶字段全部逐位相等（含两个紧凑分布数组）。
-      - name: 补连续文本当量（纯 Rust）
-        run: |
-          set -e
-          shopt -s nullglob
-          if [ ! -d 方案档案 ]; then
-            echo "::warning::没有方案档案，跳过"
-            exit 0
-          fi
-          档案=(方案档案/*.json)
-          if [ ${#档案[@]} -eq 0 ]; then
-            echo "::warning::方案档案目录为空，跳过"
-            exit 0
-          fi
-          ./target/release/code_genie fill-continuous \
-            --profile "${档案[@]}" --yuhao-dir yuhao-data
-
       - name: 上传结果
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
@@ -206,8 +153,5 @@ jobs:
             artifacts/
             方案档案/
             汇总.md
-            流水线.md
-            归并.md
-            归并对比/
           if-no-files-found: warn
           retention-days: 14

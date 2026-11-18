@@ -146,7 +146,6 @@ src/
 
 ```
 tools/
-├── rime_eval.cc     # 星月方案取码的 C++ 参考实现
 ├── 对比码表.py       # 两版 output-keymap.txt 的字根键位差异（内部走 csvdiff）
 ├── 画收敛曲线.py     # optimize 日志的「采样」行 → 收敛曲线 SVG
 ├── 记录实验.py       # 一次 optimize 运行 → 一份实验档案（参数 + 得分 + 曲线 PNG）

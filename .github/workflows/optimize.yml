@@ -312,10 +312,6 @@ jobs:
           echo "ACTUAL_ROUNDS=$k" >> "$GITHUB_ENV"
           echo "=== 重复运行结束：共 $k 轮 ==="
 
-      # 字根表页面（chart）已按需求下线：优化结束后不再生成 HTML 页面，
-      # 也不再往产物目录拷 拆分全表/全字频表/字根映射/显示字体。
-      # 需要时仍可在本地手动跑：code_genie chart -d <out_dir> [--schema yustar] [--font ...]
-
       - name: 写入 Job Summary
         if: always()
         run: |
